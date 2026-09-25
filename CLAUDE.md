@@ -30,6 +30,17 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
   (`user-docs/`, MkDocs).
 - `source/` — исходные материалы заказчика. Только чтение.
 
+Код (ADR-024):
+
+- `apps/<домен>/` — Django-приложения: `sites` (площадки, метрики, цены,
+  аудиты — блок 1 модели данных), `placements` (размещения и ссылки —
+  блок 2), `keywords` (ключи и позиции — блок 3), `content` (статьи, пул,
+  правила, промпты — блоки 4–5), `observability` (проверки, вызовы LLM,
+  запуски задач — блок 6), `integrations` (клиенты внешних API).
+- `config/settings/` — `base.py` общее, `local.py` и `prod.py` по
+  `DJANGO_ENV`; `config/env.py` — чтение переменных окружения.
+- `tests/` — тесты.
+
 ## Команды
 
 Всё идёт в контейнере `app` (ADR-023). Нужен `.env` — копия
@@ -40,6 +51,7 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 - Тесты: `make test`
 - Линтер и типы: `make check` (ruff lint + ruff format --check + mypy strict)
 - Автоисправление стиля: `make fmt`
+- Миграции: `make migrate`, пользователь админки: `make superuser`
 - Django-команды: `docker compose run --rm app python manage.py <команда>`
 - Зависимости: `uv add <пакет>` / `uv add --dev <пакет>`, затем `make up`
   (пересборка образа)

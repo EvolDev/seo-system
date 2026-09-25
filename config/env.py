@@ -11,6 +11,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
+_ENVIRONMENTS = frozenset({"local", "prod"})
 
 
 def _raw(name: str) -> str | None:
@@ -49,3 +50,18 @@ def env_list(name: str, default: list[str] | None = None) -> list[str]:
     if value is None:
         return list(default) if default is not None else []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def settings_module() -> str:
+    """Модуль настроек Django по DJANGO_ENV: `config.settings.local` или `.prod`.
+
+    Значения по умолчанию нет: прод, по ошибке запущенный с локальными
+    настройками, хуже, чем прод, который не стартовал.
+    """
+    name = env_str("DJANGO_ENV")
+    if name not in _ENVIRONMENTS:
+        allowed = " | ".join(sorted(_ENVIRONMENTS))
+        raise ImproperlyConfigured(
+            f"Переменная окружения DJANGO_ENV: ожидается {allowed}, получено {name!r}"
+        )
+    return f"config.settings.{name}"

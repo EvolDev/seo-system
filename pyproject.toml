@@ -48,10 +48,10 @@ plugins = ["mypy_django_plugin.main"]
 exclude = ["^source/", "^site/", "^tools/", "^\\.venv/"]
 
 [tool.django-stubs]
-django_settings_module = "config.settings"
+django_settings_module = "config.settings.local"
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings"
+DJANGO_SETTINGS_MODULE = "config.settings.local"
 addopts = "--strict-markers"
 norecursedirs = [".*", "source", "docs", "user-docs", "site", "screens", "tools"]
 
