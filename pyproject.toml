@@ -1,0 +1,64 @@
+[project]
+name = "seo-system"
+version = "0.1.0"
+description = "SEO-система линкбилдинга convertio.co"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "django>=5.2,<6",
+    "psycopg[binary]>=3.2",
+]
+
+[tool.uv]
+# Приложение, а не библиотека: пакет не собирается и не публикуется.
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# tools/ — проверщик документации из пакета, под проверки его заводит E0-04.
+extend-exclude = ["source", "site", "tools"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # порядок импортов
+    "B",   # bugbear: типичные ошибки
+    "UP",  # современный синтаксис Python
+    "SIM", # упрощения
+    "DJ",  # правила для Django
+    "RUF", # правила самого ruff
+]
+ignore = [
+    # «Похожие символы»: кириллица в строках и комментариях — норма для проекта.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.format]
+# ruff умеет форматировать блоки кода в Markdown; документацию не трогаем.
+exclude = ["*.md"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["mypy_django_plugin.main"]
+exclude = ["^source/", "^site/", "^tools/", "^\\.venv/"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+addopts = "--strict-markers"
+norecursedirs = [".*", "source", "docs", "user-docs", "site", "screens", "tools"]
+
+[dependency-groups]
+dev = [
+    "django-stubs[compatible-mypy]>=6.1.1",
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+    "ruff>=0.16.9",
+]
