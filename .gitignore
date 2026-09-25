@@ -1,0 +1,31 @@
+# Секреты
+.env
+.env.*
+!.env.example
+secrets/
+
+# Личные настройки агента (общие — .claude/settings.json и CLAUDE.md — коммитятся)
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Сборка пользовательской документации (mkdocs build)
+site/
+
+# Скриншоты для агента
+screens/
+
+# IDE и система
+.idea/
+.vscode/
+.DS_Store
+*.log
