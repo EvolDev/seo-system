@@ -1,0 +1,61 @@
+# Пользовательская документация — см. docs/15-USER-DOCS.md
+# Локально:  mkdocs serve
+# Сборка:    mkdocs build --strict   (битая ссылка роняет сборку)
+
+site_name: Линкбилдинг — документация
+docs_dir: user-docs
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      toggle: { icon: material/weather-night, name: Тёмная тема }
+    - scheme: slate
+      toggle: { icon: material/weather-sunny, name: Светлая тема }
+
+plugins:
+  - search:
+      lang: [ru, en]
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.superfences
+
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    not_found: warn
+    anchors: warn
+
+# Каждая новая страница добавляется сюда в том же коммите, что и функция.
+# Проверщик tools/check_user_docs.py сверяет этот список с файлами.
+nav:
+  - Главная: index.md
+  - Начало работы:
+      - getting-started/index.md
+  - Инструкции:
+      - how-to/index.md
+  - Справочник:
+      - reference/index.md
+      - reference/statuses.md
+      - reference/thresholds.md
+      - reference/glossary.md
+  - Как это устроено:
+      - explanation/index.md
+      - explanation/site-evaluation.md
+  - Журнал изменений: changelog.md
