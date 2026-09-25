@@ -6,7 +6,7 @@ export APP_GID := $(shell id -g)
 COMPOSE := docker compose
 RUN := $(COMPOSE) run --rm app
 
-.PHONY: up down logs test check fmt shell
+.PHONY: up down logs migrate superuser test check fmt shell
 
 up:  ## Поднять окружение (с пересборкой образа, если менялись зависимости)
 	$(COMPOSE) up -d --build
@@ -16,6 +16,12 @@ down:  ## Остановить окружение; данные Postgres сох�
 
 logs:  ## Логи всех сервисов
 	$(COMPOSE) logs -f
+
+migrate:  ## Применить миграции
+	$(RUN) python manage.py migrate
+
+superuser:  ## Создать пользователя для входа в админку
+	$(RUN) python manage.py createsuperuser
 
 test:  ## Тесты
 	$(RUN) pytest

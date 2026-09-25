@@ -1,7 +1,7 @@
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import env_bool, env_list, env_str
+from config.env import env_bool, env_list, env_str, settings_module
 
 # monkeypatch — встроенная фикстура pytest: меняет окружение только на время теста.
 
@@ -62,3 +62,20 @@ class TestEnvList:
         result = env_list("X", default=default)
         result.append("b")
         assert default == ["a"]
+
+
+class TestSettingsModule:
+    @pytest.mark.parametrize("name", ["local", "prod"])
+    def test_known_environment(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        monkeypatch.setenv("DJANGO_ENV", name)
+        assert settings_module() == f"config.settings.{name}"
+
+    def test_unknown_environment_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DJANGO_ENV", "production")
+        with pytest.raises(ImproperlyConfigured, match="production"):
+            settings_module()
+
+    def test_missing_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DJANGO_ENV", raising=False)
+        with pytest.raises(ImproperlyConfigured, match="DJANGO_ENV"):
+            settings_module()

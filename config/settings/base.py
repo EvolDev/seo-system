@@ -1,14 +1,17 @@
-"""Настройки Django.
+"""Общие настройки Django для всех окружений.
 
 Всё, что различается между машинами, — из переменных окружения
-(`docs/13-CONFIG.md` §1). Разделение на local/prod — задача E0-02.
+(`docs/13-CONFIG.md` §1). Модуль окружения (`local.py`, `prod.py`)
+импортирует отсюда всё и дописывает своё; выбирает его `DJANGO_ENV`
+через `config.env.settings_module()`.
 """
 
 from pathlib import Path
 
 from config.env import env_bool, env_list, env_str
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Корень проекта: config/settings/base.py → три уровня вверх.
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 SECRET_KEY = env_str("DJANGO_SECRET_KEY")
 DEBUG = env_bool("DJANGO_DEBUG", default=False)
@@ -21,6 +24,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Свои приложения — по доменам, не по слоям (ADR-024).
+    "apps.sites",
+    "apps.placements",
+    "apps.keywords",
+    "apps.content",
+    "apps.observability",
+    "apps.integrations",
 ]
 
 MIDDLEWARE = [
