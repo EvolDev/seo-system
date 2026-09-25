@@ -1,0 +1,63 @@
+Hello!
+
+I would like to publish an article on your website containing a link to convertio.co.
+Below are the requirements for preparing and publishing the article:
+
+1. The article must focus on Convertio.co or a topic related to file conversion. The article’s content must correspond to the anchor text and target page specified in the assignment.
+2. A creative approach is encouraged. Please do not create the entire article with a single prompt to an AI tool. Before writing, you must research the topic, verify the facts, and familiarize yourself with the service’s features.
+3. The article must be interesting and well-structured rather than looking like a wall of text. It must include images, lists, highlighted sections, tables, and a table of contents.
+4. The link must be clearly visible and visually distinguishable from the surrounding text. Links that are difficult to notice or visually blend in with the text are not acceptable.
+5. The first link must be placed near the beginning of the article, no more than 1,000 characters (including spaces) from the start of the article. If a second link is included, it must be placed no more than 2,000 characters (including spaces) from the beginning of the article.
+6. Links to convertio.co must be dofollow, meaning they must not contain the nofollow attribute.
+7. The links must not contain rel="sponsored", rel="ugc", or similar attributes.
+8. The article must not contain any indication that the content is advertising, sponsored, or paid.
+9. The article must contain 1–2 links to convertio.co, as well as 1–2 links to authoritative external sources, such as 8. Wikipedia, well-known media outlets, statistics websites, or other large relevant websites.
+10. The article must contain no more than two internal links to other pages on your website.
+11. The website’s homepage must contain a mention or short description of the new article with a link to it.
+12. The article page must be open to indexing and must not be blocked using noindex, robots.txt, or any other technical method.
+13. It must be possible to reach the article from the homepage in no more than two clicks. This means that the category containing the article or the general list of articles must be accessible from the homepage or through the menu in the website’s header or footer.
+14. After publication, all the listed conditions and placed links must remain unchanged.
+15. The publication will be finally approved after the page appears in Google’s index.
+16. If AI is used to prepare the article, it must be given an individual style, tone, and structure. Standard AI-generated text must not be published without manual review and editing.
+17. The link to Convertio must be integrated into the text according to the following requirements:
+
+The link must be an essential part of the sentence rather than an additional mention. Use the following relationship: subject → specific action → object or result. The sentence containing the assigned anchor text must clearly show who or what performs the action, what exactly happens, and to which object or with what result. In other words, the sentence must be constructed around the anchor so that it plays an important semantic role.
+
+The test is very simple: remove the anchor and the fragment used to attach it to the sentence. If the main fact remains and the meaning barely changes, the link has been integrated poorly. If the actor, tool, action, object, or result disappears, the link has been integrated correctly. It is not enough for the sentence to become grammatically incorrect after removing the anchor: an important part of its meaning must disappear.
+
+More details:
+The complete fact must be contained within one sentence
+The subject, action, and result must not be separated between different sentences or paragraphs.
+✅ Correct: “The user uploads a file to Convertio, which converts it in the cloud without requiring software installation.”
+❌ Incorrect: “Convertio performs file conversion. Processing takes place in the cloud and does not require software installation.”
+In the incorrect version, the information about Convertio and the file-processing method is divided between two sentences. The relationship between the service, action, and result is expressed less explicitly.
+
+The fact must contain three elements: a subject, an action, and an object or value
+•	Subject — who or what performs the action.
+•	Action — what exactly happens.
+•	Object or value — what is processed, what result is produced, how many formats are supported, and so on.
+✅ Correct: “Users use Convertio to convert files between more than 300 formats.”
+This sentence expresses a complete relationship: users → use Convertio → convert files between more than 300 formats. If the anchor is removed, the tool used by the users disappears.
+❌ Incorrect: “Many online services allow users to work with a large number of formats; Convertio is one of them.”
+The sentence sounds natural, but Convertio’s specific action and its result are not stated. If the second part containing the link is removed, the main fact about the capabilities of online services remains.
+
+Use a specific verb
+The verb must directly describe the action: “converts,” “transforms,” “extracts,” or “supports.” Words such as “is,” “has,” and “represents” do not explain what the tool actually does.
+✅ Correct: “The online audio converter from Convertio transforms WAV files into MP3 directly in the browser.”
+❌ Incorrect: “The online audio converter from Convertio is a convenient solution for WAV and MP3 files.”
+The incorrect example does not state what action the tool performs with WAV and MP3 files.
+
+Place the anchor closer to the beginning of the sentence
+Do not add the link at the very end of a long sentence when the main fact has already been fully expressed without it.
+The brand does not have to be the subject of every sentence. However, when using non-branded anchor text, it is advisable to mention Convertio in the same sentence to clearly connect the tool or operation with the service.
+✅ Correct: “Convertio allows users to select mp4 to mp3 to extract the audio track from a video and save it in MP3 format.”
+❌ Incorrect: “Users can extract the audio track from a video and save it in MP3 format using the mp4 to mp3 tool from Convertio.”
+In the incorrect version, the main fact is fully expressed before the anchor appears. If the ending containing the link is removed, the meaning of the sentence barely changes.
+
+State the fact first and the condition second
+State the main fact first and then specify the necessary condition. Do not begin the sentence with a long condition that forces the reader or parser to wait for the main information.
+✅ Correct: “Convertio converts the uploaded file in the cloud after the user selects the output format.”
+❌ Incorrect: “After the user uploads the file and selects the output format, Convertio converts it in the cloud.”
+Both sentences are understandable to a person, but in the correct version, the main fact appears immediately: Convertio converts the file. The condition is stated afterward.
+
+Main rule: if the anchor can be removed without changing the main meaning of the sentence, the link must be reintegrated.
