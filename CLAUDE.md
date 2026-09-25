@@ -32,12 +32,18 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 
 ## Команды
 
-Заполняется в E0-01, пока здесь только документация.
+Всё идёт в контейнере `app` (ADR-023). Нужен `.env` — копия
+`.env.example` с заполненными значениями.
 
+- Поднять окружение: `make up` (приложение — http://localhost:8000/admin/),
+  остановить: `make down`, логи: `make logs`
+- Тесты: `make test`
+- Линтер и типы: `make check` (ruff lint + ruff format --check + mypy strict)
+- Автоисправление стиля: `make fmt`
+- Django-команды: `docker compose run --rm app python manage.py <команда>`
+- Зависимости: `uv add <пакет>` / `uv add --dev <пакет>`, затем `make up`
+  (пересборка образа)
 - Документация: `python tools/check_user_docs.py`, `mkdocs build --strict`
-- Тесты: —
-- Линтер и типы: —
-- Поднять окружение: —
 
 ## Правила кода
 

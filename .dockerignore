@@ -1,0 +1,18 @@
+# Секреты в образ не попадают: переменные передаёт compose при запуске.
+.env
+.env.*
+secrets/
+
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+.claude/
+.idea/
+.vscode/
+site/
+screens/
