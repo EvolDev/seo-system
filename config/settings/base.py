@@ -9,6 +9,8 @@
 from pathlib import Path
 
 from config.env import env_bool, env_list, env_str
+from config.logs import logging_config
+from config.sentry import init_sentry
 
 # Корень проекта: config/settings/base.py → три уровня вверх.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -89,3 +91,10 @@ STATIC_URL = "static/"
 
 # В schema.sql первичные ключи — bigserial.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Технические логи — в stdout, с run_id и маскировкой секретов (ADR-011).
+# В проде JSON для grep и jq; local.py переключает на читаемый формат.
+LOGGING = logging_config("json")
+
+# Ошибки — в Sentry (ADR-013); пустой SENTRY_DSN — выключен.
+init_sentry(env_str("SENTRY_DSN", default=""), environment=env_str("DJANGO_ENV"))

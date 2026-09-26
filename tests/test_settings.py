@@ -1,11 +1,13 @@
 """Настройки окружений: прод не включает то, что опасно в проде."""
 
 import importlib
+import logging
 from collections.abc import Iterator
 from types import ModuleType
 
 import pytest
 
+from config.logs import ConsoleFormatter, RunIdFilter, SecretsFilter
 from config.settings import base
 
 
@@ -33,3 +35,25 @@ class TestProd:
         prod = _load_prod()
         assert prod.SESSION_COOKIE_SECURE is True
         assert prod.CSRF_COOKIE_SECURE is True
+
+    def test_logs_as_json(self) -> None:
+        assert _load_prod().LOGGING["handlers"]["stdout"]["formatter"] == "json"
+
+
+def test_local_logs_readable() -> None:
+    from config.settings import local
+
+    assert local.LOGGING["handlers"]["stdout"]["formatter"] == "console"
+
+
+def test_django_loggers_go_through_our_handler() -> None:
+    # pytest-django уже применил LOGGING из config.settings.local.
+    # Свои обработчики на корневом логгере держит и pytest — берём не его.
+    (handler,) = [
+        h for h in logging.getLogger().handlers if not type(h).__module__.startswith("_pytest")
+    ]
+    assert isinstance(handler.formatter, ConsoleFormatter)
+    assert {type(f) for f in handler.filters} == {RunIdFilter, SecretsFilter}
+    for name in ("django", "django.request", "django.server"):
+        # Своих обработчиков нет — запись уходит в корневой один раз.
+        assert logging.getLogger(name).handlers == []
