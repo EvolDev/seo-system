@@ -5,8 +5,9 @@ from pathlib import Path
 
 from django.conf import settings
 
+from config.logs import SECRET_SUFFIXES
+
 ROOT: Path = settings.BASE_DIR
-SECRET_SUFFIXES = ("_KEY", "_PASSWORD", "_TOKEN", "_DSN", "_LOGIN")
 
 
 def _parse(text: str) -> dict[str, str]:
