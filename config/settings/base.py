@@ -26,6 +26,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Поля Postgres (ArrayField) и их формы в админке.
+    "django.contrib.postgres",
     # Свои приложения — по доменам, не по слоям (ADR-024).
     "apps.sites",
     "apps.placements",

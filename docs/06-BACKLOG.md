@@ -172,11 +172,11 @@ Postgres и Redis в Docker Compose, ruff + mypy + pytest в конфиге.
 | E0-02 | Репозиторий и структура | S | E0-01 | 0 | Opus | medium |
 | E0-03 | Sentry и логи | S | E0-01 | 0 | Opus | medium |
 | E0-04 | Каркас пользовательской документации | S | E0-02 | 0 | Opus | medium |
-| E1-01 | Схема: площадки и метрики | M | E0-01 | 0 | Fable | high |
+| E1-01 | Схема: площадки и метрики | L | E0-01 | 0 | Fable | high |
 | E1-02 | Схема: размещения, ссылки, ключи | M | E1-01 | 1 | Fable | high |
 | E1-03 | Схема: наблюдаемость | S | E1-01 | 0 | Opus | high |
 | E1-04 | Импорт из Excel/CSV | M | E1-02 | 1 | Fable | high |
-| E1-05 | Расчётные поля и представления | S | E1-04 | 1 | Opus | high |
+| E1-05 | Расчётные поля и представления | M | E1-04 | 1 | Opus | high |
 | E1-06 | Экспорт в Excel/CSV | S | E1-05 | 1 | Opus | medium |
 | E2-01 | Инфраструктура очередей | M | E0-01, E1-03 | 1 | Fable | high |
 | E2-02 | Клиент SERP API | M | E2-01 | 1 | Opus | high |

@@ -39,7 +39,15 @@ ignore = [
     "RUF001",
     "RUF002",
     "RUF003",
+    # null=True у текстовых полей: в schema.sql текстовые колонки допускают NULL,
+    # «нет данных» и пустая строка различаются (ADR-029).
+    "DJ001",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Миграции генерирует Django: длинные строки verbose_name не переносятся,
+# списки dependencies и operations — атрибуты класса по его соглашению.
+"*/migrations/*" = ["E501", "RUF012"]
 
 [tool.ruff.format]
 # ruff умеет форматировать блоки кода в Markdown; документацию не трогаем.

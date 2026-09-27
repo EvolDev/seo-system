@@ -1,10 +1,16 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
--- Версия 1.1 от 23.09.2026 (проверена применением на PostgreSQL 16.13)
+-- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
+-- (проверена применением на PostgreSQL 16.15: 29 таблиц, 8 представлений)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
--- из моделей, но схема должна соответствовать этому файлу.
+-- из моделей, но схема должна соответствовать этому файлу. Известные
+-- расхождения, которые даёт Django, перечислены в ADR-029.
 -- Перед применением миграции всегда смотреть sqlmigrate.
+--
+-- Продукты (ADR-030): площадка хранит только факты о себе, решение по ней
+-- своё для каждого продукта (product_sites). У правил, настроек и знаний
+-- product_id пусто — общее для всех продуктов, заполнен — локальное.
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -22,7 +28,6 @@ CREATE TYPE placement_status AS ENUM
 -- exact — точный ключ; diluted — ключ внутри фразы; branded, url, generic — безанкорка
 -- (бренд, голый URL, нейтральное «here»), как во вкладке «Распределение безанкорки».
 CREATE TYPE anchor_type AS ENUM ('exact','diluted','branded','url','generic');
-CREATE TYPE tool_category AS ENUM ('Main','Video','Audio','Image','Doc');
 CREATE TYPE article_origin AS ENUM ('platform','copywriter','system');
 CREATE TYPE article_status AS ENUM
     ('draft','validating','revising','needs_human','accepted','rejected');
@@ -50,6 +55,8 @@ CREATE TABLE products (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- Площадка сама по себе: факты, которые не зависят от продукта.
+-- Статус, причина отказа и соответствие тематике — в product_sites.
 CREATE TABLE sites (
     id                  bigserial PRIMARY KEY,
     domain              text NOT NULL UNIQUE,
@@ -63,17 +70,29 @@ CREATE TABLE sites (
     links_allowed       smallint,
     link_type           text,               -- заявленный тип ссылки: dofollow / nofollow
     marks_as_ad         boolean,            -- «Пометка о рекламе статья» = Да
-    content_profile     jsonb,              -- результат P2: тематика, fit_score
-    status              site_status NOT NULL DEFAULT 'new',
-    reject_reason       text,
     notes               text,
     content_selector    text,               -- ручной CSS-селектор тела статьи для краулера
-    imported_undecided  boolean NOT NULL DEFAULT false,
     is_deleted          boolean NOT NULL DEFAULT false,
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_sites_status ON sites(status) WHERE is_deleted = false;
+
+-- Площадка в работе продукта. Строка есть для каждой пары продукт × площадка:
+-- новая площадка получает строки под все продукты, новый продукт — под все
+-- площадки, со статусом new.
+CREATE TABLE product_sites (
+    id                  bigserial PRIMARY KEY,
+    product_id          bigint NOT NULL REFERENCES products(id),
+    site_id             bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    status              site_status NOT NULL DEFAULT 'new',
+    reject_reason       text,
+    content_profile     jsonb,              -- результат P2 под этот продукт: тематика, fit_score
+    imported_undecided  boolean NOT NULL DEFAULT false,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (site_id, product_id)
+);
+CREATE INDEX idx_product_sites_status ON product_sites(product_id, status);
 
 CREATE TABLE site_metrics (
     id              bigserial PRIMARY KEY,
@@ -118,6 +137,7 @@ CREATE INDEX idx_gray_site ON gray_scans(site_id, checked_at DESC);
 CREATE TABLE site_audits (
     id          bigserial PRIMARY KEY,
     site_id     bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    product_id  bigint NOT NULL REFERENCES products(id), -- аудит всегда под продукт
     verdict     audit_verdict NOT NULL,
     score       smallint CHECK (score BETWEEN 0 AND 100),
     blockers    jsonb,
@@ -132,7 +152,7 @@ CREATE TABLE site_audits (
     run_id      uuid,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_audits_site ON site_audits(site_id, created_at DESC);
+CREATE INDEX idx_audits_site ON site_audits(site_id, product_id, created_at DESC);
 
 -- ---------- Блок 2. Размещения ----------
 
@@ -169,7 +189,7 @@ CREATE TABLE keywords (
     target_url   text NOT NULL,
     volume       integer,
     global_volume integer,
-    tool         tool_category,
+    tool         text,                     -- раздел сайта продукта; список — настройка TOOL_CATEGORIES
     page_type    text,                     -- колонка Type: «Главная», «Video (xxx-yyy)»…
     anchor_type  anchor_type,
     is_active    boolean NOT NULL DEFAULT true,
@@ -210,9 +230,14 @@ CREATE TABLE keyword_positions (
 CREATE INDEX idx_positions_kw ON keyword_positions(keyword_id, checked_at DESC);
 
 -- ---------- Блок 3. Контент ----------
+-- product_id в промптах, правилах, настройках и знаниях: пусто — общее для
+-- всех продуктов, заполнен — локальное (ADR-030). Там, где выбирается одно
+-- значение (промпт задачи, правило, настройка), локальное перекрывает общее
+-- с тем же кодом; там, где набор (факты, примеры, конструкции), — объединение.
 
 CREATE TABLE prompt_templates (
     id          bigserial PRIMARY KEY,
+    product_id  bigint REFERENCES products(id),
     task        text NOT NULL,
     name        text NOT NULL,
     is_active   boolean NOT NULL DEFAULT true,
@@ -279,6 +304,7 @@ CREATE INDEX idx_reviews_version ON article_reviews(article_version_id);
 
 CREATE TABLE facts (
     id            bigserial PRIMARY KEY,
+    product_id    bigint REFERENCES products(id),
     layer         fact_layer NOT NULL,
     statement     text NOT NULL,
     detail        text,
@@ -310,9 +336,10 @@ CREATE INDEX idx_fact_usage ON fact_usages(fact_id, used_at DESC);
 
 CREATE TABLE anchor_patterns (
     id                      bigserial PRIMARY KEY,
+    product_id              bigint REFERENCES products(id),
     pattern                 text NOT NULL,
     example                 text,
-    tool                    tool_category,
+    tool                    text,
     anchor_type             anchor_type,
     extraction_test_passed  boolean NOT NULL DEFAULT true,
     language                text NOT NULL DEFAULT 'en',
@@ -322,34 +349,44 @@ CREATE TABLE anchor_patterns (
     is_active               boolean NOT NULL DEFAULT true
 );
 
+-- Локальное правило с тем же кодом перекрывает общее: другие params или
+-- is_active = false — правило выключено для продукта.
+-- NULLS NOT DISTINCT: двух общих правил с одним кодом тоже быть не может.
 CREATE TABLE rules (
     id           bigserial PRIMARY KEY,
-    code         text NOT NULL UNIQUE,
+    code         text NOT NULL,
+    product_id   bigint REFERENCES products(id),
     description  text NOT NULL,
     severity     rule_severity NOT NULL,
     check_type   rule_check_type NOT NULL,
     params       jsonb,
-    is_active    boolean NOT NULL DEFAULT true
+    is_active    boolean NOT NULL DEFAULT true,
+    UNIQUE NULLS NOT DISTINCT (code, product_id)
 );
 
 -- Пороги аудита, контентные настройки и списки (белый список доменов).
 -- У них нет критичности, поэтому они не живут в rules.
+-- Локальное значение продукта перекрывает общее с тем же ключом.
 CREATE TABLE domain_settings (
-    key          text PRIMARY KEY,
+    id           bigserial PRIMARY KEY,
+    key          text NOT NULL,
+    product_id   bigint REFERENCES products(id),
     value        jsonb NOT NULL,
     description  text,
-    updated_at   timestamptz NOT NULL DEFAULT now()
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    UNIQUE NULLS NOT DISTINCT (key, product_id)
 );
 
 CREATE TABLE examples (
     id              bigserial PRIMARY KEY,
+    product_id      bigint REFERENCES products(id),
     kind            example_kind NOT NULL,
     scope           example_scope NOT NULL,
     body            text NOT NULL,
     reason          text,
     tags            text[],
     language        text NOT NULL DEFAULT 'en',
-    rule_code       text REFERENCES rules(code),
+    rule_code       text,                  -- код из rules; без внешнего ключа: код уникален только вместе с продуктом
     score           numeric(4,3) NOT NULL DEFAULT 0.5,
     times_used      integer NOT NULL DEFAULT 0,
     times_accepted  integer NOT NULL DEFAULT 0,
@@ -371,6 +408,7 @@ CREATE INDEX idx_validation_version ON validation_results(article_version_id);
 
 CREATE TABLE golden_set (
     id          bigserial PRIMARY KEY,
+    product_id  bigint REFERENCES products(id),
     name        text NOT NULL,
     brief       jsonb NOT NULL,
     expectation jsonb NOT NULL,
@@ -455,6 +493,7 @@ CREATE INDEX idx_usage_provider ON api_usage(provider, created_at DESC);
 CREATE VIEW v_keyword_coverage AS
 SELECT
     k.id,
+    k.product_id,
     k.keyword,
     k.tool,
     k.volume,
@@ -498,10 +537,11 @@ JOIN sites s ON s.id = p.site_id
 WHERE p.status = 'published';
 
 CREATE VIEW v_site_funnel AS
-SELECT status, imported_undecided, count(*) AS sites
-FROM sites
-WHERE NOT is_deleted
-GROUP BY status, imported_undecided;
+SELECT ps.product_id, ps.status, ps.imported_undecided, count(*) AS sites
+FROM product_sites ps
+JOIN sites s ON s.id = ps.site_id
+WHERE NOT s.is_deleted
+GROUP BY ps.product_id, ps.status, ps.imported_undecided;
 
 -- Валюты не складываются: API и LLM — в долларах, размещения — в евро.
 CREATE VIEW v_monthly_spend AS
@@ -541,21 +581,17 @@ FROM articles a
 WHERE a.origin = 'system'
 GROUP BY 1;
 
--- Площадка «на сегодня»: последние метрики, цены, серость и вердикт.
--- we_write и reference_total вычисляются здесь и больше нигде (одна точка правды).
--- reference_total — то, что сравнивается с ориентиром 550 EUR: размещение + анонс.
--- Написание в него не входит: ≤ 50 EUR — пишет площадка, > 50 или пусто — пишем мы
--- (промпт аудитора). expected_spend — сколько заплатим площадке на самом деле.
+-- Площадка «на сегодня»: последние метрики, цены и серость. Только факты,
+-- от продукта не зависят; статус и вердикт — в v_product_site_latest.
+-- reference_total — то, что сравнивается с ценовым ориентиром продукта:
+-- размещение + анонс. Написание в него не входит никогда (промпт аудитора).
 CREATE VIEW v_site_latest AS
-SELECT s.id, s.domain, s.status, s.language, s.topics, s.declared_topics,
-       s.links_allowed, s.link_type, s.marks_as_ad, s.imported_undecided,
+SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
+       s.links_allowed, s.link_type, s.marks_as_ad,
        m.dr, m.organic_traffic, m.total_keywords, m.top_geo, m.checked_at AS metrics_at,
        pr.placement_cents, pr.announce_cents, pr.writing_cents, pr.checked_at AS prices_at,
-       (pr.writing_cents IS NULL OR pr.writing_cents > 5000) AS we_write,
        coalesce(pr.placement_cents, 0) + coalesce(pr.announce_cents, 0) AS reference_total_cents,
-       coalesce(pr.placement_cents, 0) + coalesce(pr.announce_cents, 0)
-         + CASE WHEN pr.writing_cents <= 5000 THEN pr.writing_cents ELSE 0 END AS expected_spend_cents,
-       g.ratio AS gray_ratio, a.verdict AS last_verdict, a.score AS last_score
+       g.ratio AS gray_ratio
 FROM sites s
 LEFT JOIN LATERAL (SELECT * FROM site_metrics x WHERE x.site_id = s.id
                    ORDER BY checked_at DESC LIMIT 1) m ON true
@@ -563,6 +599,46 @@ LEFT JOIN LATERAL (SELECT * FROM site_prices x WHERE x.site_id = s.id
                    ORDER BY checked_at DESC LIMIT 1) pr ON true
 LEFT JOIN LATERAL (SELECT * FROM gray_scans x WHERE x.site_id = s.id
                    ORDER BY checked_at DESC LIMIT 1) g ON true
-LEFT JOIN LATERAL (SELECT * FROM site_audits x WHERE x.site_id = s.id
-                   ORDER BY created_at DESC LIMIT 1) a ON true
 WHERE NOT s.is_deleted;
+
+-- Площадка в работе продукта «на сегодня»: статус, последний аудит под этот
+-- продукт, его опубликованные размещения и другие наши продукты, уже
+-- размещённые на площадке (ADR-030).
+-- we_write и expected_spend вычисляются здесь и больше нигде (одна точка правды).
+-- Порог написания — writing_eur из настройки PRICE_REFERENCE: локальное значение
+-- продукта перекрывает общее. ≤ порога — пишет площадка, > порога или пусто —
+-- пишем мы. expected_spend — сколько заплатим площадке на самом деле.
+-- Настройки нет — expected_spend пусто: порог не угадываем.
+CREATE VIEW v_product_site_latest AS
+SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.reject_reason, ps.imported_undecided,
+       l.domain, l.language, l.topics, l.declared_topics,
+       l.links_allowed, l.link_type, l.marks_as_ad,
+       l.dr, l.organic_traffic, l.total_keywords, l.top_geo, l.metrics_at,
+       l.placement_cents, l.announce_cents, l.writing_cents, l.prices_at,
+       l.reference_total_cents,
+       (l.writing_cents IS NULL OR l.writing_cents > w.writing_cents) AS we_write,
+       l.reference_total_cents
+         + CASE WHEN w.writing_cents IS NULL THEN NULL
+                WHEN l.writing_cents <= w.writing_cents THEN l.writing_cents
+                ELSE 0 END AS expected_spend_cents,
+       l.gray_ratio,
+       a.verdict AS last_verdict, a.score AS last_score, a.created_at AS audited_at,
+       pp.published AS placements_published,
+       op.names AS other_products_placed
+FROM product_sites ps
+JOIN v_site_latest l ON l.id = ps.site_id
+LEFT JOIN LATERAL (SELECT (x.value->>'writing_eur')::integer * 100 AS writing_cents
+                   FROM domain_settings x
+                   WHERE x.key = 'PRICE_REFERENCE'
+                     AND (x.product_id = ps.product_id OR x.product_id IS NULL)
+                   ORDER BY x.product_id NULLS LAST LIMIT 1) w ON true
+LEFT JOIN LATERAL (SELECT * FROM site_audits x
+                   WHERE x.site_id = ps.site_id AND x.product_id = ps.product_id
+                   ORDER BY created_at DESC LIMIT 1) a ON true
+LEFT JOIN LATERAL (SELECT count(*) AS published FROM placements x
+                   WHERE x.site_id = ps.site_id AND x.product_id = ps.product_id
+                     AND x.status = 'published') pp ON true
+LEFT JOIN LATERAL (SELECT array_agg(DISTINCT pr.name ORDER BY pr.name) AS names
+                   FROM placements x JOIN products pr ON pr.id = x.product_id
+                   WHERE x.site_id = ps.site_id AND x.product_id <> ps.product_id
+                     AND x.status = 'published') op ON true;
