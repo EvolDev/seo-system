@@ -3,13 +3,13 @@
 Тест разворачивает `schema.sql` в отдельной схеме Postgres `ref` внутри
 транзакции теста (после теста она откатывается) и сравнивает с тем, что
 построили миграции в `public`: колонки, значения по умолчанию, индексы,
-ограничения, внешние ключи, значения перечислений.
+ограничения, внешние ключи, значения перечислений, текст представлений.
 
 Принятые расхождения из ADR-029 нормализуются перед сравнением:
 `id` — identity вместо `bigserial`; `char(n)` — `varchar(n)`; имена,
 `DEFERRABLE` и `ON DELETE` у внешних ключей; порядок колонок.
 
-Список таблиц растёт с каждой задачей, которая добавляет модели.
+Списки таблиц и представлений растут с каждой задачей, которая их добавляет.
 """
 
 from typing import Any
@@ -19,6 +19,7 @@ from django.conf import settings
 from django.db import connection
 from django.db.models import TextChoices
 
+from apps.observability.models import CheckStatus, LlmStatus, Performer, TaskStatus
 from apps.sites.models import AuditAuthor, AuditVerdict, MetricSource, SiteStatus
 
 TABLES = [
@@ -30,6 +31,18 @@ TABLES = [
     "site_prices",
     "gray_scans",
     "site_audits",
+    # E1-03
+    "prompt_templates",
+    "prompt_variants",
+    "checks",
+    "llm_calls",
+    "task_runs",
+    "api_usage",
+]
+
+VIEWS = [
+    # E1-03
+    "v_overdue_checks",
 ]
 
 ENUMS: dict[str, type[TextChoices]] = {
@@ -37,6 +50,10 @@ ENUMS: dict[str, type[TextChoices]] = {
     "metric_source": MetricSource,
     "audit_verdict": AuditVerdict,
     "audit_author": AuditAuthor,
+    "check_status": CheckStatus,
+    "performer": Performer,
+    "llm_status": LlmStatus,
+    "task_status": TaskStatus,
 }
 
 REF = "ref"
@@ -135,6 +152,22 @@ def _foreign_keys(schema: str) -> set[tuple[str, str, str, str]]:
     return {(table, column, ref_table, ref_column) for table, column, ref_table, ref_column in rows}
 
 
+def _views(schema: str) -> dict[str, str | None]:
+    # Текст представления в том виде, как его хранит Postgres: пробелы и
+    # переносы из исходного SQL не влияют, влияет смысл запроса.
+    rows = _rows(
+        """
+        SELECT c.relname, pg_get_viewdef(c.oid)
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = %s AND c.relname = ANY(%s) AND c.relkind = 'v'
+        """,
+        schema,
+        VIEWS,
+    )
+    return {name: _unqualify(definition) for name, definition in rows}
+
+
 def _enum_labels(schema: str) -> dict[str, list[str]]:
     rows = _rows(
         """
@@ -158,6 +191,9 @@ class TestSchemaParity:
         tables = {table for table, _ in _columns(REF)}
         assert tables == set(TABLES)
 
+    def test_reference_has_all_views(self) -> None:
+        assert set(_views(REF)) == set(VIEWS)
+
     def test_columns(self) -> None:
         assert _columns(OURS) == _columns(REF)
 
@@ -170,6 +206,9 @@ class TestSchemaParity:
 
     def test_foreign_keys(self) -> None:
         assert _foreign_keys(OURS) == _foreign_keys(REF)
+
+    def test_views(self) -> None:
+        assert _views(OURS) == _views(REF)
 
     def test_enum_types(self) -> None:
         assert _enum_labels(OURS) == _enum_labels(REF)
