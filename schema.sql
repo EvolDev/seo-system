@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
 -- (проверена применением на PostgreSQL 16.15: 29 таблиц, 8 представлений)
 --
@@ -205,7 +206,8 @@ CREATE TABLE placement_links (
     target_url              text NOT NULL,
     anchor_type             anchor_type,
     rel                     text,          -- атрибут rel как на странице; NULL — нет атрибута
-    char_offset             integer,
+    char_offset             integer,       -- знаков до анкора с пробелами, как в Word (ADR-032)
+    char_offset_no_spaces   integer,       -- то же без пробелов
     context_sentence        text,          -- предложение вокруг ссылки, для критика
     link_index              smallint,
     extraction_test_passed  boolean,

@@ -19,7 +19,9 @@ from django.conf import settings
 from django.db import connection
 from django.db.models import TextChoices
 
+from apps.keywords.models import AnchorType
 from apps.observability.models import CheckStatus, LlmStatus, Performer, TaskStatus
+from apps.placements.models import PlacementStatus, PlacementType
 from apps.sites.models import AuditAuthor, AuditVerdict, MetricSource, SiteStatus
 
 TABLES = [
@@ -31,6 +33,11 @@ TABLES = [
     "site_prices",
     "gray_scans",
     "site_audits",
+    # E1-02
+    "placements",
+    "placement_links",
+    "keywords",
+    "keyword_positions",
     # E1-03
     "prompt_templates",
     "prompt_variants",
@@ -50,6 +57,9 @@ ENUMS: dict[str, type[TextChoices]] = {
     "metric_source": MetricSource,
     "audit_verdict": AuditVerdict,
     "audit_author": AuditAuthor,
+    "placement_status": PlacementStatus,
+    "placement_type": PlacementType,
+    "anchor_type": AnchorType,
     "check_status": CheckStatus,
     "performer": Performer,
     "llm_status": LlmStatus,

@@ -22,11 +22,7 @@ from apps.sites.models import (
     SiteMetric,
     SitePrice,
 )
-
-
-class NoDeleteAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
-    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return False
+from config.admin import NoDeleteAdmin, SnapshotAdmin
 
 
 @admin.register(Product)
@@ -106,43 +102,15 @@ class ProductSiteAdmin(NoDeleteAdmin):
         return False
 
 
-class SnapshotAdmin(NoDeleteAdmin):
-    """Снапшоты (ADR-008, уточнение 27.09.2026).
+class SiteSnapshotAdmin(SnapshotAdmin):
+    """Снапшоты площадки: последний — среди замеров этой площадки."""
 
-    Новый замер — «Сохранить как новый объект»: форма открывается с
-    данными последнего снапшота, сохранение создаёт новую строку. Править
-    можно только последний снапшот, более старые — только просмотр. Дата
-    замера в форме не редактируется: у нового снапшота она своя.
-    """
-
-    save_as = True
-    # Внутри чего снапшот «последний»: площадка, у аудита — площадка и продукт.
-    snapshot_key: tuple[str, ...] = ("site",)
-    time_field = "checked_at"
+    snapshot_key: tuple[str, ...] = ("site_id",)
     autocomplete_fields = ("site",)
-
-    def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> tuple[str, ...]:
-        return (self.time_field,)
-
-    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        if obj is not None and not self.is_latest(obj):
-            return False
-        return super().has_change_permission(request, obj)
-
-    def is_latest(self, obj: models.Model) -> bool:
-        key = {f"{field}_id": getattr(obj, f"{field}_id") for field in self.snapshot_key}
-        latest = (
-            type(obj)
-            ._default_manager.filter(**key)
-            .order_by(f"-{self.time_field}", "-pk")
-            .values_list("pk", flat=True)
-            .first()
-        )
-        return bool(latest == obj.pk)
 
 
 @admin.register(SiteMetric)
-class SiteMetricAdmin(SnapshotAdmin):
+class SiteMetricAdmin(SiteSnapshotAdmin):
     list_display = ("site", "dr", "organic_traffic", "total_keywords", "source", "checked_at")
     list_filter = ("source",)
     search_fields = ("site__domain",)
@@ -150,7 +118,7 @@ class SiteMetricAdmin(SnapshotAdmin):
 
 
 @admin.register(SitePrice)
-class SitePriceAdmin(SnapshotAdmin):
+class SitePriceAdmin(SiteSnapshotAdmin):
     list_display = (
         "site",
         "placement_cents",
@@ -165,17 +133,17 @@ class SitePriceAdmin(SnapshotAdmin):
 
 
 @admin.register(GrayScan)
-class GrayScanAdmin(SnapshotAdmin):
+class GrayScanAdmin(SiteSnapshotAdmin):
     list_display = ("site", "ratio", "gray_hits", "total_indexed", "method", "checked_at")
     search_fields = ("site__domain",)
     list_select_related = ("site",)
 
 
 @admin.register(SiteAudit)
-class SiteAuditAdmin(SnapshotAdmin):
+class SiteAuditAdmin(SiteSnapshotAdmin):
     list_display = ("site", "product", "verdict", "score", "author", "created_at")
     list_filter = ("product", "verdict", "author")
     search_fields = ("site__domain",)
     list_select_related = ("site", "product")
-    snapshot_key = ("site", "product")
+    snapshot_key = ("site_id", "product_id")
     time_field = "created_at"

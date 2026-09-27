@@ -46,3 +46,15 @@ class PgNow(models.Func):
     template = "%(function)s()"
     output_field = models.DateTimeField()
     allowed_default = True
+
+
+class PgCurrentDate(models.Func):
+    """`CURRENT_DATE` — дата начала транзакции, как `DEFAULT current_date` в схеме.
+
+    Дата — по часовому поясу соединения с базой. Django ставит соединению
+    UTC, поэтому с 00:00 до 03:00 по Москве это ещё вчерашняя дата.
+    """
+
+    template = "CURRENT_DATE"
+    output_field = models.DateField()
+    allowed_default = True
