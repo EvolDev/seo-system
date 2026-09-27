@@ -13,12 +13,14 @@ dependencies = [
 [tool.uv]
 # Приложение, а не библиотека: пакет не собирается и не публикуется.
 package = false
+# docs ставится по умолчанию: проверка и сборка документации идут в
+# контейнере (make docs-check, pre-commit), а в E9-07 сайт собирается в образе.
+default-groups = ["dev", "docs"]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# tools/ — проверщик документации из пакета, под проверки его заводит E0-04.
-extend-exclude = ["source", "site", "tools"]
+extend-exclude = ["source", "site"]
 
 [tool.ruff.lint]
 select = [
@@ -47,7 +49,7 @@ exclude = ["*.md"]
 python_version = "3.12"
 strict = true
 plugins = ["mypy_django_plugin.main"]
-exclude = ["^source/", "^site/", "^tools/", "^\\.venv/"]
+exclude = ["^source/", "^site/", "^\\.venv/"]
 
 [tool.django-stubs]
 django_settings_module = "config.settings.local"
@@ -60,7 +62,20 @@ norecursedirs = [".*", "source", "docs", "user-docs", "site", "screens", "tools"
 [dependency-groups]
 dev = [
     "django-stubs[compatible-mypy]>=6.1.1",
+    "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
     "ruff>=0.16.9",
+    "types-pyyaml>=6.0.12.20260906",
+]
+# Сборка пользовательской документации — docs/15-USER-DOCS.md §6.
+# Проверено 23.09.2026: mkdocs 1.6.1 + mkdocs-material 9.7.7.
+# MkDocs 2.0 несовместим с Material и с нашим mkdocs.yml (нет плагинов,
+# другой формат конфига) — верхняя граница <2 обязательна. Запасной движок —
+# zensical: собирает этот же mkdocs.yml без изменений (проверено на 0.0.64),
+# переход — когда выйдет 1.0.
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.7.5,<10",
+    "pyyaml>=6",
 ]

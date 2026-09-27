@@ -55,7 +55,8 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 - Django-команды: `docker compose run --rm app python manage.py <команда>`
 - Зависимости: `uv add <пакет>` / `uv add --dev <пакет>`, затем `make up`
   (пересборка образа)
-- Документация: `python tools/check_user_docs.py`, `mkdocs build --strict`
+- Документация: `make docs-check` (проверщик + `mkdocs build --strict`,
+  его же запускает pre-commit), просмотр — `make docs-serve` (порт 8001)
 
 ## Правила кода
 

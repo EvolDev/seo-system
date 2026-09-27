@@ -6,7 +6,7 @@ export APP_GID := $(shell id -g)
 COMPOSE := docker compose
 RUN := $(COMPOSE) run --rm app
 
-.PHONY: up down logs migrate superuser test check fmt shell
+.PHONY: up down logs migrate superuser test check fmt shell docs-check docs-serve
 
 up:  ## Поднять окружение (с пересборкой образа, если менялись зависимости)
 	$(COMPOSE) up -d --build
@@ -34,3 +34,11 @@ fmt:  ## Автоисправление стиля и форматировани
 
 shell:  ## Django shell
 	$(RUN) python manage.py shell
+
+# Документации не нужны база и Redis: --no-deps их не поднимает.
+docs-check:  ## Проверка пользовательской документации и сборка сайта в строгом режиме
+	$(COMPOSE) run --rm --no-deps app sh -c \
+		"python tools/check_user_docs.py && mkdocs build --strict --site-dir /tmp/site"
+
+docs-serve:  ## Просмотр документации: http://127.0.0.1:8001 (8000 занят приложением)
+	$(COMPOSE) run --rm --no-deps -p 127.0.0.1:8001:8001 app mkdocs serve -a 0.0.0.0:8001

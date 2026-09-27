@@ -141,7 +141,7 @@ schema.sql
    → пишет или обновляет страницы user-docs/ по разделу
      «Влияние на документацию»
    → строка в user-docs/changelog.md с ID задачи
-   → python tools/check_user_docs.py — ноль ошибок
+   → make docs-check — ноль ошибок (его же запускает pre-commit)
    → обновляет PROGRESS.md, 08-DECISIONS.md, 09-OPEN-QUESTIONS.md
    → коммит; ты читаешь diff документации, как читаешь diff кода
 

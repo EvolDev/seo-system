@@ -10,7 +10,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PATH="/opt/venv/bin:$PATH" \
+    # Баннер Material про MkDocs 2.0 на каждой сборке: версия уже ограничена <2.
+    NO_MKDOCS_2_WARNING=1
 
 WORKDIR /app
 

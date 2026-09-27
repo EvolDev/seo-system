@@ -1,0 +1,17 @@
+# Хуки git перед коммитом. Установка один раз после клонирования:
+#   uv sync && uv run pre-commit install
+# Проверки идут в контейнере (ADR-023, ADR-028): при коммите должен быть
+# запущен Docker. Прогнать вручную: uv run pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      # Битая документация не должна попасть в коммит (docs/15-USER-DOCS.md).
+      # Проверщик сверяет страницы с бэклогом (ID задач) и списком экранов,
+      # поэтому хук срабатывает и на правку этих документов.
+      - id: user-docs
+        name: пользовательская документация
+        entry: make docs-check
+        language: system
+        pass_filenames: false
+        files: ^(user-docs/|mkdocs\.yml$|docs/06-BACKLOG\.md$|docs/15-USER-DOCS\.md$|tools/check_user_docs\.py$|pyproject\.toml$|uv\.lock$)

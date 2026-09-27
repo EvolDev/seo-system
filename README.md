@@ -60,6 +60,15 @@ Python, Django и остальные пакеты ставить на хост �
 
 6. Открыть http://localhost:8000/admin/ и войти.
 
+7. Поставить хуки git — они не пропустят коммит с битой пользовательской
+   документацией (ADR-028). Нужен [uv](https://docs.astral.sh/uv/) на
+   хосте, при коммите должен быть запущен Docker:
+
+   ```bash
+   uv sync
+   uv run pre-commit install
+   ```
+
 Остановить — `make down`. Данные базы при этом сохраняются в томе
 Docker `pgdata`.
 
@@ -76,6 +85,8 @@ Docker `pgdata`.
 | `make check` | ruff, проверка форматирования, mypy strict |
 | `make fmt` | автоисправление стиля |
 | `make shell` | Django shell |
+| `make docs-check` | проверка пользовательской документации и сборка сайта в строгом режиме |
+| `make docs-serve` | просмотр пользовательской документации на http://127.0.0.1:8001 |
 
 Любая команда Django:
 `docker compose run --rm app python manage.py <команда>`.
@@ -144,6 +155,7 @@ seo-system/
 ├── compose.yaml, Dockerfile     локальное окружение
 ├── Makefile                     команды запуска и проверок
 ├── pyproject.toml, uv.lock      зависимости и настройки ruff, mypy, pytest
+├── .pre-commit-config.yaml      хуки git: проверка документации перед коммитом
 ├── manage.py
 ├── config/                      проект Django
 │   ├── settings/                base.py, local.py, prod.py
@@ -164,7 +176,6 @@ seo-system/
 │   └── templates/               шаблоны ТЗ, закрытия задачи, страниц
 ├── user-docs/                   ПОЛЬЗОВАТЕЛЬСКАЯ документация — как работать
 ├── mkdocs.yml                   навигация пользовательской документации
-├── requirements-docs.txt        зависимости сборки документации
 ├── tools/check_user_docs.py     проверка пользовательской документации
 └── source/                      исходные материалы заказчика, только чтение
 ```
@@ -181,16 +192,16 @@ seo-system/
 | Когда меняется | при решениях и планировании | с каждой задачей, меняющей то, что видит пользователь |
 | Правила | `docs/14-WORKFLOW.md` | `docs/15-USER-DOCS.md` |
 
-Посмотреть пользовательскую документацию локально:
+Пользовательская документация — в контейнере, как и остальные проверки:
 
 ```bash
-pip install -r requirements-docs.txt
-mkdocs serve          # http://127.0.0.1:8000
-python tools/check_user_docs.py
+make docs-serve       # http://127.0.0.1:8001, пересборка при сохранении
+make docs-check       # tools/check_user_docs.py + mkdocs build --strict
 ```
 
-`mkdocs serve` занимает тот же порт 8000, что и приложение: либо
-остановить приложение, либо запустить `mkdocs serve -a 127.0.0.1:8001`.
+`make docs-check` же запускает хук pre-commit, когда в коммите есть
+`user-docs/`, `mkdocs.yml` или документы, с которыми сверяется проверщик.
+Зависимости сборки — группа `docs` в `pyproject.toml`.
 
 ---
 
