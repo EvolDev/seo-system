@@ -1,15 +1,16 @@
 {
   "permissions": {
-    "defaultMode": "default",
-    "blockReadsOutsideWorkingDirectories": true,
-    "disableBypassPermissionsMode": "disable",
     "deny": [
       "Read(.env)",
       "Read(.env.*)",
       "Read(!.env.example)",
       "Read(**/secrets/**)",
       "Edit(.idea/**)",
-      "Bash(git push *)"
-    ]
+      "Bash(git push)",
+      "Bash(git push *main*)"
+    ],
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable",
+    "blockReadsOutsideWorkingDirectories": true
   }
 }
