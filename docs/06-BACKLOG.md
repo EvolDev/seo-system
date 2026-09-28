@@ -175,7 +175,7 @@ Postgres и Redis в Docker Compose, ruff + mypy + pytest в конфиге.
 | E1-01 | Схема: площадки и метрики | L | E0-01 | 0 | Fable | high |
 | E1-02 | Схема: размещения, ссылки, ключи | M | E1-01 | 1 | Fable | high |
 | E1-03 | Схема: наблюдаемость | S | E1-01 | 0 | Opus | high |
-| E1-04 | Импорт из Excel/CSV | M | E1-02 | 1 | Fable | high |
+| E1-04 | Импорт из Excel/CSV | L | E1-02 | 1 | Fable | high |
 | E1-05 | Расчётные поля и представления | M | E1-04 | 1 | Opus | high |
 | E1-06 | Экспорт в Excel/CSV | S | E1-05 | 1 | Opus | medium |
 | E2-01 | Инфраструктура очередей | M | E0-01, E1-03 | 1 | Fable | high |
@@ -192,7 +192,7 @@ Postgres и Redis в Docker Compose, ruff + mypy + pytest в конфиге.
 | E3-04 | Интерфейс подбора | S | E3-01, E9-02 | 3 | Opus | medium |
 | E4-01 | Абстракция над LLM | M | E1-03 | 3 | Fable | high |
 | E4-02 | Сбор досье по площадке | M | E2-04, E2-06, E2-07 | 3 | Opus | high |
-| E4-03 | Детерминированные стоп-факторы | S | E4-02, E2-05 | 3 | Opus | xhigh |
+| E4-03 | Детерминированные стоп-факторы | S | E4-02, E2-05, Q19 | 3 | Opus | xhigh |
 | E4-04 | LLM-оценка гибкой зоны | M | E4-01, E4-02, E1-04, Q11 | 3 | Fable | high |
 | E4-05 | Массовый аудит | M | E4-04, E1-04 | 3 | Opus | high |
 | E4-06 | Пересмотр отложенных площадок | S | E4-05 | 3 | Opus | medium |

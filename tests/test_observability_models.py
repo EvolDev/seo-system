@@ -154,6 +154,10 @@ class TestLlmCallPromptVariant:
 
 
 class TestOverdueChecks:
+    def test_empty_on_fresh_database(self) -> None:
+        # Критерий приёмки E1-05.
+        assert _overdue() == []
+
     def test_past_due_is_overdue(self) -> None:
         # Критерий приёмки E1-03.
         now = timezone.now()

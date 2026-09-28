@@ -1,8 +1,10 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 import sentry_sdk
+from openpyxl import Workbook
 from sentry_sdk.envelope import Envelope
 from sentry_sdk.transport import Transport
 
@@ -45,3 +47,148 @@ def sentry_events() -> Iterator[Events]:
     sentry_sdk.init(**sentry_options(FAKE_DSN, "test"), transport=_CaptureTransport(events))
     yield events
     disable_sentry()
+
+
+# --- Импорт таблицы (E1-04): книга Excel, которую тест собирает сам ---
+
+BASE_HEADERS = [
+    "Target",
+    "Новая?",
+    "Источник",
+    "Комментарий к площадке",
+    "URL статьи",
+    "Индексация",
+    "Статус",
+    "Дата размещения",
+    "Месяц",
+    "Комментарий по размещению",
+    "Анкор1",
+    "Ссылка1",
+    "Анкор2",
+    "Ссылка2",
+    "Пример статьи на Clideo",
+    "Organic / Traffic",
+    "Top Geo",
+    "Top Geo Traff",
+    "US Traff",
+    "DR",
+    "Organic / Total Keywords",
+    "Тип ссылки",
+    "Цена размещения статья, EUR",
+    "Цена анонса статья, EUR",
+    "Цена написания статья, EUR",
+    "Итог цена",
+    "Количество ссылок статья",
+    "Пометка о рекламе статья",
+    "Особые тематики",
+    "Языки сайта",
+    "Тип сайта",
+    "URL Коллаборатора",
+    "Тематика",
+    "Тип ссылки статья",
+]
+
+KEYWORD_HEADERS = [
+    "Keyword",
+    "URL",
+    "Volume",
+    "Global Volume",
+    "Links Placed",
+    "Links Waiting",
+    "Pos 22.09.26",
+    "Pos 16.09.26",
+    "Pos 09.09.26",
+    "Pos 02.09.26",
+    "Tool",
+    "Type",
+]
+
+Row = dict[str, object]
+# Строка книги в тесте: («домен» или «ключ», изменения к типовой строке)
+# или словарь целиком — например, строка без Target.
+RowSpec = tuple[str, Row] | Row
+
+
+def site_row(domain: str, changes: Row | None = None) -> Row:
+    """Строка основной вкладки с правдоподобными значениями, как в файле 27.09."""
+    row: Row = {
+        "Target": domain,
+        "Источник": "Collaborator",
+        "Organic / Traffic": 96653,
+        "Top Geo": "us",
+        "Top Geo Traff": 60990,
+        "US Traff": 60990,
+        "DR": 55,
+        "Organic / Total Keywords": 15707,
+        "Цена размещения статья, EUR": 544.57,
+        "Цена анонса статья, EUR": "",
+        "Цена написания статья, EUR": 40.84,
+        "Итог цена": 581.82,
+        "Количество ссылок статья": 1,
+        "Пометка о рекламе статья": "Нет",
+        "Особые тематики": "",
+        "Языки сайта": "Английский",
+        "Тип сайта": "Персональный блог",
+        "URL Коллаборатора": f"https://collaborator.pro/ru/creator/article/view?id={domain}",
+        "Тематика": "Культура и искусство",
+        "Тип ссылки статья": "dofollow",
+    }
+    row.update(changes or {})
+    return row
+
+
+def keyword_row(keyword: str, changes: Row | None = None) -> Row:
+    row: Row = {
+        "Keyword": keyword,
+        "URL": "https://convertio.co/",
+        "Volume": 42000,
+        "Global Volume": 363000,
+        "Pos 22.09.26": 7,
+        "Pos 16.09.26": 14,
+        "Pos 09.09.26": 5,
+        "Pos 02.09.26": 7,
+        "Tool": "Main",
+        "Type": "Главная",
+    }
+    row.update(changes or {})
+    return row
+
+
+def _rows(specs: list[RowSpec] | None, factory: Callable[[str, Row | None], Row]) -> list[Row]:
+    return [factory(*spec) if isinstance(spec, tuple) else spec for spec in specs or []]
+
+
+@pytest.fixture
+def make_workbook(tmp_path: Path) -> Callable[..., Path]:
+    """Собирает xlsx с вкладками «База линкбилдинга», «Распределение анкоров»
+    и, если передана, «Размещения»; возвращает путь к файлу.
+
+    Строки основной вкладки и копии — `("домен", {колонка: значение})`,
+    ключи — `("ключ", {…})`: к типовой строке применяются изменения.
+    """
+
+    def build(
+        base: list[RowSpec] | None = None,
+        keywords: list[RowSpec] | None = None,
+        copy: list[RowSpec] | None = None,
+        base_headers: list[str] | None = None,
+        name: str = "book.xlsx",
+    ) -> Path:
+        workbook = Workbook()
+        workbook.remove(workbook.active)  # type: ignore[arg-type]
+        sheets: list[tuple[str, list[str], list[Row]]] = [
+            ("База линкбилдинга", base_headers or BASE_HEADERS, _rows(base, site_row)),
+            ("Распределение анкоров", KEYWORD_HEADERS, _rows(keywords, keyword_row)),
+        ]
+        if copy is not None:
+            sheets.append(("Размещения", BASE_HEADERS, _rows(copy, site_row)))
+        for title, headers, rows in sheets:
+            sheet = workbook.create_sheet(title)
+            sheet.append(headers)
+            for row in rows:
+                sheet.append([row.get(header) for header in headers])
+        path = tmp_path / name
+        workbook.save(path)
+        return path
+
+    return build

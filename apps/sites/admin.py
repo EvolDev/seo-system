@@ -1,7 +1,9 @@
-"""Админка блока 1: продукты, площадки, решения по ним и снапшоты.
+"""Админка блока 1: продукты, площадки, решения по ним, снапшоты, списки.
 
 Удаление отключено везде: ничего не удаляем физически. Площадку
-скрывает пометка «удалена», решение по ней меняется статусом.
+скрывает пометка «удалена», решение по ней меняется статусом. Исключения —
+локальные настройки на странице продукта (ADR-035) и продукт, с которым
+ещё не работали (ADR-036).
 """
 
 from collections.abc import Iterator
@@ -10,8 +12,16 @@ from typing import Any
 
 from django.contrib import admin
 from django.db import models
+from django.db.models import Count, Q
 from django.http import HttpRequest
+from django.urls import reverse
+from django.utils.html import format_html
 
+from apps.content.admin import (
+    PRODUCT_SETTING_FIELDS,
+    ProductOtherSettingsInline,
+    ProductSettingsForm,
+)
 from apps.sites.domains import normalize_domain
 from apps.sites.models import (
     GrayScan,
@@ -19,6 +29,8 @@ from apps.sites.models import (
     ProductSite,
     Site,
     SiteAudit,
+    SiteList,
+    SiteListItem,
     SiteMetric,
     SitePrice,
 )
@@ -27,8 +39,54 @@ from config.admin import NoDeleteAdmin, SnapshotAdmin
 
 @admin.register(Product)
 class ProductAdmin(NoDeleteAdmin):
+    """Продукт и его настройки: заводя продукт, человек сразу видит, что заполнить."""
+
+    form = ProductSettingsForm
     list_display = ("name", "domain", "is_active", "created_at")
     readonly_fields = ("created_at",)
+    fieldsets = (
+        (None, {"fields": ("name", "domain", "is_active", "created_at")}),
+        (
+            "Настройки продукта",
+            {
+                "fields": PRODUCT_SETTING_FIELDS,
+                "description": (
+                    "Пустое поле — у продукта нет своего значения: действует общее из"
+                    " раздела «Настройки», а где общего нет, признак не считается."
+                ),
+            },
+        ),
+    )
+    inlines = (ProductOtherSettingsInline,)
+
+    def save_model(
+        self, request: HttpRequest, obj: Product, form: ProductSettingsForm, change: bool
+    ) -> None:
+        super().save_model(request, obj, form, change)
+        form.save_settings(obj)
+
+    # Продукт, заведённый по ошибке, удаляется, пока с ним не работали
+    # (ADR-036). По одному, со страницы продукта: массового удаления нет.
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        if obj is None or obj.has_history():
+            return False
+        return admin.ModelAdmin.has_delete_permission(self, request, obj)
+
+    def get_deleted_objects(
+        self, objs: Any, request: HttpRequest
+    ) -> tuple[list[str], dict[str, int], set[str], list[str]]:
+        # Строки продукт × площадка защищены от удаления (PROTECT), и штатная
+        # страница подтверждения отказала бы. Удаляет их delete_unused.
+        products = list(objs)
+        counts = {
+            "продукты": len(products),
+            "площадки продуктов — пустые строки": sum(p.product_sites.count() for p in products),
+            "настройки продукта": sum(p.domain_settings.count() for p in products),
+        }
+        return [str(product) for product in products], counts, set(), []
+
+    def delete_model(self, request: HttpRequest, obj: Product) -> None:
+        obj.delete_unused()
 
 
 class DeletedFilter(admin.SimpleListFilter):
@@ -147,3 +205,45 @@ class SiteAuditAdmin(SiteSnapshotAdmin):
     list_select_related = ("site", "product")
     snapshot_key = ("site_id", "product_id")
     time_field = "created_at"
+
+
+@admin.register(SiteList)
+class SiteListAdmin(NoDeleteAdmin):
+    """Рабочие списки (ADR-033). Создаёт их импорт; здесь — обзор и имя."""
+
+    list_display = ("name", "sites_count", "first_seen_count", "source", "created_at")
+    search_fields = ("name",)
+    readonly_fields = ("created_at", "sites_count", "first_seen_count")
+
+    def get_queryset(self, request: HttpRequest) -> models.QuerySet[SiteList]:
+        # Счётчики одним запросом на весь список, а не запросом на строку.
+        queryset: models.QuerySet[SiteList] = super().get_queryset(request)
+        return queryset.annotate(
+            sites_total=Count("items"),
+            first_seen_total=Count("items", filter=Q(items__first_seen=True)),
+        )
+
+    @admin.display(description="площадок", ordering="sites_total")
+    def sites_count(self, obj: Any) -> str:
+        url = reverse("admin:sites_sitelistitem_changelist") + f"?site_list__id__exact={obj.pk}"
+        return format_html('<a href="{}">{}</a>', url, obj.sites_total)
+
+    @admin.display(description="впервые в базе", ordering="first_seen_total")
+    def first_seen_count(self, obj: Any) -> int:
+        return int(obj.first_seen_total)
+
+
+@admin.register(SiteListItem)
+class SiteListItemAdmin(NoDeleteAdmin):
+    """Площадки списка — только просмотр: в список их добавляет импорт."""
+
+    list_display = ("site", "site_list", "first_seen", "added_at")
+    list_filter = ("site_list", "first_seen")
+    search_fields = ("site__domain",)
+    list_select_related = ("site", "site_list")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False

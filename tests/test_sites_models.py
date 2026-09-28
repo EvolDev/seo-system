@@ -74,6 +74,19 @@ class TestProductSites:
         assert {p for p, _ in _pairs()} == {product.pk}
         assert ProductSite.objects.count() == 2
 
+    @pytest.mark.parametrize("update_fields", [None, ["status"]])
+    def test_decision_clears_imported_undecided(self, update_fields: list[str] | None) -> None:
+        # ADR-033: пометка «импортирована без решения» снимается с решением.
+        Product.objects.create(name="Convertio", domain="convertio.co")
+        Site.objects.create(domain="example.com")
+        ProductSite.objects.update(imported_undecided=True)
+        row = ProductSite.objects.get()
+        row.save()
+        assert ProductSite.objects.get().imported_undecided is True
+        row.status = SiteStatus.APPROVED
+        row.save(update_fields=update_fields)
+        assert ProductSite.objects.get().imported_undecided is False
+
 
 class TestSite:
     def test_domain_normalized_on_save(self) -> None:

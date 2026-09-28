@@ -32,3 +32,6 @@ screens/
 .vscode/
 .DS_Store
 *.log
+
+# Отчёты импорта таблицы: домены, цены, комментарии — не для git
+import-reports/

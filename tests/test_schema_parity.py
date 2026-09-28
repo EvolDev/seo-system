@@ -7,11 +7,15 @@
 
 Принятые расхождения из ADR-029 нормализуются перед сравнением:
 `id` — identity вместо `bigserial`; `char(n)` — `varchar(n)`; имена,
-`DEFERRABLE` и `ON DELETE` у внешних ключей; порядок колонок.
+`DEFERRABLE` и `ON DELETE` у внешних ключей; порядок колонок. В тексте
+представлений те же два расхождения видны по-своему: `SELECT *` Postgres
+разворачивает в порядке колонок таблицы, а у `char(n)` и `varchar(n)` по-разному
+печатает приведения типов (`'US'::bpchar` и `(kp.country)::text`).
 
 Списки таблиц и представлений растут с каждой задачей, которая их добавляет.
 """
 
+import re
 from typing import Any
 
 import pytest
@@ -45,11 +49,23 @@ TABLES = [
     "llm_calls",
     "task_runs",
     "api_usage",
+    # E1-04
+    "site_lists",
+    "site_list_items",
+    # E1-05
+    "domain_settings",
 ]
 
 VIEWS = [
     # E1-03
     "v_overdue_checks",
+    # E1-05; v_article_funnel — с таблицами статей
+    "v_keyword_coverage",
+    "v_site_funnel",
+    "v_monthly_spend",
+    "v_link_health",
+    "v_site_latest",
+    "v_product_site_latest",
 ]
 
 ENUMS: dict[str, type[TextChoices]] = {
@@ -162,6 +178,30 @@ def _foreign_keys(schema: str) -> set[tuple[str, str, str, str]]:
     return {(table, column, ref_table, ref_column) for table, column, ref_table, ref_column in rows}
 
 
+# Список колонок подзапроса: « SELECT x.id,\n    x.site_id,\n ... FROM».
+_SUBQUERY_COLUMNS = re.compile(r"(\( SELECT )(.*?)(\n\s+FROM )", re.S)
+# Колонка в скобках с приведением: «(kp.country)::text».
+_CAST_COLUMN = re.compile(r"\((\w+\.\w+)\)::text")
+
+
+def _sort_columns(match: re.Match[str]) -> str:
+    columns = sorted(column.strip() for column in match.group(2).split(","))
+    return match.group(1) + ", ".join(columns) + match.group(3)
+
+
+def _normalize_view(text: str | None) -> str | None:
+    """Убирает из текста представления расхождения ADR-029, одинаково для обеих схем.
+
+    Типы колонок сверяет `test_columns`, поэтому разница `char` и `varchar`
+    в приведениях здесь не нужна.
+    """
+    if text is None:
+        return None
+    text = _SUBQUERY_COLUMNS.sub(_sort_columns, text)
+    text = text.replace("::bpchar", "::text").replace("::character varying", "::text")
+    return _CAST_COLUMN.sub(r"\1", text)
+
+
 def _views(schema: str) -> dict[str, str | None]:
     # Текст представления в том виде, как его хранит Postgres: пробелы и
     # переносы из исходного SQL не влияют, влияет смысл запроса.
@@ -175,7 +215,7 @@ def _views(schema: str) -> dict[str, str | None]:
         schema,
         VIEWS,
     )
-    return {name: _unqualify(definition) for name, definition in rows}
+    return {name: _normalize_view(_unqualify(definition)) for name, definition in rows}
 
 
 def _enum_labels(schema: str) -> dict[str, list[str]]:

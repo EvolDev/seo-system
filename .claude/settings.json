@@ -10,7 +10,6 @@
       "Bash(git push *main*)"
     ],
     "defaultMode": "default",
-    "disableBypassPermissionsMode": "disable",
-    "blockReadsOutsideWorkingDirectories": true
+    "disableBypassPermissionsMode": "disable"
   }
 }

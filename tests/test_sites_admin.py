@@ -114,7 +114,14 @@ def test_site_page_shows_status_per_product(admin_client: Client, site: Site) ->
 
 def test_add_product_in_admin(admin_client: Client, site: Site) -> None:
     url = reverse("admin:sites_product_add")
-    data = {"name": "Convertio", "domain": "https://Convertio.co/", "is_active": "on"}
+    data = {
+        "name": "Convertio",
+        "domain": "https://Convertio.co/",
+        "is_active": "on",
+        # Служебные поля таблицы «Другие настройки продукта» (E1-05).
+        "domain_settings-TOTAL_FORMS": "0",
+        "domain_settings-INITIAL_FORMS": "0",
+    }
     assert admin_client.post(url, data).status_code == 302
     product = Product.objects.get()
     assert product.domain == "convertio.co"

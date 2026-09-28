@@ -1,6 +1,6 @@
 """Блок 1 модели данных: продукты, площадки, решения по ним, снапшоты.
 
-Схема — `schema.sql` 1.2, как модели её повторяют — ADR-029: имена
+Схема — `schema.sql` 1.4, как модели её повторяют — ADR-029: имена
 таблиц, индексов и ограничений из схемы, значения по умолчанию в базе
 (`db_default`), `on_delete=PROTECT`. Несколько продуктов — ADR-030:
 площадка хранит только факты о себе, решение по ней — в `ProductSite`.
@@ -75,6 +75,42 @@ class Product(models.Model):
 
     def clean(self) -> None:
         self.domain = _clean_domain(self.domain)
+
+    def has_history(self) -> bool:
+        """С продуктом уже работали: есть решение, аудит, размещение, ключ или промпт.
+
+        Строки продукт × площадка, которые создались сами и остались
+        нетронутыми («Новая», без причины, профиля и пометки импорта), и
+        настройки продукта — не история (ADR-036).
+        """
+        touched = self.product_sites.exclude(
+            status=SiteStatus.NEW,
+            reject_reason__isnull=True,
+            content_profile__isnull=True,
+            imported_undecided=False,
+        )
+        return any(
+            related.exists()
+            for related in (
+                touched,
+                self.audits.all(),
+                self.placements.all(),
+                self.keywords.all(),
+                self.prompt_templates.all(),
+            )
+        )
+
+    def delete_unused(self) -> None:
+        """Удаляет продукт, заведённый по ошибке, вместе с его пустыми строками.
+
+        Продукт с историей не удаляется — его выключают флагом «активен».
+        """
+        with transaction.atomic():
+            if self.has_history():
+                raise ValidationError("С продуктом уже работали — его можно только выключить.")
+            self.product_sites.all().delete()
+            self.domain_settings.all().delete()
+            self.delete()
 
 
 class ActiveSiteManager(models.Manager["Site"]):
@@ -195,6 +231,16 @@ class ProductSite(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site} · {self.product}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Решение появилось — пометка «импортирована без решения» больше не
+        # верна (ADR-033). Хоть из импорта, хоть из админки.
+        if self.status != SiteStatus.NEW and self.imported_undecided:
+            self.imported_undecided = False
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = {*update_fields, "imported_undecided"}
+        super().save(*args, **kwargs)
 
 
 class SiteMetric(models.Model):
@@ -337,6 +383,67 @@ class SiteAudit(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site} · {self.product} · {self.get_verdict_display()}"
+
+
+class SiteList(models.Model):
+    """Рабочий список площадок: одна загрузка таблицы или каталога (ADR-033).
+
+    Площадка в базе одна и входит в списки со всей историей — статусом
+    по продуктам, аудитами, размещениями. Список общий для всех продуктов.
+    """
+
+    name = models.TextField("название")
+    source = models.TextField("откуда", null=True, blank=True)
+    created_at = models.DateTimeField("создан", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_lists"
+        verbose_name = "список площадок"
+        verbose_name_plural = "списки площадок"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=["name"], name="site_lists_name_key"),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class SiteListItem(models.Model):
+    """Площадка в рабочем списке.
+
+    `first_seen` — площадки не было в базе до этого списка: замена
+    колонке «Новая?» из таблицы.
+    """
+
+    site_list = models.ForeignKey(
+        SiteList,
+        models.PROTECT,
+        verbose_name="список",
+        related_name="items",
+        db_column="list_id",
+        db_index=False,
+    )
+    site = models.ForeignKey(
+        Site, models.PROTECT, verbose_name="площадка", related_name="list_items", db_index=False
+    )
+    first_seen = models.BooleanField("впервые в базе", default=False, db_default=False)
+    added_at = models.DateTimeField("добавлена", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_list_items"
+        verbose_name = "площадка в списке"
+        verbose_name_plural = "площадки в списке"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["site_list", "site"], name="site_list_items_list_id_site_id_key"
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["site"], name="idx_list_items_site"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site_list} · {self.site}"
 
 
 def ensure_product_sites(

@@ -1,8 +1,9 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16.15: 29 таблиц, 8 представлений)
+-- (проверена применением на PostgreSQL 16: 31 таблица, 8 представлений)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -154,6 +155,26 @@ CREATE TABLE site_audits (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_audits_site ON site_audits(site_id, product_id, created_at DESC);
+
+-- Рабочий список площадок: одна загрузка таблицы или выгрузки каталога
+-- (ADR-033). Площадка в базе одна, в списки она входит со всей историей.
+-- Список общий для всех продуктов, статус в нём — по выбранному продукту.
+CREATE TABLE site_lists (
+    id          bigserial PRIMARY KEY,
+    name        text NOT NULL UNIQUE,       -- «Сентябрь 2026»
+    source      text,                       -- откуда: имя файла, API
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE site_list_items (
+    id          bigserial PRIMARY KEY,
+    list_id     bigint NOT NULL REFERENCES site_lists(id) ON DELETE CASCADE,
+    site_id     bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    first_seen  boolean NOT NULL DEFAULT false, -- площадки не было в базе до этого списка
+    added_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (list_id, site_id)
+);
+CREATE INDEX idx_list_items_site ON site_list_items(site_id);
 
 -- ---------- Блок 2. Размещения ----------
 
