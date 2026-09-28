@@ -6,16 +6,20 @@ export APP_GID := $(shell id -g)
 COMPOSE := docker compose
 RUN := $(COMPOSE) run --rm app
 
-.PHONY: up down logs migrate superuser test check fmt shell docs-check docs-serve
+.PHONY: up down logs restart-queue migrate superuser test check fmt shell docs-check docs-serve
 
 up:  ## Поднять окружение (с пересборкой образа, если менялись зависимости)
 	$(COMPOSE) up -d --build
 
-down:  ## Остановить окружение; данные Postgres сохраняются в томе
+down:  ## Остановить окружение; данные Postgres и очередь Redis сохраняются в томах
 	$(COMPOSE) down
 
 logs:  ## Логи всех сервисов
 	$(COMPOSE) logs -f
+
+# Воркер и beat не перечитывают код сами, в отличие от runserver.
+restart-queue:  ## Перезапустить воркер и beat — после правки кода задач
+	$(COMPOSE) restart worker beat
 
 migrate:  ## Применить миграции
 	$(RUN) python manage.py migrate

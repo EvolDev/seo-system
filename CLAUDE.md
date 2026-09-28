@@ -51,6 +51,9 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 - Тесты: `make test`
 - Линтер и типы: `make check` (ruff lint + ruff format --check + mypy strict)
 - Автоисправление стиля: `make fmt`
+- Очередь: воркер и beat поднимает `make up`; после правки кода задач —
+  `make restart-queue`; проверка —
+  `docker compose run --rm app python manage.py queue_check`
 - Миграции: `make migrate`, пользователь админки: `make superuser`
 - Django-команды: `docker compose run --rm app python manage.py <команда>`
 - Зависимости: `uv add <пакет>` / `uv add --dev <пакет>`, затем `make up`
@@ -75,6 +78,9 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
   В коде чисел не хардкодить.
 - Схема БД меняется только миграциями. Перед применением — `sqlmigrate`.
 - Фоновые задачи идемпотентны, `run_id` протягивается через всю цепочку.
+  Задача — `@shared_task(base=QueueTask, name=...)` из `config.queue`:
+  журнал запусков, `run_id`, повторы и ограничение скорости делает
+  базовый класс (ADR-039).
 - Логи — `logging.getLogger(__name__)`, данные через `extra`. Точка входа
   цепочки: `new_run_id()` и `with bind_run_id(...)` из `config.run_id`
   (ADR-025). Секреты в логах не маскировать вручную — это делает логгер.

@@ -51,6 +51,9 @@ Python, Django и остальные пакеты ставить на хост �
    make up
    ```
 
+   Поднимутся приложение, воркер и beat очереди, Postgres и Redis —
+   `docker compose ps`.
+
 5. Применить миграции и создать пользователя для админки:
 
    ```bash
@@ -70,7 +73,7 @@ Python, Django и остальные пакеты ставить на хост �
    ```
 
 Остановить — `make down`. Данные базы при этом сохраняются в томе
-Docker `pgdata`.
+Docker `pgdata`, очередь задач — в томе `redisdata`.
 
 ### Команды
 
@@ -79,6 +82,7 @@ Docker `pgdata`.
 | `make up` | поднять окружение, пересобрать образ, если менялись зависимости |
 | `make down` | остановить окружение |
 | `make logs` | логи всех сервисов |
+| `make restart-queue` | перезапустить воркер и beat — после правки кода задач |
 | `make migrate` | применить миграции |
 | `make superuser` | создать пользователя для админки |
 | `make test` | тесты |
@@ -132,6 +136,48 @@ Docker `pgdata`.
 observability_check --raise` — тестовая цепочка, дамп конфига с
 замаскированными секретами, тестовая ошибка в Sentry.
 
+### Очередь фоновых задач
+
+Проверки идут в фоне, через очередь Celery в Redis (ADR-039). Два
+сервиса compose:
+
+- **worker** выполняет задачи. Код сам не перечитывает, в отличие от
+  `runserver`: после правки задач — `make restart-queue`;
+- **beat** — будильник: по расписанию кладёт задачи в очередь, сам их не
+  выполняет. Расписание — `CELERY_BEAT_SCHEDULE` в
+  `config/settings/base.py`, список — `docs/13-CONFIG.md` §3.
+
+Задача объявляется с базовым классом — он пишет запуск в `task_runs`,
+передаёт `run_id`, повторяет упавшую и ограничивает скорость:
+
+```python
+from celery import shared_task
+
+from config.queue import QueueTask
+
+
+@shared_task(base=QueueTask, name="check_indexation")
+def check_indexation(placement_id: int) -> None: ...
+```
+
+Поставить в очередь — `check_indexation.delay(placement_id)`, после
+фиксации транзакции — `delay_on_commit`. Упавшая задача повторяется
+дважды, через 1 и 2 минуты; после третьей неудачи — «Ошибка» в журнале
+и событие в Sentry/GlitchTip. Задачи должны быть идемпотентными:
+прерванная остановкой воркера выполнится снова с начала.
+
+Журнал запусков — в админке, **Служебное → Запуски задач**. Проверить
+очередь целиком:
+
+```bash
+docker compose run --rm app python manage.py queue_check          # проба через воркер
+docker compose run --rm app python manage.py queue_check --fail   # три попытки, «Ошибка», событие в Sentry
+```
+
+В тестах задачи выполняются сразу, без воркера (`tests/conftest.py`).
+Без воркера можно работать и локально: `CELERY_TASK_ALWAYS_EAGER=true`
+в `.env`.
+
 ### Если что-то не так
 
 | Симптом | Причина |
@@ -141,6 +187,8 @@ observability_check --raise` — тестовая цепочка, дамп ко�
 | `Переменная окружения DJANGO_SECRET_KEY не задана` | пустой `DJANGO_SECRET_KEY` в `.env` |
 | `DJANGO_ENV: ожидается local \| prod` | в `.env` нет `DJANGO_ENV` или там опечатка |
 | `port is already allocated` на 8000 или 5432 | порт занят другим процессом или другой копией проекта |
+| задача в очереди, а в «Запусках задач» её нет | воркер не запущен: `docker compose ps`, лог — `docker compose logs worker` |
+| поменяли код задачи, а выполняется по-старому | воркер не перечитывает код: `make restart-queue` |
 
 ---
 
@@ -160,6 +208,7 @@ seo-system/
 ├── config/                      проект Django
 │   ├── settings/                base.py, local.py, prod.py
 │   ├── env.py                   чтение переменных окружения
+│   ├── celery.py, queue.py      очередь: приложение Celery, базовый класс задач
 │   └── urls.py, wsgi.py, asgi.py
 ├── apps/                        приложения по доменам, ADR-024
 │   ├── sites/                   площадки, метрики, цены, аудиты

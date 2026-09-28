@@ -8,12 +8,30 @@ from openpyxl import Workbook
 from sentry_sdk.envelope import Envelope
 from sentry_sdk.transport import Transport
 
+from config.celery import app as celery_app
 from config.sentry import disable_sentry, sentry_options
 
 # Адрес не резолвится: даже если транспорт не подменится, в сеть ничего не уйдёт.
 FAKE_DSN = "https://public@sentry.invalid/1"
 
 Events = list[dict[str, Any]]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def celery_eager() -> Iterator[None]:
+    """Задачи выполняются сразу, в процессе теста, без воркера (E2-01).
+
+    В `.env` запущенного приложения CELERY_TASK_ALWAYS_EAGER=false — тесты
+    от него не зависят. Повторы в этом режиме идут сразу, без пауз; ошибку
+    задачи после всех попыток поднимает `.get()` у результата.
+
+    Ключи — с префиксом CELERY_, как в настройках Django: Celery ищет
+    значение сначала по нему, и ключ без префикса (`task_always_eager`)
+    настройку не перекрыл бы. Брокер — в памяти процесса: задача, ушедшая
+    мимо eager, не попадёт в Redis запущенного приложения к его воркеру.
+    """
+    celery_app.conf.update(CELERY_TASK_ALWAYS_EAGER=True, CELERY_BROKER_URL="memory://")
+    yield
 
 
 @pytest.fixture(autouse=True, scope="session")

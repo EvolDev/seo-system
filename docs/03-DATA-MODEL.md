@@ -600,13 +600,17 @@ Markdown не считаются, границы абзацев, заголов�
 | Поле | Тип | Описание |
 |---|---|---|
 | id | bigserial PK | |
-| task_name | text | |
-| status | enum | `running`, `success`, `failed` |
-| started_at / finished_at | timestamptz | |
+| task_name | text | имя задачи Celery (`heartbeat`) или команды (`import_workbook`) |
+| status | enum | `running`, `success`, `failed`; у задачи очереди `running` — до конца всех попыток |
+| started_at / finished_at | timestamptz | от старта первой попытки до конца последней |
 | duration_ms | int | |
-| error | text | |
-| payload | jsonb | |
+| error | text | текст последней ошибки, без трассировки |
+| payload | jsonb | параметры запуска. У задач очереди — `task_id` Celery, `args`, `kwargs`, `attempt` (номер последней попытки), `errors` прежних попыток, `redelivered` (возвращалась в очередь после остановки воркера), ADR-039 |
 | run_id | uuid | |
+
+Одна строка — один запуск задачи, а не попытка: повтор и возврат в
+очередь после остановки воркера продолжают строку. Пишет базовый класс
+задачи `QueueTask` (`config/queue.py`) и команда импорта таблицы.
 
 ### `api_usage`
 

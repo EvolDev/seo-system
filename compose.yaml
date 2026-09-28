@@ -1,26 +1,54 @@
 # Локальное окружение. Прод — отдельный файл, задача E10-01.
 
+# Общее у приложения, воркера и beat: один образ, код с хоста, те же переменные.
+x-app: &app
+  build:
+    context: .
+    # Тот же пользователь заводится в образе (Dockerfile).
+    args:
+      APP_UID: "${APP_UID:-1000}"
+      APP_GID: "${APP_GID:-1000}"
+  image: seo-system-app
+  env_file: .env
+  # Под своим пользователем, чтобы кэши ruff/mypy/pytest в папке проекта
+  # не принадлежали root. APP_UID/APP_GID выставляет Makefile.
+  user: "${APP_UID:-1000}:${APP_GID:-1000}"
+  volumes:
+    - .:/app
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
 services:
   app:
-    build: .
-    env_file: .env
-    # Под своим пользователем, чтобы кэши ruff/mypy/pytest в папке проекта
-    # не принадлежали root. APP_UID/APP_GID выставляет Makefile.
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    <<: *app
     ports:
       - "127.0.0.1:8000:8000"
-    volumes:
-      - .:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/admin/login/')"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Выполняет задачи из очереди (E2-01, ADR-039). Код задач сам не
+  # перечитывает, в отличие от runserver: после правки — make restart-queue.
+  # Уровень логов — LOGGING в настройках Django, не ключ celery.
+  worker:
+    <<: *app
+    command: celery -A config worker --concurrency=2
+    # docker compose stop даёт начатым задачам доработать. Не успели — сообщение
+    # осталось в Redis неподтверждённым, задача выполнится снова (acks_late).
+    stop_grace_period: 60s
+
+  # Будильник: по расписанию кладёт задачи в очередь, сам их не выполняет.
+  # Должен быть ровно один, иначе задачи по расписанию уходили бы дважды.
+  # Файл состояния — во временной папке контейнера: пересоздали контейнер —
+  # пропущенный запуск не догоняется. Прод — на томе (E10-01).
+  beat:
+    <<: *app
+    command: celery -A config beat --schedule=/tmp/celerybeat-schedule
 
   postgres:
     image: postgres:16
@@ -38,8 +66,13 @@ services:
       timeout: 5s
       retries: 10
 
+  # Очередь задач. Журнал AOF на томе: очередь переживает перезапуск Redis
+  # и пересоздание контейнера, пропасть может разве что последняя секунда.
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -48,3 +81,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

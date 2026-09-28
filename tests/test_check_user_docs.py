@@ -4,6 +4,7 @@
 документов, с которыми сверяется проверщик, и портит в ней одно место.
 """
 
+import re
 import shutil
 from pathlib import Path
 
@@ -64,7 +65,10 @@ def test_nav_entry_without_file_fails(docs_root: Path, capsys: pytest.CaptureFix
 
 
 def test_unknown_task_fails(docs_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    _replace(docs_root / "user-docs/reference/index.md", "tasks: []", "tasks: [E99-99]")
+    page = docs_root / "user-docs/reference/index.md"
+    # Список задач страницы — любой: он растёт с каждой задачей.
+    text = re.sub(r"^tasks: .*$", "tasks: [E99-99]", page.read_text(encoding="utf-8"), flags=re.M)
+    page.write_text(text, encoding="utf-8")
     code, out = _run(docs_root, capsys)
     assert code == 1
     assert "задачи E99-99 нет в docs/06-BACKLOG.md" in out

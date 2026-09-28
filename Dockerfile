@@ -16,6 +16,14 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 
 WORKDIR /app
 
+# Контейнеры идут под пользователем хоста (APP_UID/APP_GID из Makefile). Без
+# записи о нём в образе воркер Celery считает процесс root-ом и при старте
+# пишет тревожное предупреждение. Номер уже занят в образе — берём как есть.
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN (getent group "$APP_GID" || groupadd --gid "$APP_GID" app) \
+    && (getent passwd "$APP_UID" || useradd --uid "$APP_UID" --gid "$APP_GID" --no-create-home app)
+
 # Сначала только зависимости: слой кэшируется, пока не менялся uv.lock.
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-install-project

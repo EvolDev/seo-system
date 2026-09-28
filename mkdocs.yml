@@ -59,6 +59,7 @@ nav:
       - reference/statuses.md
       - reference/thresholds.md
       - reference/glossary.md
+      - reference/background-tasks.md
   - Как это устроено:
       - explanation/index.md
       - explanation/site-evaluation.md
