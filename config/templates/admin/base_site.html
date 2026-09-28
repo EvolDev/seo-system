@@ -1,0 +1,99 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Шапка и расцветки админки поверх темы Admin Interface (ADR-038).
+
+Имя шаблона то же, что у темы: Django берёт следующий по порядку шаблон с
+этим именем — сначала наш (TEMPLATES["DIRS"]), затем тему, — поэтому extends
+продолжает её шаблон, а не этот же. Расцветки — config/static/seo/admin-palettes.css.
+{% endcomment %}
+{% load static %}
+
+{% block title %}{% if title %}{{ title }} | {% endif %}SEO-система{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% static 'seo/admin-palettes.css' %}">
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<script>
+  // Расцветку ставим до первой отрисовки, иначе страница мигнёт чужими цветами.
+  // Выбор помнит браузер; в первый раз — по настройке системы (светлая / тёмная).
+  (() => {
+    const modes = { "apple-light": "light", "google-dark": "dark", emerald: "light", ahrefs: "dark" };
+    let palette = null;
+    try {
+      palette = localStorage.getItem("admin-palette");
+    } catch (error) {
+      // Хранилище выключено — работаем по настройке системы.
+    }
+    if (!(palette in modes)) {
+      palette = matchMedia("(prefers-color-scheme: dark)").matches ? "google-dark" : "apple-light";
+    }
+    document.documentElement.dataset.palette = palette;
+    document.documentElement.dataset.mode = modes[palette];
+    // Группа меню «Служебное» свёрнута, пока человек сам её не раскроет
+    // (сворачивание групп — Admin Interface, состояние — в том же хранилище).
+    try {
+      const serviceKey = "admin-interface.foldable-apps_app-service_collapsed";
+      if (localStorage.getItem(serviceKey) === null) localStorage.setItem(serviceKey, "1");
+    } catch (error) {
+      // Без хранилища группа просто раскрыта.
+    }
+  })();
+</script>
+{% endblock %}
+
+{% block branding %}
+<h1 id="site-name"><a href="{% url 'admin:index' %}"><span>SEO-система</span></a></h1>
+{% endblock %}
+
+{% block userlinks %}{{ block.super }}
+<details class="palette-switch" id="palette-switch">
+  <summary title="Сменить расцветку"><span class="palette-dot"></span>Оформление</summary>
+  <div class="palette-menu">
+    <button type="button" data-palette="apple-light" data-mode="light" data-dot="#0071e3">
+      <i style="background: #0071e3"></i>Apple — светлая
+    </button>
+    <button type="button" data-palette="google-dark" data-mode="dark" data-dot="#a8c7fa">
+      <i style="background: #a8c7fa"></i>Google — тёмная
+    </button>
+    <button type="button" data-palette="emerald" data-mode="light" data-dot="#059669">
+      <i style="background: #059669"></i>Изумрудная
+    </button>
+    <button type="button" data-palette="ahrefs" data-mode="dark" data-dot="#ff8800">
+      <i style="background: #ff8800"></i>Ahrefs — тёмная
+    </button>
+  </div>
+</details>
+<script>
+  (() => {
+    const root = document.documentElement;
+    const menu = document.getElementById("palette-switch");
+    const buttons = [...menu.querySelectorAll("button[data-palette]")];
+    const mark = () => {
+      for (const button of buttons) {
+        const current = button.dataset.palette === root.dataset.palette;
+        button.setAttribute("aria-pressed", String(current));
+        if (current) menu.style.setProperty("--palette-current", button.dataset.dot);
+      }
+    };
+    for (const button of buttons) {
+      button.addEventListener("click", () => {
+        root.dataset.palette = button.dataset.palette;
+        root.dataset.mode = button.dataset.mode;
+        try {
+          localStorage.setItem("admin-palette", button.dataset.palette);
+        } catch (error) {
+          // Не запомнится, но на этой странице расцветка уже сменилась.
+        }
+        mark();
+        menu.open = false;
+      });
+    }
+    document.addEventListener("click", (event) => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
+    mark();
+  })();
+</script>
+{% endblock %}

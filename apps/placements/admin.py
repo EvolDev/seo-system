@@ -8,10 +8,9 @@ from typing import Any
 
 from django.contrib import admin
 from django.http import HttpRequest
-from unfold.admin import StackedInline
 
 from apps.placements.models import Placement, PlacementLink
-from config.admin import NoDeleteAdmin
+from config.admin import NoDeleteAdmin, StackedInline
 
 
 class PlacementLinkInline(StackedInline):

@@ -55,8 +55,9 @@ class TestAdmin:
         assert response.status_code == 200
         row = response.context["cl"].result_list[0]
         assert (row.sites_total, row.first_seen_total) == (3, 2)
-        items_url = reverse("admin:sites_sitelistitem_changelist")
-        assert f"{items_url}?site_list__id__exact={september.pk}" in response.content.decode()
+        # Число ведёт на рабочий экран «Площадки» с этим списком (E9-08).
+        sites_url = reverse("admin:sites_productsitelatest_changelist")
+        assert f"{sites_url}?list={september.pk}" in response.content.decode()
 
     def test_items_filtered_by_list(self, admin_client: Client, september: SiteList) -> None:
         october = SiteList.objects.create(name="Октябрь 2026")

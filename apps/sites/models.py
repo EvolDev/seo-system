@@ -153,7 +153,8 @@ class Site(models.Model):
     class Meta:
         db_table = "sites"
         verbose_name = "площадка"
-        verbose_name_plural = "площадки"
+        # Все площадки базы; рабочий экран — «Площадки» (ProductSiteLatest).
+        verbose_name_plural = "каталог площадок"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=["domain"], name="sites_domain_key"),
         ]
@@ -218,8 +219,8 @@ class ProductSite(models.Model):
 
     class Meta:
         db_table = "product_sites"
-        verbose_name = "площадка продукта"
-        verbose_name_plural = "площадки продуктов"
+        verbose_name = "решение по площадке"
+        verbose_name_plural = "решения по площадкам"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(
                 fields=["site", "product"], name="product_sites_site_id_product_id_key"
@@ -398,8 +399,8 @@ class SiteList(models.Model):
 
     class Meta:
         db_table = "site_lists"
-        verbose_name = "список площадок"
-        verbose_name_plural = "списки площадок"
+        verbose_name = "рабочий список"
+        verbose_name_plural = "рабочие списки"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=["name"], name="site_lists_name_key"),
         ]
@@ -431,8 +432,8 @@ class SiteListItem(models.Model):
 
     class Meta:
         db_table = "site_list_items"
-        verbose_name = "площадка в списке"
-        verbose_name_plural = "площадки в списке"
+        verbose_name = "строка рабочего списка"
+        verbose_name_plural = "строки рабочих списков"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(
                 fields=["site_list", "site"], name="site_list_items_list_id_site_id_key"
@@ -535,7 +536,8 @@ class ProductSiteLatest(models.Model):
         managed = False
         db_table = "v_product_site_latest"
         verbose_name = "площадка продукта на сегодня"
-        verbose_name_plural = "площадки продукта"
+        # Главный рабочий экран — в меню первым пунктом «Работы» (E9-08).
+        verbose_name_plural = "площадки"
 
     def __str__(self) -> str:
         return f"{self.domain} · {self.product_id}"

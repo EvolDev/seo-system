@@ -15,7 +15,11 @@ LOGGING = logging_config("console")
 # момент запроса: в тестах pytest-django выключает DEBUG, и панели нет.
 INSTALLED_APPS = [*INSTALLED_APPS, "debug_toolbar"]  # noqa: F405
 MIDDLEWARE = ["debug_toolbar.middleware.DebugToolbarMiddleware", *MIDDLEWARE]  # noqa: F405
-DEBUG_TOOLBAR_CONFIG = {"SHOW_TOOLBAR_CALLBACK": "config.settings.local.show_toolbar"}
+DEBUG_TOOLBAR_CONFIG = {
+    "SHOW_TOOLBAR_CALLBACK": "config.settings.local.show_toolbar",
+    # Свёрнута в ярлычок у края: развёрнутая закрывала шапку и переключатели (E9-08).
+    "SHOW_COLLAPSED": True,
+}
 
 
 def show_toolbar(request: HttpRequest) -> bool:

@@ -20,11 +20,12 @@ DEBUG = env_bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS")
 
 INSTALLED_APPS = [
-    # Тема админки (ADR-037): должна стоять до django.contrib.admin, чтобы
-    # её шаблоны перекрыли штатные. Фильтры — диапазоны чисел и выпадающие.
-    "unfold",
-    "unfold.contrib.filters",
-    "django.contrib.admin",
+    # Тема админки Admin Interface (ADR-038): до django.contrib.admin, чтобы
+    # её шаблоны перекрыли штатные; colorfield — поля цветов её модели темы.
+    "admin_interface",
+    "colorfield",
+    # Штатная админка со своим сайтом: меню по работе человека (config/admin_site.py).
+    "config.admin_site.SeoAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -32,6 +33,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Поля Postgres (ArrayField) и их формы в админке.
     "django.contrib.postgres",
+    # Фильтр диапазона в списках админки: поля «С» и «До» (DR, трафик).
+    "rangefilter",
     # Свои приложения — по доменам, не по слоям (ADR-024).
     "apps.sites",
     "apps.placements",
@@ -56,7 +59,8 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Шаблоны уровня проекта: переопределения админки (шапка, расцветки).
+        "DIRS": [BASE_DIR / "config" / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -89,11 +93,16 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "ru"
+# Интерфейс только на русском. С одним языком тема админки не показывает
+# свой переключатель языков (ADR-038).
+LANGUAGES = [("ru", "Русский")]
 TIME_ZONE = env_str("TIME_ZONE", default="Europe/Moscow")
 USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Статика уровня проекта: расцветки админки (ADR-038).
+STATICFILES_DIRS = [BASE_DIR / "config" / "static"]
 
 # В schema.sql первичные ключи — bigserial.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -105,8 +114,8 @@ LOGGING = logging_config("json")
 # Ошибки — в Sentry (ADR-013); пустой SENTRY_DSN — выключен.
 init_sentry(env_str("SENTRY_DSN", default=""), environment=env_str("DJANGO_ENV"))
 
-# Тема админки (ADR-037).
-UNFOLD = {
-    "SITE_TITLE": "SEO-система",
-    "SITE_HEADER": "SEO-система",
-}
+# Admin Interface открывает окно «добавить связанный объект» во фрейме той же
+# страницы (ADR-038): фреймы разрешаем только своему сайту. W019 — проверка
+# `check --deploy`, которая требует DENY.
+X_FRAME_OPTIONS = "SAMEORIGIN"
+SILENCED_SYSTEM_CHECKS = ["security.W019"]

@@ -13,7 +13,6 @@ from django import forms
 from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
-from unfold.admin import TabularInline
 
 from apps.content.domain_settings import (
     PRODUCT_KEYS,
@@ -24,7 +23,7 @@ from apps.content.domain_settings import (
 from apps.content.models import DomainSetting
 from apps.sites.domains import normalize_domain
 from apps.sites.models import Product
-from config.admin import NoDeleteAdmin
+from config.admin import NoDeleteAdmin, TabularInline
 
 # Поля ценового ориентира на странице продукта → ключи внутри PRICE_REFERENCE.
 PRICE_FIELDS = {

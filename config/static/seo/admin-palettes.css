@@ -1,0 +1,333 @@
+/*
+ * Расцветки админки поверх темы Admin Interface (ADR-038).
+ *
+ * Расцветка — набор CSS-переменных: переменные темы (--admin-interface-*,
+ * шапка, модули, кнопки) и штатной админки Django (--body-bg и др.). Какая
+ * включена, решает атрибут data-palette у <html>; его ставит скрипт в <head>
+ * (config/templates/admin/base_site.html) до первой отрисовки, по выбору в
+ * переключателе, а в первый раз — по настройке системы. Селектор
+ * html[data-palette] body.admin-interface сильнее, чем :root .admin-interface
+ * у темы, поэтому наши значения перекрывают её.
+ *
+ * Тёмного режима у Admin Interface нет: для тёмных расцветок (data-mode="dark")
+ * внизу — заплатки там, где тема зашила светлый цвет.
+ */
+
+/* Переход между страницами — плавная смена вместо пустого экрана (View Transitions). */
+@view-transition { navigation: auto; }
+::view-transition-group(root) { animation-duration: .18s; }
+
+/* Светлая и тёмная — выбором расцветки; штатный переключатель Django не нужен. */
+body.admin-interface #user-tools .theme-toggle { display: none; }
+html[data-mode="dark"] { color-scheme: dark; }
+
+/* Apple — светлая: системные цвета HIG и apple.com (#0071e3, #1d1d1f, #f5f5f7). */
+html[data-palette="apple-light"] { background: #ffffff; }
+html[data-palette="apple-light"] body.admin-interface {
+  color-scheme: light;
+  --admin-interface-title-color: #1d1d1f;
+  --admin-interface-logo-color: #1d1d1f;
+  --admin-interface-header-background-color: #f5f5f7;
+  --admin-interface-header-text-color: #6e6e73;
+  --admin-interface-header-link-color: #1d1d1f;
+  --admin-interface-header-link-hover-color: #0066cc;
+  --admin-interface-module-background-color: #e8e8ed;
+  --admin-interface-module-background-selected-color: #e3eefc;
+  --admin-interface-module-text-color: #1d1d1f;
+  --admin-interface-module-link-color: #1d1d1f;
+  --admin-interface-module-link-selected-color: #0066cc;
+  --admin-interface-module-link-hover-color: #0066cc;
+  --admin-interface-generic-link-color: #0066cc;
+  --admin-interface-generic-link-hover-color: #004f9e;
+  --admin-interface-generic-link-active-color: #0071e3;
+  --admin-interface-save-button-background-color: #0071e3;
+  --admin-interface-save-button-background-hover-color: #0077ed;
+  --admin-interface-save-button-text-color: #ffffff;
+  --admin-interface-delete-button-background-color: #d70015;
+  --admin-interface-delete-button-background-hover-color: #b8000f;
+  --admin-interface-delete-button-text-color: #ffffff;
+  --admin-interface-main-border-top: 10px solid var(--admin-interface-module-background-color);
+  --body-bg: #ffffff;
+  --body-fg: #1d1d1f;
+  --body-quiet-color: #6e6e73;
+  --body-medium-color: #424245;
+  --body-loud-color: #000000;
+  --hairline-color: #e5e5ea;
+  --border-color: #d2d2d7;
+  --darkened-bg: #f5f5f7;
+  --selected-bg: #e8e8ed;
+  --selected-row: #e8f2ff;
+  --link-fg: #0066cc;
+  --link-hover-color: #004f9e;
+  --link-selected-fg: #0066cc;
+  --button-fg: #ffffff;
+  --button-bg: #0071e3;
+  --button-hover-bg: #0077ed;
+  --default-button-bg: #424245;
+  --default-button-hover-bg: #1d1d1f;
+  --close-button-bg: #8e8e93;
+  --close-button-hover-bg: #636366;
+  --delete-button-bg: #d70015;
+  --delete-button-hover-bg: #b8000f;
+  --object-tools-fg: #ffffff;
+  --object-tools-bg: #8e8e93;
+  --object-tools-hover-bg: #636366;
+  --error-fg: #d70015;
+  --message-success-bg: #e6f6ea;
+  --message-warning-bg: #fff6e0;
+  --message-error-bg: #ffebeb;
+}
+
+/* Google — тёмная: Material 3, как в Gmail и Drive (#1e1f20, #a8c7fa). */
+html[data-palette="google-dark"] { background: #1e1f20; }
+html[data-palette="google-dark"] body.admin-interface {
+  color-scheme: dark;
+  --admin-interface-title-color: #e3e3e3;
+  --admin-interface-logo-color: #e3e3e3;
+  --admin-interface-header-background-color: #282a2c;
+  --admin-interface-header-text-color: #c4c7c5;
+  --admin-interface-header-link-color: #e3e3e3;
+  --admin-interface-header-link-hover-color: #a8c7fa;
+  --admin-interface-module-background-color: #004a77;
+  --admin-interface-module-background-selected-color: #0842a0;
+  --admin-interface-module-text-color: #c2e7ff;
+  --admin-interface-module-link-color: #c2e7ff;
+  --admin-interface-module-link-selected-color: #d3e3fd;
+  --admin-interface-module-link-hover-color: #ffffff;
+  --admin-interface-generic-link-color: #a8c7fa;
+  --admin-interface-generic-link-hover-color: #d3e3fd;
+  --admin-interface-generic-link-active-color: #7cacf8;
+  --admin-interface-save-button-background-color: #a8c7fa;
+  --admin-interface-save-button-background-hover-color: #7cacf8;
+  --admin-interface-save-button-text-color: #062e6f;
+  --admin-interface-delete-button-background-color: #f2b8b5;
+  --admin-interface-delete-button-background-hover-color: #f9dedc;
+  --admin-interface-delete-button-text-color: #601410;
+  --admin-interface-main-border-top: 10px solid var(--admin-interface-module-background-color);
+  --body-bg: #1e1f20;
+  --body-fg: #e3e3e3;
+  --body-quiet-color: #c4c7c5;
+  --body-medium-color: #c4c7c5;
+  --body-loud-color: #ffffff;
+  --hairline-color: #3c4043;
+  --border-color: #5e6164;
+  --darkened-bg: #282a2c;
+  --selected-bg: #333537;
+  --selected-row: #0b3565;
+  --link-fg: #a8c7fa;
+  --link-hover-color: #d3e3fd;
+  --link-selected-fg: #d3e3fd;
+  --button-fg: #062e6f;
+  --button-bg: #a8c7fa;
+  --button-hover-bg: #7cacf8;
+  --default-button-bg: #444746;
+  --default-button-hover-bg: #5e6164;
+  --close-button-bg: #5e6164;
+  --close-button-hover-bg: #747775;
+  --delete-button-bg: #f2b8b5;
+  --delete-button-hover-bg: #f9dedc;
+  --object-tools-fg: #e3e3e3;
+  --object-tools-bg: #444746;
+  --object-tools-hover-bg: #5e6164;
+  --error-fg: #f2b8b5;
+  --message-success-bg: #1e3a2a;
+  --message-warning-bg: #3d3212;
+  --message-error-bg: #4a1f1d;
+  --primary: #a8c7fa;
+  --secondary: #282a2c;
+  --primary-fg: #062e6f;
+  --header-color: #e3e3e3;
+  --header-bg: #282a2c;
+  --header-link-color: #e3e3e3;
+  --breadcrumbs-fg: #c4c7c5;
+  --breadcrumbs-link-fg: #e3e3e3;
+  --breadcrumbs-bg: #282a2c;
+}
+
+/* Изумрудная: оттенки Tailwind emerald 50/100/600/700/800, фон — штатный светлый. */
+html[data-palette="emerald"] { background: #ffffff; }
+html[data-palette="emerald"] body.admin-interface {
+  color-scheme: light;
+  --admin-interface-title-color: #ffffff;
+  --admin-interface-logo-color: #ffffff;
+  --admin-interface-header-background-color: #064e3b;
+  --admin-interface-header-text-color: #d1fae5;
+  --admin-interface-header-link-color: #ffffff;
+  --admin-interface-header-link-hover-color: #d1fae5;
+  --admin-interface-module-background-color: #059669;
+  --admin-interface-module-background-selected-color: #ecfdf5;
+  --admin-interface-module-text-color: #ffffff;
+  --admin-interface-module-link-color: #ffffff;
+  --admin-interface-module-link-selected-color: #064e3b;
+  --admin-interface-module-link-hover-color: #d1fae5;
+  --admin-interface-generic-link-color: #059669;
+  --admin-interface-generic-link-hover-color: #064e3b;
+  --admin-interface-generic-link-active-color: #047857;
+  --admin-interface-save-button-background-color: #059669;
+  --admin-interface-save-button-background-hover-color: #047857;
+  --admin-interface-save-button-text-color: #ffffff;
+  --admin-interface-delete-button-background-color: #ba2121;
+  --admin-interface-delete-button-background-hover-color: #a41515;
+  --admin-interface-delete-button-text-color: #ffffff;
+  --admin-interface-main-border-top: 10px solid var(--admin-interface-module-background-color);
+  --primary: #059669;
+  --button-bg: #059669;
+  --button-hover-bg: #047857;
+  --default-button-bg: #047857;
+  --default-button-hover-bg: #064e3b;
+  --selected-row: #ecfdf5;
+  --link-fg: #059669;
+  --link-hover-color: #064e3b;
+}
+
+/* Ahrefs — тёмная: цвета сняты со скриншотов Ahrefs (#232426, #323335, #44a5ff, #ff8800). */
+html[data-palette="ahrefs"] { background: #232426; }
+html[data-palette="ahrefs"] body.admin-interface {
+  color-scheme: dark;
+  --admin-interface-title-color: #ededed;
+  --admin-interface-logo-color: #ededed;
+  --admin-interface-header-background-color: #323335;
+  --admin-interface-header-text-color: #a7a7a8;
+  --admin-interface-header-link-color: #ededed;
+  --admin-interface-header-link-hover-color: #44a5ff;
+  --admin-interface-module-background-color: #323335;
+  --admin-interface-module-background-selected-color: #3a3b3d;
+  --admin-interface-module-text-color: #ededed;
+  --admin-interface-module-link-color: #ededed;
+  --admin-interface-module-link-selected-color: #ffffff;
+  --admin-interface-module-link-hover-color: #44a5ff;
+  --admin-interface-generic-link-color: #44a5ff;
+  --admin-interface-generic-link-hover-color: #7cc0ff;
+  --admin-interface-generic-link-active-color: #44a5ff;
+  --admin-interface-save-button-background-color: #ff8800;
+  --admin-interface-save-button-background-hover-color: #ffa033;
+  --admin-interface-save-button-text-color: #1b1b1b;
+  --admin-interface-delete-button-background-color: #d9412e;
+  --admin-interface-delete-button-background-hover-color: #ff5b46;
+  --admin-interface-delete-button-text-color: #ffffff;
+  --admin-interface-main-border-top: 0px;
+  --body-bg: #232426;
+  --body-fg: #ededed;
+  --body-quiet-color: #a7a7a8;
+  --body-medium-color: #c8c8c9;
+  --body-loud-color: #ffffff;
+  --hairline-color: #3b3c3e;
+  --border-color: #515153;
+  --darkened-bg: #323335;
+  --selected-bg: #3a3b3d;
+  --selected-row: #2c3a48;
+  --link-fg: #44a5ff;
+  --link-hover-color: #7cc0ff;
+  --link-selected-fg: #7cc0ff;
+  --button-fg: #ededed;
+  --button-bg: #4a4b4d;
+  --button-hover-bg: #5a5b5d;
+  --default-button-bg: #5a5b5d;
+  --default-button-hover-bg: #6a6b6d;
+  --close-button-bg: #515153;
+  --close-button-hover-bg: #5f5f61;
+  --delete-button-bg: #d9412e;
+  --delete-button-hover-bg: #ff5b46;
+  --object-tools-fg: #ededed;
+  --object-tools-bg: #4a4b4d;
+  --object-tools-hover-bg: #5a5b5d;
+  --error-fg: #ff5b46;
+  --message-success-bg: #1d3a2b;
+  --message-warning-bg: #3d3317;
+  --message-error-bg: #45241f;
+  --primary: #44a5ff;
+  --secondary: #323335;
+  --primary-fg: #ffffff;
+  --header-color: #ededed;
+  --header-bg: #323335;
+  --header-link-color: #ededed;
+  --breadcrumbs-fg: #a7a7a8;
+  --breadcrumbs-link-fg: #ededed;
+  --breadcrumbs-bg: #323335;
+}
+
+/* Тёмные расцветки: места, где Admin Interface зашила светлый цвет. */
+html[data-mode="dark"] body.admin-interface thead th a,
+html[data-mode="dark"] body.admin-interface thead th a:link,
+html[data-mode="dark"] body.admin-interface thead th a:visited,
+html[data-mode="dark"] body.admin-interface thead th a:focus,
+html[data-mode="dark"] body.admin-interface thead th a:hover { color: var(--body-quiet-color); }
+html[data-mode="dark"] body.admin-interface #changelist .changelist-footer .paginator a,
+html[data-mode="dark"] body.admin-interface #changelist .changelist-footer .paginator a:link,
+html[data-mode="dark"] body.admin-interface #changelist .changelist-footer .paginator a:visited { background-color: var(--body-bg); }
+html[data-mode="dark"] body.admin-interface #changelist .changelist-footer .paginator a:hover,
+html[data-mode="dark"] body.admin-interface #changelist .changelist-footer .paginator a:active { background-color: var(--darkened-bg); }
+html[data-mode="dark"] body.admin-interface #changelist-filter .list-filter-dropdown select {
+  background-color: var(--body-bg);
+  color: var(--body-fg);
+}
+html[data-mode="dark"] body.admin-interface #toggle-nav-sidebar {
+  background-color: var(--darkened-bg);
+  border-color: var(--hairline-color);
+  box-shadow: none;
+  color: var(--body-quiet-color);
+}
+html[data-mode="dark"] body.admin-interface .module.filtered #changelist-filter li a:focus,
+html[data-mode="dark"] body.admin-interface .module.filtered #changelist-filter li a:hover,
+html[data-mode="dark"] body.admin-interface .module.filtered #changelist-filter .changelist-filter-clear a:hover { color: var(--body-quiet-color); }
+html[data-mode="dark"] body.admin-interface .object-tools a:hover { background-color: var(--object-tools-hover-bg); }
+html[data-mode="dark"] body.admin-interface.sticky-actions #changelist .actions,
+html[data-mode="dark"] body.admin-interface.sticky-pagination.change-list #changelist .changelist-footer { border-color: var(--hairline-color) !important; }
+
+/* Переключатель расцветки в шапке. */
+.palette-switch { display: inline-block; position: relative; margin-left: 12px; }
+.palette-switch > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.palette-switch > summary::-webkit-details-marker { display: none; }
+.palette-switch .palette-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  background: var(--palette-current, transparent);
+}
+.palette-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1000;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--hairline-color);
+  border-radius: 10px;
+  background: var(--body-bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.palette-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--body-fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.palette-menu button:hover,
+.palette-menu button:focus-visible { background: var(--darkened-bg); }
+.palette-menu button[aria-pressed="true"] { font-weight: 600; }
+.palette-menu button[aria-pressed="true"]::after { content: "✓"; margin-left: auto; }
+.palette-menu i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgb(0 0 0 / 20%);
+}

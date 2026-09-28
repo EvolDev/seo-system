@@ -5,7 +5,8 @@ description = "SEO-система линкбилдинга convertio.co"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "django>=5.2,<6",
-    "django-unfold>=0.108.0",
+    "django-admin-interface>=0.32.0",
+    "django-admin-rangefilter>=0.15.0",
     "openpyxl>=3.1.5",
     "psycopg[binary]>=3.2",
     "python-json-logger>=4.2.0",
@@ -61,11 +62,12 @@ strict = true
 plugins = ["mypy_django_plugin.main"]
 exclude = ["^source/", "^site/", "^\\.venv/"]
 
-# django-unfold аннотирован, но без маркера py.typed (ADR-037): читаем его
-# аннотации как есть, иначе все классы админки наследовались бы от Any.
+# Тема админки и фильтр диапазона (ADR-038) без аннотаций типов. Наш код их
+# классы не наследует: модели темы разбирает плагин django-stubs (они в
+# INSTALLED_APPS), класс фильтра только передаётся в list_filter.
 [[tool.mypy.overrides]]
-module = ["unfold.*"]
-follow_untyped_imports = true
+module = ["admin_interface.*", "colorfield.*", "rangefilter.*"]
+ignore_missing_imports = true
 
 [tool.django-stubs]
 django_settings_module = "config.settings.local"

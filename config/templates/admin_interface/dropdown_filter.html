@@ -1,0 +1,17 @@
+{% load admin_interface_tags i18n %}
+{% comment %}
+Выпадающий фильтр Admin Interface с одной правкой (E9-08): заголовок — просто
+название фильтра («Продукт»), а не «По продукт». Остальное — как у темы 0.32.
+{% endcomment %}
+<div class="list-filter-dropdown">
+    <h3 {% if spec.lookup_val or spec.value %}class="active"{% endif %}>{{ title|capfirst }}</h3>
+    <div align="right">
+        <select>
+        {% for choice in choices %}
+            <option {% if choice.selected %}selected{% endif %} value="{{ choice.query_string|iriencode }}">{{ choice.display }}</option>
+        {% endfor %}
+        </select>
+    </div>
+</div>
+
+<script id="admin-interface-dropdown-filter" src="{% get_admin_interface_static 'admin_interface/dropdown-filter/dropdown-filter.js' %}"></script>

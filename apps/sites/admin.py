@@ -16,14 +16,7 @@ from django.db.models import Count, Exists, F, OuterRef, Q
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
-from unfold.admin import ModelAdmin, TabularInline
-from unfold.contrib.filters.admin import (
-    BooleanRadioFilter,
-    ChoicesDropdownFilter,
-    DropdownFilter,
-    RadioFilter,
-    RangeNumericFilter,
-)
+from rangefilter.filters import NumericRangeFilter
 
 from apps.content.admin import (
     PRODUCT_SETTING_FIELDS,
@@ -45,7 +38,7 @@ from apps.sites.models import (
     SitePrice,
     SiteStatus,
 )
-from config.admin import NoDeleteAdmin, SnapshotAdmin
+from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline
 
 
 @admin.register(Product)
@@ -70,11 +63,10 @@ class ProductAdmin(NoDeleteAdmin):
     )
     inlines = (ProductOtherSettingsInline,)
 
-    # unfold объявляет form как Form, а админка передаёт ModelForm (ADR-037).
-    def save_model(  # type: ignore[override]
+    def save_model(
         self, request: HttpRequest, obj: Product, form: ProductSettingsForm, change: bool
     ) -> None:
-        super().save_model(request, obj, form, change)  # type: ignore[arg-type]
+        super().save_model(request, obj, form, change)
         form.save_settings(obj)
 
     # Продукт, заведённый по ошибке, удаляется, пока с ним не работали
@@ -237,7 +229,9 @@ class SiteListAdmin(NoDeleteAdmin):
 
     @admin.display(description="площадок", ordering="sites_total")
     def sites_count(self, obj: Any) -> str:
-        url = reverse("admin:sites_sitelistitem_changelist") + f"?site_list__id__exact={obj.pk}"
+        # Ведёт на рабочий экран «Площадки» с этим списком в фильтре, а не в
+        # служебную таблицу строк списка — её нет в меню (E9-08).
+        url = reverse("admin:sites_productsitelatest_changelist") + f"?list={obj.pk}"
         return format_html('<a href="{}">{}</a>', url, obj.sites_total)
 
     @admin.display(description="впервые в базе", ordering="first_seen_total")
@@ -261,7 +255,7 @@ class SiteListItemAdmin(NoDeleteAdmin):
         return False
 
 
-# ---------- Площадки продукта: рабочий экран поверх v_product_site_latest ----------
+# ---------- «Площадки»: рабочий экран поверх v_product_site_latest ----------
 
 
 def _euros(cents: int | None) -> str:
@@ -272,7 +266,7 @@ def _euros(cents: int | None) -> str:
     return f"€{euros}" if rest == 0 else f"€{euros}.{rest:02d}"
 
 
-class ProductFilter(DropdownFilter):
+class ProductFilter(admin.SimpleListFilter):
     """Продукт, чьими глазами смотрим на площадки. Пункта «все» нет.
 
     Без выбора — первый активный продукт: одна площадка у двух продуктов
@@ -281,8 +275,6 @@ class ProductFilter(DropdownFilter):
 
     title = "продукт"
     parameter_name = "product"
-    # unfold допускает None — пункт «все» не выводится; в аннотации этого нет.
-    all_option = None  # type: ignore[assignment]
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
         products = Product.objects.order_by("pk").values_list("pk", "name")
@@ -304,14 +296,18 @@ class ProductFilter(DropdownFilter):
             return queryset
         return queryset.filter(product_id=int(value)) if value.isdigit() else queryset.none()
 
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        # Первый пункт Django — «Все»; у нас без выбора — продукт по умолчанию.
+        choices = super().choices(changelist)
+        next(choices)
+        yield from choices
 
-class SiteListFilter(DropdownFilter):
+
+class SiteListFilter(admin.SimpleListFilter):
     """Рабочий список (ADR-033). Без выбора — самый новый список."""
 
     title = "список"
     parameter_name = "list"
-    # unfold допускает None — пункт «все» не выводится; в аннотации этого нет.
-    all_option = None  # type: ignore[assignment]
     ALL = "all"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
@@ -335,8 +331,14 @@ class SiteListFilter(DropdownFilter):
         in_list = SiteListItem.objects.filter(site_list_id=int(value)).values("site_id")
         return queryset.filter(site_id__in=in_list)
 
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        # «Все площадки» — свой пункт в конце списка, штатное «Все» не нужно.
+        choices = super().choices(changelist)
+        next(choices)
+        yield from choices
 
-class WorkedFilter(RadioFilter):
+
+class WorkedFilter(admin.SimpleListFilter):
     """«Уже работали / новые для нас» — по выбранному продукту (ADR-033).
 
     Уже работали: статус не «Новая», был аудит под продукт или есть
@@ -361,7 +363,7 @@ class WorkedFilter(RadioFilter):
         return queryset.filter(worked) if self.value() == self.YES else queryset.exclude(worked)
 
 
-class PublishedFilter(RadioFilter):
+class PublishedFilter(admin.SimpleListFilter):
     """Есть ли опубликованные размещения выбранного продукта."""
 
     title = "размещения"
@@ -378,7 +380,7 @@ class PublishedFilter(RadioFilter):
         return queryset
 
 
-class LanguageFilter(DropdownFilter):
+class LanguageFilter(admin.SimpleListFilter):
     """Основной язык площадки. Языков десятки — выпадающий список."""
 
     title = "язык"
@@ -426,14 +428,14 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         ProductFilter,
         SiteListFilter,
         WorkedFilter,
-        ("status", ChoicesDropdownFilter),
-        ("dr", RangeNumericFilter),
-        ("organic_traffic", RangeNumericFilter),
+        "status",
+        # Диапазон — поля «С» и «До» (django-admin-rangefilter, ADR-038).
+        ("dr", NumericRangeFilter),
+        ("organic_traffic", NumericRangeFilter),
         LanguageFilter,
-        ("we_write", BooleanRadioFilter),
+        "we_write",
         PublishedFilter,
     )
-    list_filter_submit = True
     search_fields = ("domain",)
     ordering = (F("dr").desc(nulls_last=True), "domain")
     list_per_page = 100

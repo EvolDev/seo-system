@@ -163,11 +163,12 @@ class TestFilters:
 
     @pytest.mark.usefixtures("sites")
     def test_dr_range(self, admin_client: Client) -> None:
-        assert _domains(admin_client, list="all", dr_from="20", dr_to="60") == {"mid.com"}
+        found = _domains(admin_client, list="all", dr__range__gte="20", dr__range__lte="60")
+        assert found == {"mid.com"}
 
     @pytest.mark.usefixtures("sites")
     def test_traffic_range(self, admin_client: Client) -> None:
-        found = _domains(admin_client, list="all", organic_traffic_from="1000")
+        found = _domains(admin_client, list="all", organic_traffic__range__gte="1000")
         assert found == {"mid.com", "high.com"}
 
     @pytest.mark.usefixtures("sites")
@@ -250,8 +251,8 @@ def test_query_count(
             Placement.objects.create(site=site, product=clideo, status=PlacementStatus.PUBLISHED)
     params = {
         "worked": "no",
-        "dr_from": "0",
-        "organic_traffic_from": "0",
+        "dr__range__gte": "0",
+        "organic_traffic__range__gte": "0",
         "language": "en",
         "published": "no",
     }

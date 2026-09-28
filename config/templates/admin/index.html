@@ -1,0 +1,38 @@
+{% extends "admin/index.html" %}
+{% comment %}
+Главная (E9-08): вход в работу, а не список всех таблиц. Сверху — карточки
+экранов группы «Работа» с парой чисел, ниже — остальные группы меню.
+Данные — config/admin_site.py (SeoAdminSite.index). Шаблон с тем же именем,
+что у Django: extends продолжает штатный.
+{% endcomment %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;
+    margin: 0 0 28px; }
+  .home-card { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border-radius: 10px;
+    border: 1px solid var(--hairline-color); background: var(--darkened-bg); color: var(--body-fg); }
+  .home-card:hover, .home-card:focus-visible { border-color: var(--admin-interface-generic-link-color);
+    text-decoration: none; }
+  .home-card-title { font-size: 15px; font-weight: 600; color: var(--admin-interface-generic-link-color); }
+  .home-card-value { font-size: 28px; font-weight: 600; line-height: 1.2; color: var(--body-fg); }
+  .home-card-note { font-size: 13px; color: var(--body-quiet-color); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% if home_cards %}
+  <section class="home-cards" aria-label="Работа">
+    {% for card in home_cards %}
+    <a class="home-card" href="{{ card.url }}">
+      <span class="home-card-title">{{ card.name }}</span>
+      {% if card.value %}<span class="home-card-value">{{ card.value }}</span>{% endif %}
+      {% if card.note %}<span class="home-card-note">{{ card.note }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </section>
+  {% endif %}
+  {% include "admin/app_list.html" with app_list=home_app_list show_changelinks=True %}
+</div>
+{% endblock %}
