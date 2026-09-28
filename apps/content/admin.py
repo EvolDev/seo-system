@@ -13,6 +13,7 @@ from django import forms
 from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
+from unfold.admin import TabularInline
 
 from apps.content.domain_settings import (
     PRODUCT_KEYS,
@@ -199,7 +200,7 @@ class OtherSettingForm(forms.ModelForm):  # type: ignore[type-arg]
         return key
 
 
-class ProductOtherSettingsInline(admin.TabularInline):  # type: ignore[type-arg]
+class ProductOtherSettingsInline(TabularInline):
     """Любая другая настройка, переопределённая для продукта (ADR-035).
 
     Основные настройки продукта сюда не попадают — у них свои поля выше.

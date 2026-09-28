@@ -480,3 +480,62 @@ def _clean_domain(value: str) -> str:
         return normalize_domain(value)
     except ValueError as error:
         raise ValidationError({"domain": str(error)}) from error
+
+
+class ProductSiteLatest(models.Model):
+    """Площадка в работе продукта «на сегодня» — строка `v_product_site_latest`.
+
+    Только чтение: это представление, а не таблица (`managed = False` —
+    Django не создаёт и не меняет его, представление делает миграция
+    `0003_views`). Одна строка на пару продукт × площадка, `id` — строки
+    `product_sites`. «Пишем мы» и плановые расходы считает представление
+    и больше никто.
+    """
+
+    product = models.ForeignKey(
+        Product, models.DO_NOTHING, verbose_name="продукт", related_name="+", db_constraint=False
+    )
+    site = models.ForeignKey(
+        Site, models.DO_NOTHING, verbose_name="площадка", related_name="+", db_constraint=False
+    )
+    status = PgEnumField("статус", enum_type="site_status", choices=SiteStatus.choices)
+    reject_reason = models.TextField("причина отказа", null=True)
+    imported_undecided = models.BooleanField("импортирована без решения")
+    domain = models.TextField("домен")
+    language = models.TextField("язык", null=True)
+    topics = ArrayField(models.TextField(), verbose_name="тематики", null=True)
+    declared_topics = ArrayField(models.TextField(), verbose_name="особые тематики", null=True)
+    links_allowed = models.SmallIntegerField("ссылок разрешено", null=True)
+    link_type = models.TextField("тип ссылки", null=True)
+    marks_as_ad = models.BooleanField("пометка «реклама»", null=True)
+    dr = models.SmallIntegerField("DR", null=True)
+    organic_traffic = models.IntegerField("трафик", null=True)
+    total_keywords = models.IntegerField("ключей в органике", null=True)
+    top_geo = models.TextField("основное гео", null=True)
+    metrics_at = models.DateTimeField("дата метрик", null=True)
+    placement_cents = models.IntegerField("размещение, центы", null=True)
+    announce_cents = models.IntegerField("анонс, центы", null=True)
+    writing_cents = models.IntegerField("написание, центы", null=True)
+    prices_at = models.DateTimeField("дата цен", null=True)
+    reference_total_cents = models.IntegerField("к ориентиру, центы")
+    we_write = models.BooleanField("пишем мы", null=True)
+    expected_spend_cents = models.IntegerField("плановые расходы, центы", null=True)
+    gray_ratio = models.DecimalField("доля серых, %", max_digits=5, decimal_places=2, null=True)
+    last_verdict = PgEnumField(
+        "вердикт", enum_type="audit_verdict", choices=AuditVerdict.choices, null=True
+    )
+    last_score = models.SmallIntegerField("оценка", null=True)
+    audited_at = models.DateTimeField("дата аудита", null=True)
+    placements_published = models.BigIntegerField("опубликовано")
+    other_products_placed = ArrayField(
+        models.TextField(), verbose_name="размещались другие продукты", null=True
+    )
+
+    class Meta:
+        managed = False
+        db_table = "v_product_site_latest"
+        verbose_name = "площадка продукта на сегодня"
+        verbose_name_plural = "площадки продукта"
+
+    def __str__(self) -> str:
+        return f"{self.domain} · {self.product_id}"

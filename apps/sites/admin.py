@@ -12,27 +12,38 @@ from typing import Any
 
 from django.contrib import admin
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, F, OuterRef, Q
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
+from unfold.admin import ModelAdmin, TabularInline
+from unfold.contrib.filters.admin import (
+    BooleanRadioFilter,
+    ChoicesDropdownFilter,
+    DropdownFilter,
+    RadioFilter,
+    RangeNumericFilter,
+)
 
 from apps.content.admin import (
     PRODUCT_SETTING_FIELDS,
     ProductOtherSettingsInline,
     ProductSettingsForm,
 )
+from apps.placements.models import Placement
 from apps.sites.domains import normalize_domain
 from apps.sites.models import (
     GrayScan,
     Product,
     ProductSite,
+    ProductSiteLatest,
     Site,
     SiteAudit,
     SiteList,
     SiteListItem,
     SiteMetric,
     SitePrice,
+    SiteStatus,
 )
 from config.admin import NoDeleteAdmin, SnapshotAdmin
 
@@ -59,10 +70,11 @@ class ProductAdmin(NoDeleteAdmin):
     )
     inlines = (ProductOtherSettingsInline,)
 
-    def save_model(
+    # unfold объявляет form как Form, а админка передаёт ModelForm (ADR-037).
+    def save_model(  # type: ignore[override]
         self, request: HttpRequest, obj: Product, form: ProductSettingsForm, change: bool
     ) -> None:
-        super().save_model(request, obj, form, change)
+        super().save_model(request, obj, form, change)  # type: ignore[arg-type]
         form.save_settings(obj)
 
     # Продукт, заведённый по ошибке, удаляется, пока с ним не работали
@@ -70,7 +82,7 @@ class ProductAdmin(NoDeleteAdmin):
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         if obj is None or obj.has_history():
             return False
-        return admin.ModelAdmin.has_delete_permission(self, request, obj)
+        return ModelAdmin.has_delete_permission(self, request, obj)
 
     def get_deleted_objects(
         self, objs: Any, request: HttpRequest
@@ -112,7 +124,7 @@ class DeletedFilter(admin.SimpleListFilter):
         yield from choices
 
 
-class ProductSiteInline(admin.TabularInline):  # type: ignore[type-arg]
+class ProductSiteInline(TabularInline):
     """Статус площадки по каждому продукту. Строки создаёт система."""
 
     model = ProductSite
@@ -247,3 +259,236 @@ class SiteListItemAdmin(NoDeleteAdmin):
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+
+# ---------- Площадки продукта: рабочий экран поверх v_product_site_latest ----------
+
+
+def _euros(cents: int | None) -> str:
+    """Центы — в евро для показа: 12000 → «€120», 12050 → «€120.50»."""
+    if cents is None:
+        return ""
+    euros, rest = divmod(cents, 100)
+    return f"€{euros}" if rest == 0 else f"€{euros}.{rest:02d}"
+
+
+class ProductFilter(DropdownFilter):
+    """Продукт, чьими глазами смотрим на площадки. Пункта «все» нет.
+
+    Без выбора — первый активный продукт: одна площадка у двух продуктов
+    дала бы две строки с разными статусами (ADR-030).
+    """
+
+    title = "продукт"
+    parameter_name = "product"
+    # unfold допускает None — пункт «все» не выводится; в аннотации этого нет.
+    all_option = None  # type: ignore[assignment]
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        products = Product.objects.order_by("pk").values_list("pk", "name")
+        return [(str(pk), name) for pk, name in products]
+
+    def value(self) -> str | None:
+        value = super().value()
+        if not value and self.lookup_choices:
+            active = Product.objects.filter(is_active=True).order_by("pk")
+            first = active.values_list("pk", flat=True).first()
+            value = str(first) if first is not None else self.lookup_choices[0][0]
+            # Запоминаем, чтобы не спрашивать базу второй раз при отрисовке.
+            self.used_parameters[self.parameter_name] = value
+        return str(value) if value is not None else None
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        value = self.value()
+        if value is None:
+            return queryset
+        return queryset.filter(product_id=int(value)) if value.isdigit() else queryset.none()
+
+
+class SiteListFilter(DropdownFilter):
+    """Рабочий список (ADR-033). Без выбора — самый новый список."""
+
+    title = "список"
+    parameter_name = "list"
+    # unfold допускает None — пункт «все» не выводится; в аннотации этого нет.
+    all_option = None  # type: ignore[assignment]
+    ALL = "all"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        lists = SiteList.objects.order_by("-created_at", "-pk").values_list("pk", "name")
+        return [*((str(pk), name) for pk, name in lists), (self.ALL, "Все площадки")]
+
+    def value(self) -> str | None:
+        value = super().value()
+        if not value:
+            # Первый пункт — самый новый список, а если списков нет — «все».
+            value = self.lookup_choices[0][0]
+            self.used_parameters[self.parameter_name] = value
+        return str(value)
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        value = self.value()
+        if value == self.ALL:
+            return queryset
+        if value is None or not value.isdigit():
+            return queryset.none()
+        in_list = SiteListItem.objects.filter(site_list_id=int(value)).values("site_id")
+        return queryset.filter(site_id__in=in_list)
+
+
+class WorkedFilter(RadioFilter):
+    """«Уже работали / новые для нас» — по выбранному продукту (ADR-033).
+
+    Уже работали: статус не «Новая», был аудит под продукт или есть
+    размещение продукта в любом статусе. Размещение другого продукта сюда
+    не входит — оно видно в колонке «другие продукты».
+    """
+
+    title = "уже работали"
+    parameter_name = "worked"
+    YES, NO = "yes", "no"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [(self.YES, "Уже работали"), (self.NO, "Новые для нас")]
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        if self.value() not in (self.YES, self.NO):
+            return queryset
+        placed = Placement.objects.filter(
+            site_id=OuterRef("site_id"), product_id=OuterRef("product_id")
+        )
+        worked = ~Q(status=SiteStatus.NEW) | Q(audited_at__isnull=False) | Exists(placed)
+        return queryset.filter(worked) if self.value() == self.YES else queryset.exclude(worked)
+
+
+class PublishedFilter(RadioFilter):
+    """Есть ли опубликованные размещения выбранного продукта."""
+
+    title = "размещения"
+    parameter_name = "published"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Есть опубликованные"), ("no", "Нет опубликованных")]
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        if self.value() == "yes":
+            return queryset.filter(placements_published__gt=0)
+        if self.value() == "no":
+            return queryset.filter(placements_published=0)
+        return queryset
+
+
+class LanguageFilter(DropdownFilter):
+    """Основной язык площадки. Языков десятки — выпадающий список."""
+
+    title = "язык"
+    parameter_name = "language"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        languages = (
+            Site.objects.exclude(language__isnull=True)
+            .order_by("language")
+            .values_list("language", flat=True)
+            .distinct()
+        )
+        return [(str(language), str(language)) for language in languages]
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        value = self.value()
+        return queryset.filter(language=value) if value else queryset
+
+
+@admin.register(ProductSiteLatest)
+class ProductSiteLatestAdmin(NoDeleteAdmin):
+    """Площадки продукта «на сегодня» — рабочий список вместо Excel.
+
+    Только просмотр: строка — это представление. Статус меняется по
+    ссылке в колонке «статус», факты о площадке — по ссылке на домене.
+    Всё, что в колонках, приходит одним запросом из представления.
+    """
+
+    list_display = (
+        "domain_link",
+        "status_link",
+        "dr",
+        "organic_traffic",
+        "language",
+        "reference_price",
+        "writing_price",
+        "we_write",
+        "expected_spend",
+        "verdict",
+        "placements_published",
+        "other_products",
+    )
+    list_display_links = None
+    list_filter = (
+        ProductFilter,
+        SiteListFilter,
+        WorkedFilter,
+        ("status", ChoicesDropdownFilter),
+        ("dr", RangeNumericFilter),
+        ("organic_traffic", RangeNumericFilter),
+        LanguageFilter,
+        ("we_write", BooleanRadioFilter),
+        PublishedFilter,
+    )
+    list_filter_submit = True
+    search_fields = ("domain",)
+    ordering = (F("dr").desc(nulls_last=True), "domain")
+    list_per_page = 100
+    # Полный счётчик без фильтров — лишний запрос на каждую страницу.
+    show_full_result_count = False
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def get_search_results(
+        self, request: HttpRequest, queryset: models.QuerySet[Any], search_term: str
+    ) -> tuple[models.QuerySet[Any], bool]:
+        # Как в «Площадках»: вставленный адрес целиком сводится к домену.
+        with suppress(ValueError):
+            search_term = normalize_domain(search_term)
+        return super().get_search_results(request, queryset, search_term)
+
+    @admin.display(description="домен", ordering="domain")
+    def domain_link(self, obj: ProductSiteLatest) -> str:
+        url = reverse("admin:sites_site_change", args=[obj.site_id])
+        return format_html('<a href="{}">{}</a>', url, obj.domain)
+
+    @admin.display(description="статус", ordering="status")
+    def status_link(self, obj: ProductSiteLatest) -> str:
+        url = reverse("admin:sites_productsite_change", args=[obj.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.get_status_display())
+
+    @admin.display(description="размещение + анонс", ordering="reference_total_cents")
+    def reference_price(self, obj: ProductSiteLatest) -> str:
+        # Без замера цен представление даёт 0 (coalesce) — показываем пусто.
+        return "" if obj.prices_at is None else _euros(obj.reference_total_cents)
+
+    @admin.display(description="написание", ordering="writing_cents")
+    def writing_price(self, obj: ProductSiteLatest) -> str:
+        return _euros(obj.writing_cents)
+
+    @admin.display(description="плановые расходы", ordering="expected_spend_cents")
+    def expected_spend(self, obj: ProductSiteLatest) -> str:
+        # Без замера цен сумма была бы 0, будто бесплатно, — пусто.
+        return "" if obj.prices_at is None else _euros(obj.expected_spend_cents)
+
+    @admin.display(description="аудит", ordering="audited_at")
+    def verdict(self, obj: ProductSiteLatest) -> str:
+        if obj.last_verdict is None:
+            return ""
+        label = obj.get_last_verdict_display()
+        return label if obj.last_score is None else f"{label}, {obj.last_score}"
+
+    @admin.display(description="другие продукты")
+    def other_products(self, obj: ProductSiteLatest) -> str:
+        # Статья другого продукта «уже работали» не делает, но её видно (ADR-033).
+        if not obj.other_products_placed:
+            return ""
+        url = reverse("admin:placements_placement_changelist") + f"?site__id__exact={obj.site_id}"
+        return format_html('<a href="{}">{}</a>', url, ", ".join(obj.other_products_placed))

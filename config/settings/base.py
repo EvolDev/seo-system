@@ -20,6 +20,10 @@ DEBUG = env_bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS")
 
 INSTALLED_APPS = [
+    # Тема админки (ADR-037): должна стоять до django.contrib.admin, чтобы
+    # её шаблоны перекрыли штатные. Фильтры — диапазоны чисел и выпадающие.
+    "unfold",
+    "unfold.contrib.filters",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -100,3 +104,9 @@ LOGGING = logging_config("json")
 
 # Ошибки — в Sentry (ADR-013); пустой SENTRY_DSN — выключен.
 init_sentry(env_str("SENTRY_DSN", default=""), environment=env_str("DJANGO_ENV"))
+
+# Тема админки (ADR-037).
+UNFOLD = {
+    "SITE_TITLE": "SEO-система",
+    "SITE_HEADER": "SEO-система",
+}

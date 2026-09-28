@@ -7,12 +7,13 @@
 
 from typing import Any
 
-from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
+from unfold.admin import ModelAdmin
 
 
-class NoDeleteAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
+class NoDeleteAdmin(ModelAdmin):
+    # Тема unfold (ADR-037): все экраны наследуют её отсюда.
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
 

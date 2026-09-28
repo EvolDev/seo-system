@@ -52,6 +52,7 @@ nav:
       - how-to/index.md
       - how-to/import-from-excel.md
       - how-to/product-settings.md
+      - how-to/find-sites.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

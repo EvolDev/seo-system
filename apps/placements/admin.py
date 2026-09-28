@@ -8,12 +8,13 @@ from typing import Any
 
 from django.contrib import admin
 from django.http import HttpRequest
+from unfold.admin import StackedInline
 
 from apps.placements.models import Placement, PlacementLink
 from config.admin import NoDeleteAdmin
 
 
-class PlacementLinkInline(admin.StackedInline):  # type: ignore[type-arg]
+class PlacementLinkInline(StackedInline):
     """Ссылки размещения: задание правит человек, остальное — проверка страницы.
 
     Что на странице (`rel`, позиция, живость, время пропажи), пишут
