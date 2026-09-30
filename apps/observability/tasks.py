@@ -5,15 +5,18 @@
 и воркер живы, даже когда других задач нет.
 
 `queue_probe` — проба для `manage.py queue_check`: удачная, падающая на
-каждой попытке, долгая или с общим ключом ограничения скорости.
+каждой попытке, долгая, с общим ключом ограничения скорости или на паузе
+до заданного времени (E2-02).
 """
 
 import logging
 import time
+from datetime import datetime
 
 from celery import shared_task
+from django.utils import timezone
 
-from config.queue import QueueTask
+from config.queue import Postpone, QueueTask
 from config.throttle import Throttle
 
 logger = logging.getLogger(__name__)
@@ -42,8 +45,15 @@ def heartbeat() -> None:
     throttle=PROBE_THROTTLE,
 )
 def queue_probe(
-    *, fail: bool = False, sleep_seconds: float = 0, throttle_key: str | None = None
+    *,
+    fail: bool = False,
+    sleep_seconds: float = 0,
+    throttle_key: str | None = None,
+    pause_until: str | None = None,
 ) -> None:
+    # Время — строкой ISO: аргументы задачи едут через очередь JSON-ом.
+    if pause_until and timezone.now() < datetime.fromisoformat(pause_until):
+        raise Postpone(datetime.fromisoformat(pause_until), "проверка очереди: пауза")
     if sleep_seconds:
         logger.info("проба идёт %g с", sleep_seconds)
         time.sleep(sleep_seconds)

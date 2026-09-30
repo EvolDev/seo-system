@@ -8,6 +8,7 @@ dependencies = [
     "django>=5.2,<6",
     "django-admin-interface>=0.32.0",
     "django-admin-rangefilter>=0.15.0",
+    "httpx>=0.28.1",
     "openpyxl>=3.1.5",
     "psycopg[binary]>=3.2",
     "python-json-logger>=4.2.0",

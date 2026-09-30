@@ -256,6 +256,9 @@ def test_query_count(
         "language": "en",
         "published": "no",
     }
+    # Тема Admin Interface при первом открытии заводит свою строку и кладёт её
+    # в кеш; в работающем приложении она там уже есть, считаем без неё.
+    admin_client.get(URL)
     with django_assert_max_num_queries(10):
         response = admin_client.get(URL, params)
     assert response.status_code == 200

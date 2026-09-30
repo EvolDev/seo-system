@@ -7,10 +7,11 @@
 """
 
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from celery.schedules import crontab
 
-from config.env import env_bool, env_list, env_str
+from config.env import env_bool, env_int, env_list, env_str
 from config.logs import logging_config
 from config.sentry import init_sentry
 
@@ -161,6 +162,30 @@ CELERY_BEAT_SCHEDULE = {
         "options": {"expires": 50 * 60},
     },
 }
+
+# --- Кеш: Redis, следующая база после очереди (E2-02) ---
+# Отдельная база: cache.clear() очищает базу Redis целиком и в общей с
+# очередью стёр бы задачи. Тесты подменяют кеш памятью процесса (conftest).
+_broker = urlsplit(CELERY_BROKER_URL)
+_cache_db = int(_broker.path.strip("/") or 0) + 1
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": urlunsplit(_broker._replace(path=f"/{_cache_db}")),
+        "KEY_PREFIX": "seo",
+    }
+}
+
+# --- Выдача Google: SERP API (E2-02, ADR-040) ---
+# Ключ провайдера (SERPER_API_KEY) читает клиент при запросе: без ключа
+# не работает поиск, а приложение стартует.
+SERP_PROVIDER = env_str("SERP_PROVIDER", default="serper")
+# Сколько стоят 1000 кредитов купленного пакета Serper, в центах: $1 → 100.
+SERPER_CENTS_PER_1000 = env_int("SERPER_CENTS_PER_1000", default=100)
+# Потрачено за сутки больше — поиск встаёт до полуночи (TIME_ZONE).
+SERP_DAILY_BUDGET_CENTS = env_int("SERP_DAILY_BUDGET_CENTS", default=500)
+# Сколько часов одинаковый запрос берётся из кеша, а не у провайдера.
+SERP_CACHE_HOURS = env_int("SERP_CACHE_HOURS", default=24)
 
 # Технические логи — в stdout, с run_id и маскировкой секретов (ADR-011).
 # В проде JSON для grep и jq; local.py переключает на читаемый формат.

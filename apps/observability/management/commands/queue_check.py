@@ -4,6 +4,7 @@
     python manage.py queue_check --fail                 # падает на всех попытках: «Ошибка», алерт
     python manage.py queue_check --sleep 60 --wait 0    # долгая проба: пока идёт, остановите воркер
     python manage.py queue_check --count 5 --throttle   # старты не чаще раза в секунду
+    python manage.py queue_check --pause 20             # пауза 20 с, потом «Успешно»
 
 Пригодится и после деплоя, как `observability_check`. Пробы ставятся в
 очередь с одним новым `run_id` — по нему их строки находятся в журнале
@@ -11,6 +12,7 @@
 """
 
 import time
+from datetime import timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandParser
@@ -48,6 +50,14 @@ class Command(BaseCommand):
             help="у всех проб один ключ ограничения скорости: старты не чаще раза в секунду",
         )
         parser.add_argument(
+            "--pause",
+            type=float,
+            default=0,
+            dest="pause_seconds",
+            metavar="СЕКУНД",
+            help="проба встаёт на паузу на столько секунд, попытку не тратит (E2-02)",
+        )
+        parser.add_argument(
             "--wait",
             type=float,
             default=60,
@@ -62,16 +72,23 @@ class Command(BaseCommand):
         sleep_seconds: float,
         count: int,
         throttle: bool,
+        pause_seconds: float,
         wait: float,
         **options: Any,
     ) -> None:
         run_id = new_run_id()
+        pause_until = (
+            (timezone.now() + timedelta(seconds=pause_seconds)).isoformat()
+            if pause_seconds
+            else None
+        )
         with bind_run_id(run_id):
             for _ in range(count):
                 queue_probe.delay(
                     fail=fail,
                     sleep_seconds=sleep_seconds,
                     throttle_key=str(run_id) if throttle else None,
+                    pause_until=pause_until,
                 )
         self.stdout.write(f"run_id: {run_id} · проб в очереди: {count}")
         if not wait:

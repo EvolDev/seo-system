@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 import sentry_sdk
+from django.core.cache import cache
+from django.test import override_settings
 from openpyxl import Workbook
 from sentry_sdk.envelope import Envelope
 from sentry_sdk.transport import Transport
@@ -32,6 +34,26 @@ def celery_eager() -> Iterator[None]:
     """
     celery_app.conf.update(CELERY_TASK_ALWAYS_EAGER=True, CELERY_BROKER_URL="memory://")
     yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def memory_cache() -> Iterator[None]:
+    """Кеш — в памяти процесса, а не в Redis запущенного приложения (E2-02).
+
+    Иначе тест получил бы из кеша выдачу, сохранённую приложением, или
+    оставил бы в нём свою.
+    """
+    memory = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    with override_settings(CACHES=memory):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def empty_cache(memory_cache: None) -> Iterator[None]:
+    """Каждый тест начинает с пустого кеша."""
+    cache.clear()
+    yield
+    cache.clear()
 
 
 @pytest.fixture(autouse=True, scope="session")

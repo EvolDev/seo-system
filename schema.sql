@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.5 от 30.09.2026 — стоимость API в центах с долями (ADR-040)
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
@@ -499,12 +500,14 @@ CREATE TABLE task_runs (
 );
 CREATE INDEX idx_taskruns_name ON task_runs(task_name, started_at DESC);
 
+-- Стоимость — центы с долями: запрос к выдаче стоит десятую долю цента,
+-- в целых центах он был бы нулём (ADR-040). numeric точен, это не float.
 CREATE TABLE api_usage (
     id          bigserial PRIMARY KEY,
     provider    text NOT NULL,
     endpoint    text,
     units       integer,
-    cost_cents  integer,
+    cost_cents  numeric(14,4),
     currency    char(3) NOT NULL DEFAULT 'USD',
     run_id      uuid,
     created_at  timestamptz NOT NULL DEFAULT now()

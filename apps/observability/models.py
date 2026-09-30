@@ -152,12 +152,19 @@ class TaskRun(models.Model):
 
 
 class ApiUsage(models.Model):
-    """Расход платного API, кроме LLM: Ahrefs, DataForSEO, Voyage."""
+    """Расход платного API, кроме LLM: Serper, Ahrefs, Voyage.
+
+    Стоимость — центы с долями (ADR-040): запрос к выдаче стоит десятую
+    долю цента, в целых центах он был бы нулём. В Python это `Decimal` —
+    точная десятичная дробь, не float.
+    """
 
     provider = models.TextField("провайдер")
     endpoint = models.TextField("метод", null=True, blank=True)
     units = models.IntegerField("юнитов или запросов", null=True, blank=True)
-    cost_cents = models.IntegerField("стоимость, центы", null=True, blank=True)
+    cost_cents = models.DecimalField(
+        "стоимость, центы", max_digits=14, decimal_places=4, null=True, blank=True
+    )
     currency = models.CharField("валюта", max_length=3, default="USD", db_default="USD")
     run_id = models.UUIDField("run_id", null=True, blank=True, default=current_run_id)
     created_at = models.DateTimeField("дата", db_default=PgNow())

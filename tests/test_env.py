@@ -1,7 +1,7 @@
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import env_bool, env_list, env_str, settings_module
+from config.env import env_bool, env_int, env_list, env_str, settings_module
 
 # monkeypatch — встроенная фикстура pytest: меняет окружение только на время теста.
 
@@ -45,6 +45,22 @@ class TestEnvBool:
         monkeypatch.setenv("X", "maybe")
         with pytest.raises(ImproperlyConfigured, match="maybe"):
             env_bool("X", default=False)
+
+
+class TestEnvInt:
+    def test_returns_number(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("X", " 500 ")
+        assert env_int("X", default=1) == 500
+
+    def test_missing_gives_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("X", raising=False)
+        assert env_int("X", default=24) == 24
+
+    @pytest.mark.parametrize("raw", ["5.5", "abc", "-1"])
+    def test_garbage_raises(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv("X", raw)
+        with pytest.raises(ImproperlyConfigured, match="целое число"):
+            env_int("X", default=0)
 
 
 class TestEnvList:

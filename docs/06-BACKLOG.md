@@ -183,7 +183,7 @@ Postgres и Redis в Docker Compose, ruff + mypy + pytest в конфиге.
 | E2-03 | Проверка индексации | M | E2-02, E1-02 | 1 | Opus | high |
 | E2-04 | Краулер статей | M | E2-01, E1-02 | 2 | Opus | high |
 | E2-05 | Проверка живости ссылок | M | E2-04 | 2 | Opus | high |
-| E2-06 | Gray scan | M | E2-02 | 2 | Opus | high |
+| E2-06 | Gray scan | M | E2-02, Q20 | 2 | Opus | high |
 | E2-07 | Клиент Ahrefs API | M | E2-01, Q2 | 3 | Opus | medium |
 | E2-08 | Планировщик перепроверок | S | E2-03, E2-05 | 2 | Opus | medium |
 | E3-01 | Алгоритм отбора анкоров | M | E1-05 | 3 | Fable | high |

@@ -4,13 +4,16 @@
 проб в журнале сразу, без воркера.
 """
 
+from datetime import timedelta
 from io import StringIO
 
 import pytest
 from django.core.management import call_command
+from django.utils import timezone
 
 from apps.observability.models import TaskRun, TaskStatus
 from apps.observability.tasks import ProbeError, heartbeat, queue_probe
+from config.queue import Postpone
 
 pytestmark = pytest.mark.django_db
 
@@ -76,3 +79,19 @@ def test_check_hints_when_worker_silent(monkeypatch: pytest.MonkeyPatch) -> None
     output = _check("--wait", "0.2")
     assert "закончено проб: 0 из 1" in output
     assert "docker compose ps" in output
+
+
+def test_probe_pause() -> None:
+    # Время паузы прошло — проба выполняется; ещё не пришло — без очереди
+    # (eager) пауза заканчивается ошибкой с причиной, на воркере — ждёт (E2-02).
+    past = (timezone.now() - timedelta(seconds=1)).isoformat()
+    queue_probe.delay(pause_until=past).get()
+    future = (timezone.now() + timedelta(hours=1)).isoformat()
+    with pytest.raises(Postpone):
+        queue_probe.delay(pause_until=future).get()
+    runs = TaskRun.objects.filter(task_name="queue_probe")
+    statuses = sorted(runs.values_list("status", "error"))
+    assert statuses == [
+        (TaskStatus.FAILED, "Postpone: проверка очереди: пауза"),
+        (TaskStatus.SUCCESS, None),
+    ]

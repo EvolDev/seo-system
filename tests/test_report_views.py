@@ -5,6 +5,7 @@
 """
 
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -304,8 +305,9 @@ class TestLinkHealth:
 
 class TestMonthlySpend:
     def test_sums_by_month_item_and_currency(self, site: Site, convertio: Product) -> None:
-        ApiUsage.objects.create(provider="dataforseo", cost_cents=100, created_at=EARLY)
-        ApiUsage.objects.create(provider="dataforseo", cost_cents=50, created_at=EARLY)
+        # Запрос к выдаче стоит доли цента (ADR-040): сумма не теряет их.
+        ApiUsage.objects.create(provider="serper", cost_cents=Decimal("0.1"), created_at=EARLY)
+        ApiUsage.objects.create(provider="serper", cost_cents=Decimal("0.06"), created_at=EARLY)
         LlmCall.objects.create(
             task="audit",
             model="claude-opus-5-5",
@@ -335,7 +337,7 @@ class TestMonthlySpend:
             " ORDER BY month, item, currency"
         )
         assert [tuple(row.values()) for row in rows] == [
-            (date(2026, 8, 1), "dataforseo", "USD", 150),
+            (date(2026, 8, 1), "serper", "USD", Decimal("0.16")),
             (date(2026, 9, 1), "llm:claude-opus-5-5", "USD", 300),
             (date(2026, 9, 1), "placements", "EUR", 45000),
             (date(2026, 9, 1), "placements", "USD", 5000),

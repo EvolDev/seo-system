@@ -617,10 +617,10 @@ Markdown не считаются, границы абзацев, заголов�
 | Поле | Тип | Описание |
 |---|---|---|
 | id | bigserial PK | |
-| provider | text | `ahrefs`, `dataforseo`, `voyage` — **без LLM**: их расход живёт в `llm_calls`, иначе посчитается дважды |
+| provider | text | `serper`, `ahrefs`, `voyage` — **без LLM**: их расход живёт в `llm_calls`, иначе посчитается дважды |
 | endpoint | text | |
-| units | int | юниты или запросы |
-| cost_cents | int | |
+| units | int | юниты, запросы или кредиты провайдера |
+| cost_cents | numeric(14,4) | центы с долями: запрос к выдаче стоит десятую долю цента (ADR-040) |
 | currency | char(3) | `USD` по умолчанию; размещения — в EUR, поэтому суммы по валютам не складываются |
 | run_id | uuid | |
 | created_at | timestamptz | |

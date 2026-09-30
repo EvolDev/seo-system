@@ -38,6 +38,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "siteaudit"),
             ("keywords", "keywordposition"),
             ("observability", "taskrun"),
+            ("observability", "apiusage"),
         ],
     ),
 ]

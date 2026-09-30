@@ -32,6 +32,15 @@
 Ключ занят — задача откладывается на остаток интервала: попытка не
 тратится, строки в журнале нет, пока задача не начала работу.
 
+**Пауза** — задача бросает `Postpone(until, reason)`, когда продолжать
+пока нельзя: например, исчерпан дневной лимит платного API (E2-02).
+Попытка не тратится, строка журнала остаётся «Выполняется», в `payload`
+— `waiting`: до какого времени и почему. Задача уходит в очередь заново,
+но не дольше чем на `MAX_POSTPONE`: Redis отдаёт снова сообщение, не
+подтверждённое за `visibility_timeout`, и задача, отложенная до утра,
+выполнилась бы по разу в час. Проснувшись раньше срока, задача сама
+проверит условие и при необходимости снова встанет на паузу.
+
 Задачи обязаны быть идемпотентными: сообщение подтверждается после
 выполнения (`acks_late`), и задачу, прерванную остановкой воркера, Redis
 отдаст снова — она выполнится ещё раз с начала.
@@ -73,9 +82,29 @@ MAX_ATTEMPTS = 3
 # Пауза перед первым повтором, секунд; перед каждым следующим — вдвое больше.
 FIRST_RETRY_DELAY = 60
 MAX_RETRY_DELAY = 10 * 60
+# Самая длинная пауза за раз, секунд: меньше visibility_timeout (settings), см.
+# описание модуля.
+MAX_POSTPONE = 30 * 60
 # Строку прежней попытки ищем среди запусков за это время: повтор приходит
 # через минуты, задача жёстко убитого воркера — через час (visibility_timeout).
 _LOOKBACK = timedelta(days=2)
+
+
+class Postpone(Exception):
+    """Задаче рано продолжать: запуск ждёт до `until`, попытка не тратится.
+
+    `reason` — по-человечески, его видно в журнале запусков.
+    """
+
+    def __init__(self, until: datetime, reason: str) -> None:
+        super().__init__(reason)
+        self.until = until
+        self.reason = reason
+
+    def __reduce__(self) -> tuple[type["Postpone"], tuple[datetime, str]]:
+        # Celery сохраняет ошибку задачи через pickle, а тот по умолчанию
+        # пересоздаёт исключение из args — здесь в них только reason.
+        return (type(self), (self.until, self.reason))
 
 
 class QueueTask(_DjangoTask):
@@ -83,6 +112,8 @@ class QueueTask(_DjangoTask):
 
     # Повторы делает Celery (autoretry): исключение из тела задачи → retry().
     autoretry_for: tuple[type[BaseException], ...] = (Exception,)
+    # Пауза — не ошибка: её не повторяем, а откладываем (_pause).
+    dont_autoretry_for: tuple[type[BaseException], ...] = (Postpone,)
     max_retries = MAX_ATTEMPTS - 1
     retry_backoff: bool | int = FIRST_RETRY_DELAY
     retry_backoff_max = MAX_RETRY_DELAY
@@ -107,6 +138,8 @@ class QueueTask(_DjangoTask):
             except Retry as retry:
                 run.attempt_failed(retry)
                 raise
+            except Postpone as pause:
+                self._pause(run, pause)
             except Ignore:
                 # Задача сама решила остановиться — это не ошибка.
                 run.succeeded()
@@ -205,6 +238,25 @@ class QueueTask(_DjangoTask):
             "задача отложена ограничением скорости",
             extra={"task": self.name, "key": key, "seconds": round(seconds, 3)},
         )
+        self._send_later(seconds)
+
+    def _pause(self, run: "_Run", pause: Postpone) -> NoReturn:
+        """Задача попросила подождать: откладываем запуск, строка журнала ждёт."""
+        if self.request.is_eager or self.request.called_directly:
+            # Без очереди отложить некуда, а ждать до утра на месте нельзя:
+            # запуск заканчивается ошибкой с причиной паузы.
+            run.failed(pause)
+            raise pause
+        run.waiting(pause)
+        seconds = min(max((pause.until - timezone.now()).total_seconds(), 1), MAX_POSTPONE)
+        logger.info(
+            "задача на паузе: %s",
+            pause.reason,
+            extra={"task": self.name, "until": pause.until.isoformat(), "seconds": seconds},
+        )
+        self._send_later(seconds)
+
+    def _send_later(self, seconds: float) -> NoReturn:
         # Та же задача — тот же id, аргументы с run_id, номер попытки, — но позже.
         # Ignore подтверждает текущее сообщение без записи об ошибке.
         self.signature_from_request(countdown=seconds).apply_async()
@@ -241,6 +293,8 @@ class _Run:
             )
         payload = dict(row.payload or {})
         payload["attempt"] = request.retries + 1
+        # Пауза кончилась: задача снова работает.
+        payload.pop("waiting", None)
         if (request.delivery_info or {}).get("redelivered"):
             # Сообщение вернулось в очередь после остановки воркера.
             payload["redelivered"] = True
@@ -270,6 +324,13 @@ class _Run:
             _delay_text(retry.when),
             extra={"task": self.task.name, "task_id": self.task.request.id, "error": error},
         )
+
+    def waiting(self, pause: Postpone) -> None:
+        """Запуск на паузе: строка остаётся «Выполняется», в payload — до когда и почему."""
+        payload = dict(self.row.payload or {})
+        payload["waiting"] = {"until": pause.until.isoformat(), "reason": pause.reason}
+        self.row.payload = payload
+        self.row.save(update_fields=["payload"])
 
     def succeeded(self) -> None:
         from apps.observability.models import TaskStatus

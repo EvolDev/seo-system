@@ -44,6 +44,22 @@ def env_bool(name: str, default: bool) -> bool:
     )
 
 
+def env_int(name: str, default: int) -> int:
+    """Целое число не меньше нуля: суммы в центах, часы, лимиты."""
+    value = _raw(name)
+    if value is None:
+        return default
+    try:
+        number = int(value)
+    except ValueError:
+        number = -1
+    if number < 0:
+        raise ImproperlyConfigured(
+            f"Переменная окружения {name}: ожидается целое число от нуля, получено {value!r}"
+        )
+    return number
+
+
 def env_list(name: str, default: list[str] | None = None) -> list[str]:
     """Список через запятую, пробелы и пустые элементы отбрасываются."""
     value = _raw(name)

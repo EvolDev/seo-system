@@ -102,3 +102,21 @@ def test_duration_text() -> None:
 def test_task_label_falls_back_to_name() -> None:
     assert task_label("import_workbook") == "Загрузка таблицы"
     assert task_label("new_task") == "new_task"
+
+
+def test_paused_run_shows_until_and_why(admin_client: Client) -> None:
+    # Задача на паузе (config/queue.py): «Выполняется» и до какого времени ждёт.
+    TaskRun.objects.create(
+        task_name="check_indexation",
+        status=TaskStatus.RUNNING,
+        payload={
+            "task_id": "c",
+            "attempt": 1,
+            "waiting": {
+                "until": "2026-10-01T00:00:00+03:00",
+                "reason": "дневной лимит на выдачу исчерпан: потрачено 500 ¢ из 500 ¢",
+            },
+        },
+    )
+    response = admin_client.get(reverse("admin:observability_taskrun_changelist"))
+    assert "до 01.10 00:00: дневной лимит на выдачу исчерпан" in response.content.decode()
