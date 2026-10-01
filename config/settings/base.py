@@ -111,6 +111,11 @@ STATIC_URL = "static/"
 # Статика уровня проекта: расцветки админки (ADR-038).
 STATICFILES_DIRS = [BASE_DIR / "config" / "static"]
 
+# Загруженные файлы продавцов и каталога (E1-08, ADR-044). Не в static и не
+# в media: внутри цены и контакты, по адресу их не раздаём. Воркер видит ту же
+# папку — локально это каталог проекта, в проде — общий том (E10-01).
+UPLOADS_DIR = BASE_DIR / "uploads"
+
 # В schema.sql первичные ключи — bigserial.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

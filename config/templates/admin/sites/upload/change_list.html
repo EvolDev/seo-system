@@ -1,0 +1,9 @@
+{% extends "admin/change_list.html" %}
+{% comment %}
+«Загрузки» (E1-08): вместо штатной «Добавить загрузка» — «Загрузить файл».
+{% endcomment %}
+{% block object-tools-items %}
+  {% if has_add_permission %}
+    <li><a href="{% url 'admin:sites_upload_add' %}" class="addlink">Загрузить файл</a></li>
+  {% endif %}
+{% endblock %}

@@ -8,8 +8,10 @@ from apps.content.domain_settings import (
     PRODUCT_KEYS,
     SETTING_KEYS,
     IndexationSchedule,
+    OfferRecheck,
     get_setting,
     indexation_schedule,
+    offer_recheck,
     set_product_setting,
     validate_setting,
 )
@@ -167,3 +169,32 @@ class TestIndexationSchedule:
         DomainSetting.objects.filter(key="INDEXATION_SCHEDULE").update(value={"enabled": True})
         with pytest.raises(ImproperlyConfigured, match="ровно с полями"):
             indexation_schedule(None)
+
+
+class TestOfferRecheck:
+    """Порог повторного разбора предложений — OFFER_RECHECK (E1-08, ADR-044)."""
+
+    def test_general_value_comes_from_migration(self) -> None:
+        assert offer_recheck() == OfferRecheck(min_change_pct=3.0)
+
+    def test_fraction_is_allowed(self) -> None:
+        validate_setting("OFFER_RECHECK", {"min_change_pct": 2.5})
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            (3, "ровно с полем"),
+            ({"min_change_pct": 3, "extra": 1}, "ровно с полем"),
+            ({"min_change_pct": "3"}, "min_change_pct"),
+            ({"min_change_pct": -1}, "min_change_pct"),
+            ({"min_change_pct": True}, "min_change_pct"),
+        ],
+    )
+    def test_wrong_value_is_rejected(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            validate_setting("OFFER_RECHECK", value)
+
+    def test_missing_setting_is_a_configuration_error(self) -> None:
+        DomainSetting.objects.filter(key="OFFER_RECHECK").delete()
+        with pytest.raises(ImproperlyConfigured, match="OFFER_RECHECK"):
+            offer_recheck()

@@ -1,0 +1,40 @@
+{% comment %}Отклоняли, дубли, ошибки, адреса, незнакомые значения — в сводке и во вкладке «Ошибки и дубли».{% endcomment %}
+<div class="seo-box">
+  <h3>Уже отклоняли</h3>
+  <ul>
+    {% for row in data.rejected %}<li><b>{{ row.domain }}</b> — {{ row.reasons|join:"; " }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+    {% if data.rejected_total > data.rejected|length %}<li class="seo-flat">всего {{ data.rejected_total }}</li>{% endif %}
+  </ul>
+</div>
+<div class="seo-box">
+  <h3>Дубли в файле</h3>
+  <ul>
+    {% for row in data.duplicates %}<li><b>{{ row.domain }}</b>: строки {{ row.lines|join:" и " }} — {{ row.prices|join:" и " }}; взята меньшая цена</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+  </ul>
+</div>
+<div class="seo-box">
+  <h3>Ошибки</h3>
+  <ul>
+    {% for row in data.errors %}<li>Строка {{ row.line }}: {{ row.message }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+    {% if data.errors_total > data.errors|length %}<li class="seo-flat">всего {{ data.errors_total }}</li>{% endif %}
+  </ul>
+  {% if data.errors %}<p class="seo-hint">Исправьте строку в файле и загрузите его снова — уже записанное не задвоится.</p>{% endif %}
+</div>
+<div class="seo-box">
+  <h3>Адреса вместо доменов</h3>
+  <ul>
+    {% for row in data.urls %}<li>Строка {{ row.line }}: «{{ row.value }}» → {{ row.domain }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+  </ul>
+</div>
+{% if data.unknown %}
+  <div class="seo-box">
+    <h3>Незнакомые значения — записаны как есть</h3>
+    <ul>{% for line in data.unknown %}<li>{{ line }}</li>{% endfor %}</ul>
+  </div>
+{% endif %}
+{% if data.facts_changed_total %}
+  <div class="seo-box">
+    <h3>Карточка Collaborator: что перезаписано — {{ data.facts_changed_total }}</h3>
+    <ul>{% for line in data.facts_changed %}<li>{{ line }}</li>{% endfor %}</ul>
+  </div>
+{% endif %}

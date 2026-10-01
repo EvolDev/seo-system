@@ -83,7 +83,11 @@
     document.documentElement.classList.remove("seo-card-open");
     if (changed) {
       // Цена или заметки поменялись — список под окном показывает старое.
-      window.location.reload();
+      // Страница, которая умеет обновиться сама (экраны загрузки, E1-08),
+      // ловит событие и подгружает себя без перезагрузки.
+      var event = new CustomEvent("seo:card-changed", { cancelable: true });
+      if (document.dispatchEvent(event)) window.location.reload();
+      if (opener) opener.focus();
       return;
     }
     if (opener) opener.focus();

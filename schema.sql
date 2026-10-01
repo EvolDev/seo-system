@@ -1,12 +1,13 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.8 от 01.10.2026 — загрузка файлов продавцов и каталога Collaborator (ADR-044)
 -- Версия 1.7 от 01.10.2026 — продавцы, рабочая цена площадки, заметки, курсы валют (ADR-043)
 -- Версия 1.6 от 01.10.2026 — размещение можно убрать из плановых проверок (E2-03)
 -- Версия 1.5 от 30.09.2026 — стоимость API в центах с долями (ADR-040)
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 34 таблицы и заглушка auth_user, 9 представлений, 1 функция)
+-- (проверена применением на PostgreSQL 16: 36 таблиц и заглушка auth_user, 9 представлений, 1 функция)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -56,6 +57,11 @@ CREATE TYPE llm_status AS ENUM ('ok','error','invalid_json','timeout');
 CREATE TYPE task_status AS ENUM ('running','success','failed');
 CREATE TYPE placement_type AS ENUM ('guest_post','link_insertion');
 CREATE TYPE review_verdict AS ENUM ('accepted','needs_revision','rejected');
+-- Загрузка файла (ADR-044): что за файл, где он в работе, вкладка разбора.
+CREATE TYPE upload_kind AS ENUM ('price_list','collaborator_catalog');
+CREATE TYPE upload_status AS ENUM ('new','checking','checked','writing','done','failed');
+CREATE TYPE review_group AS ENUM
+    ('cheaper','changed','new','rejected','pricier','other_service','same');
 
 -- ---------- Блок 1. Площадки ----------
 
@@ -77,6 +83,7 @@ CREATE TABLE sellers (
     currency         char(3) NOT NULL DEFAULT 'EUR',    -- валюта прайсов по умолчанию
     is_collaborator  boolean NOT NULL DEFAULT false,
     metrics_trusted  boolean NOT NULL DEFAULT false,    -- его DR и трафик — как наши замеры
+    column_map       jsonb,                             -- разметка колонок прайса: заголовок → поле (ADR-044)
     created_at       timestamptz NOT NULL DEFAULT now()
 );
 -- Имя без учёта регистра: «Athena Smith» и «Athena smith» — один продавец.
@@ -237,6 +244,48 @@ CREATE TABLE exchange_rates (
     created_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (currency, rate_date)
 );
+
+-- Загрузка файла продавца или каталога Collaborator (ADR-044): файл, разметка
+-- колонок, сводка до записи, итог записи. Результат — рабочий список.
+CREATE TABLE uploads (
+    id            bigserial PRIMARY KEY,
+    kind          upload_kind NOT NULL,
+    seller_id     bigint NOT NULL REFERENCES sellers(id),
+    prices_date   date NOT NULL,                -- дата цен: на неё пишутся снимки
+    file_name     text NOT NULL,                -- имя файла у пользователя
+    file_path     text NOT NULL,                -- путь от папки загрузок, её видит воркер
+    file_sha256   char(64) NOT NULL,            -- тот же файл повторно — та же загрузка
+    header_row    integer,                      -- строка заголовков, с 1
+    columns       jsonb,                        -- колонки файла: заголовок, примеры, догадка
+    mapping       jsonb,                        -- разметка этой загрузки: заголовок → поле
+    currency      char(3),                      -- валюта цен файла
+    status        upload_status NOT NULL DEFAULT 'new',
+    summary       jsonb,                        -- сводка до записи
+    result        jsonb,                        -- итог записи: счётчики, дубли, ошибки
+    error         text,
+    site_list_id  bigint REFERENCES site_lists(id),
+    run_id        uuid,
+    author_id     integer REFERENCES auth_user(id),   -- кто загрузил
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    written_at    timestamptz
+);
+
+-- Строка разбора загрузки: предложение из файла и с чем его сравнили. Вкладка —
+-- по положению на момент записи; решено ли — по reviewed_at предложения.
+CREATE TABLE upload_items (
+    id              bigserial PRIMARY KEY,
+    upload_id       bigint NOT NULL REFERENCES uploads(id) ON DELETE CASCADE,
+    site_id         bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    price_id        bigint NOT NULL REFERENCES site_prices(id),  -- предложение из файла
+    ref_price_id    bigint REFERENCES site_prices(id),           -- рабочая цена до загрузки
+    review_group    review_group NOT NULL,
+    needs_decision  boolean NOT NULL DEFAULT false,  -- при записи ждало решения человека
+    auto_applied    boolean NOT NULL DEFAULT false,  -- рабочей стало само: первая цена или тот же продавец
+    site_created    boolean NOT NULL DEFAULT false,  -- площадку создала эта загрузка
+    line            integer,                         -- строка файла
+    source_value    text                             -- адрес из файла, если там не домен
+);
+CREATE INDEX idx_upload_items_upload ON upload_items(upload_id, review_group);
 
 -- ---------- Блок 2. Размещения ----------
 
@@ -709,6 +758,8 @@ JOIN sellers sl ON sl.id = o.seller_id;
 -- рабочее; cheaper — самое дешёвое текущее предложение другого продавца за ту же
 -- услугу, если оно дешевле рабочей в евро; *_pending — по нему ещё не решили;
 -- offers_pending — у площадки есть неразобранные предложения.
+-- Заметки — одним подзапросом на все площадки, а не подзапросом на строку: на
+-- 45 000 площадках каталога тот давал полный просмотр site_notes на каждую (E1-08).
 CREATE VIEW v_site_latest AS
 SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        s.links_allowed, s.link_type, s.marks_as_ad,
@@ -730,7 +781,7 @@ SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        EXISTS (SELECT 1 FROM site_prices x
                WHERE x.site_id = s.id AND x.reviewed_at IS NULL) AS offers_pending,
        g.ratio AS gray_ratio,
-       nc.notes AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at
+       coalesce(ln.notes, 0) AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at
 FROM sites s
 LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.top_geo, x.checked_at,
                           x.seller_id, x.seller_id IS NULL OR xs.metrics_trusted AS trusted
@@ -754,9 +805,10 @@ LEFT JOIN LATERAL (SELECT o.id, o.seller, o.placement_cents, o.currency, o.place
                    ORDER BY o.placement_eur_cents, o.id LIMIT 1) ch ON true
 LEFT JOIN LATERAL (SELECT * FROM gray_scans x WHERE x.site_id = s.id
                    ORDER BY checked_at DESC LIMIT 1) g ON true
-LEFT JOIN LATERAL (SELECT count(*) AS notes FROM site_notes x WHERE x.site_id = s.id) nc ON true
-LEFT JOIN LATERAL (SELECT x.body, x.created_at FROM site_notes x WHERE x.site_id = s.id
-                   ORDER BY x.created_at DESC, x.id DESC LIMIT 1) ln ON true
+LEFT JOIN (SELECT DISTINCT ON (x.site_id) x.site_id, x.body, x.created_at,
+                  count(*) OVER (PARTITION BY x.site_id) AS notes
+           FROM site_notes x
+           ORDER BY x.site_id, x.created_at DESC, x.id DESC) ln ON ln.site_id = s.id
 WHERE NOT s.is_deleted;
 
 -- Площадка в работе продукта «на сегодня»: статус, последний аудит под этот

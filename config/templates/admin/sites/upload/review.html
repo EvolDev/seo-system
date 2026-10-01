@@ -1,0 +1,136 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Шаг 4 — разбор загрузки (E1-08, ADR-043, ADR-044), по прототипу
+price-review.html. Вкладки — ссылки; решения в строке и для отмеченных —
+без перезагрузки (seo/uploads.js), клавиши J/K, A, S, X, O, отмена — U.
+Домен открывает карточку площадки окном (seo/site-card.js).
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content_title %}{% endblock %}
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<div class="seo-rev-head">
+  <div>
+    <h1>{{ title }}</h1>
+    <div class="seo-sub">
+      {{ upload.file_name }} · {{ upload.get_kind_display }}
+      {% if upload.site_list %} · рабочий список <a href="{{ sites_url }}">«{{ upload.site_list.name }}»</a>{% endif %}
+      · записано {{ upload.written_at|date:"d.m.Y H:i" }}
+    </div>
+  </div>
+  <div class="seo-progress" data-progress>
+    <div class="seo-sub">Разобрано <b data-done>{{ done }}</b> из <b data-need>{{ need }}</b></div>
+    <div class="seo-bar"><i style="width: {{ percent }}%" data-bar></i></div>
+  </div>
+</div>
+
+<nav class="seo-tabs" aria-label="Вкладки разбора">
+  {% for t in tabs %}
+    <a href="?tab={{ t.key }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}"
+       class="seo-tab{% if t.key == tab %} seo-tab-on{% endif %}{% if not t.badge %} seo-tab-zero{% endif %}{% if t.pending %} seo-tab-pending{% endif %}"
+       data-tab="{{ t.key }}">{{ t.title }}<b data-badge>{{ t.badge }}</b></a>
+  {% endfor %}
+</nav>
+<p class="seo-tabnote">{{ tab_note }}</p>
+
+{% if tab == "issues" %}
+  <div class="seo-boxes">{% include "admin/sites/upload/_issues.html" with data=data %}</div>
+{% elif not rows %}
+  <div class="seo-note">{% if hide_done and page.paginator.count == 0 %}На этой вкладке всё разобрано или ничего нет.{% else %}Таких строк нет.{% endif %}
+    {% if hide_done %}<a href="?tab={{ tab }}&sort={{ sort }}&all=1">Показать разобранные</a>{% endif %}</div>
+{% else %}
+  <div class="seo-toolbar">
+    {% if can_decide %}<label><input type="checkbox" data-select-all> отметить все на странице</label>{% endif %}
+    <span>Порядок:
+      {% for key, label in sorts.items %}
+        {% if key == sort %}<b>{{ label }}</b>{% else %}<a href="?tab={{ tab }}&sort={{ key }}{% if not hide_done %}&all=1{% endif %}">{{ label }}</a>{% endif %}{% if not forloop.last %} · {% endif %}
+      {% endfor %}
+    </span>
+    {% if decidable %}
+      {% if hide_done %}<a href="?tab={{ tab }}&sort={{ sort }}&all=1">показать разобранные</a>{% else %}<a href="?tab={{ tab }}&sort={{ sort }}">скрыть разобранные</a>{% endif %}
+    {% endif %}
+    <a href="{{ sites_url }}">Открыть список в «Площадках»</a>
+  </div>
+
+  <div class="seo-table-wrap">
+    <table class="seo-upload-table seo-review" data-review
+           data-decide-url="{% url 'admin:sites_upload_decide' upload.pk %}"
+           data-undo-url="{% url 'admin:sites_upload_undo' upload.pk %}">
+      <thead>
+        <tr>
+          {% if can_decide %}<th class="seo-cb"></th>{% endif %}
+          <th>Площадка</th><th class="seo-r">DR</th><th>Услуга</th>
+          <th>Рабочая цена до загрузки</th><th>Из файла</th><th>Разница</th><th>Решение</th>
+          {% if can_decide %}<th class="seo-remove" title="Удалить из базы или заблокировать"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr data-item="{{ r.item.pk }}" data-site="{{ r.item.site_id }}" data-state="{{ r.row.state }}" class="{% if r.row.state == 'working' or r.row.state == 'kept' %}seo-done{% endif %}">
+            {% if can_decide %}
+              <td class="seo-cb"><input type="checkbox" data-select aria-label="Отметить {{ r.domain }}"></td>
+            {% endif %}
+            <td>
+              <a href="{{ r.card_url }}" data-site-card data-open>{{ r.domain }}</a>
+              {% if r.item.site_created %}<span class="seo-chip seo-info">новая в базе</span>{% endif %}
+              {% if r.item.source_value %}<span class="seo-chip" title="В файле: {{ r.item.source_value }}">из адреса</span>{% endif %}
+              {% for reason in r.row.rejected %}<div class="seo-warnline">Отклонена — {{ reason }}</div>{% endfor %}
+            </td>
+            <td class="seo-r">{{ r.row.dr|default_if_none:"" }}{{ r.metrics_mark }}<div class="seo-sub">{{ r.row.traffic|default_if_none:"" }}</div></td>
+            <td>{{ r.service }}</td>
+            <td>{% if r.ref_html %}{{ r.ref_html }}<div class="seo-sub">{{ r.ref_seller }} · {{ r.ref_service }}</div>{% if r.writing_html %}<div class="seo-sub">{{ r.writing_html }}</div>{% endif %}{% else %}<span class="seo-flat">не было</span>{% endif %}</td>
+            <td>{{ r.price_html }}{% if r.gray_text %}<div class="seo-sub">серая: {{ r.gray_text }}</div>{% endif %}</td>
+            <td>
+              {% if r.item.review_group == "other_service" %}<span class="seo-flat">рабочая — {{ r.ref_service }}</span>
+              {% elif r.delta_html %}{{ r.delta_html }}<div class="seo-sub">к рабочей цене</div>
+              {% else %}<span class="seo-flat">—</span>{% endif %}
+            </td>
+            <td class="seo-decision" data-decision>
+              {% if r.row.decidable and can_decide %}
+                <button type="button" class="seo-btn seo-btn-primary" data-act="fix">Сделать рабочей</button>
+                <button type="button" class="seo-btn" data-act="keep">Оставить</button>
+              {% elif r.row.decidable %}<span class="seo-chip seo-up">ждёт решения</span>
+              {% else %}<span class="seo-chip{% if r.row.state == 'working' or r.row.state == 'auto' %} seo-down{% endif %}">{{ r.row.label }}</span>{% endif %}
+            </td>
+            {% if can_decide %}
+              <td class="seo-remove">
+                <button type="button" class="seo-icon-btn" data-act="delete" title="Удалить из базы — в следующей выгрузке может прийти снова (D)" aria-label="Удалить {{ r.domain }} из базы">🗑</button>
+                <button type="button" class="seo-icon-btn" data-act="block" title="Заблокировать — загрузки её больше не берут (B)" aria-label="Заблокировать {{ r.domain }}">⛔</button>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page.has_other_pages %}
+    <p class="seo-pages">
+      {% if page.has_previous %}<a href="?tab={{ tab }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}&p={{ page.previous_page_number }}">← назад</a>{% endif %}
+      страница {{ page.number }} из {{ page.paginator.num_pages }} · строк {{ page.paginator.count }}
+      {% if page.has_next %}<a href="?tab={{ tab }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}&p={{ page.next_page_number }}">дальше →</a>{% endif %}
+    </p>
+  {% endif %}
+
+  {% if can_decide %}
+    <p class="seo-keys"><kbd>J</kbd>/<kbd>K</kbd> — по строкам{% if decidable %} · <kbd>A</kbd> — сделать рабочей · <kbd>S</kbd> — оставить{% endif %} · <kbd>X</kbd> — отметить · <kbd>O</kbd> — карточка площадки · <kbd>D</kbd> — удалить из базы · <kbd>B</kbd> — заблокировать · <kbd>U</kbd> — отменить последнее</p>
+    <div class="seo-bulk" data-bulk hidden role="region" aria-label="Действия с отмеченными">
+      <b>Отмечено: <span data-bulk-count>0</span></b>
+      {% if decidable %}
+        <button type="button" class="seo-btn seo-btn-primary" data-bulk-act="fix">Сделать рабочей ценой</button>
+        <button type="button" class="seo-btn" data-bulk-act="keep">Оставить как есть</button>
+      {% endif %}
+      <button type="button" class="seo-btn" data-bulk-act="delete">🗑 Удалить из базы</button>
+      <button type="button" class="seo-btn" data-bulk-act="block">⛔ Заблокировать</button>
+      <button type="button" class="seo-btn" data-bulk-act="clear">Снять отметки</button>
+    </div>
+    <template data-decide-buttons>
+      <button type="button" class="seo-btn seo-btn-primary" data-act="fix">Сделать рабочей</button>
+      <button type="button" class="seo-btn" data-act="keep">Оставить</button>
+    </template>
+  {% endif %}
+{% endif %}
+{% endblock %}

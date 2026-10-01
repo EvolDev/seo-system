@@ -1,0 +1,205 @@
+/* Экран «Загрузки» (E1-08): шаги, сводка, разбор — по прототипу price-review.html.
+   Цвета — переменные расцветок и offers.css (--seo-down ▼, --seo-up ▲). */
+
+.seo-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+.seo-steps li {
+  list-style: none; padding: 4px 10px; border-radius: 999px; font-size: 0.8125rem;
+  background: var(--darkened-bg, #f4f4f4); color: var(--body-quiet-color, #666);
+}
+.seo-steps li.seo-step-on { background: var(--button-bg, #2a65a8); color: var(--button-fg, #fff); }
+.seo-steps li.seo-step-done { background: var(--seo-down-bg); color: var(--seo-down); }
+
+.seo-upload-form .form-row { padding: 10px; }
+.seo-radios { display: inline-flex; flex-wrap: wrap; gap: 6px 16px; }
+.seo-radios label { width: auto; float: none; display: inline-flex; gap: 4px; align-items: center; }
+.seo-inline-label { width: auto !important; float: none !important; margin-left: 12px; }
+.seo-num { width: 5em; }
+.seo-note {
+  padding: 10px 14px; border-radius: 6px; margin: 0 0 14px;
+  background: var(--seo-info-bg); border: 1px solid var(--hairline-color, #e5e5e5);
+}
+.seo-note p { margin: 0 0 6px; }
+.seo-note ul { margin: 6px 0 0; padding-left: 18px; }
+.seo-note li { list-style: disc; }
+.seo-h2 { margin: 16px 0 8px; font-size: 1rem; }
+.seo-details { margin: 14px 0; }
+.seo-details summary { cursor: pointer; font-weight: 500; margin-bottom: 8px; }
+.seo-upload-table { width: 100%; }
+.seo-upload-table td, .seo-upload-table th { vertical-align: top; }
+.seo-upload-table select { max-width: 280px; }
+.seo-r { text-align: right; white-space: nowrap; }
+.seo-cb { width: 24px; }
+
+/* Ожидание задачи. */
+.seo-busy {
+  display: flex; gap: 14px; align-items: center; padding: 18px;
+  border: 1px solid var(--hairline-color, #e5e5e5); border-radius: 8px;
+}
+.seo-spin {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  border: 3px solid var(--hairline-color, #ddd); border-top-color: var(--button-bg, #2a65a8);
+  animation: seo-spin 0.9s linear infinite;
+}
+@keyframes seo-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .seo-spin { animation: none; } }
+
+/* Сводка до записи. */
+.seo-lead { font-size: 0.9375rem; margin: 0 0 12px; }
+.seo-hint { color: var(--body-quiet-color, #666); font-size: 0.8125rem; max-width: 900px; }
+.seo-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0 0 16px; }
+.seo-stat {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--hairline-color, #e5e5e5); background: var(--body-bg, #fff);
+}
+.seo-stat b { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.seo-stat span { color: var(--body-quiet-color, #666); font-size: 0.8125rem; }
+.seo-stat.seo-good b { color: var(--seo-down); }
+.seo-stat.seo-bad b { color: var(--seo-up); }
+.seo-stat.seo-warn b { color: var(--seo-mark); }
+.seo-boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.seo-box { padding: 10px 14px; border: 1px solid var(--hairline-color, #e5e5e5); border-radius: 8px; }
+.seo-box h3 { margin: 0 0 6px; font-size: 0.875rem; }
+.seo-box ul { margin: 0; padding-left: 18px; max-height: 280px; overflow: auto; }
+.seo-box li { list-style: disc; font-size: 0.8125rem; }
+
+/* Разбор. */
+.seo-rev-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
+.seo-rev-head h1 { margin: 0 0 4px; }
+.seo-progress { min-width: 220px; }
+.seo-bar { height: 8px; border-radius: 4px; background: var(--darkened-bg, #eee); overflow: hidden; margin-top: 4px; }
+.seo-bar i { display: block; height: 100%; background: var(--seo-down); transition: width 0.2s; }
+.seo-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.seo-tab {
+  display: inline-flex; gap: 6px; align-items: center; padding: 6px 10px; border-radius: 6px;
+  border: 1px solid var(--hairline-color, #e5e5e5); text-decoration: none !important;
+}
+.seo-tab b {
+  min-width: 1.5em; text-align: center; padding: 0 5px; border-radius: 999px; font-size: 0.75rem;
+  background: var(--darkened-bg, #f0f0f0);
+}
+.seo-tab.seo-tab-pending b { background: var(--seo-mark-bg); color: var(--seo-mark); }
+.seo-tab.seo-tab-on { background: var(--button-bg, #2a65a8); color: var(--button-fg, #fff) !important; border-color: transparent; }
+.seo-tab.seo-tab-on b { background: rgba(255, 255, 255, 0.25); color: inherit; }
+.seo-tab.seo-tab-zero { opacity: 0.6; }
+.seo-tabnote { color: var(--body-quiet-color, #666); margin: 0 0 10px; max-width: 900px; }
+.seo-toolbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin: 0 0 8px; font-size: 0.8125rem; }
+.seo-review tr.seo-focus td { box-shadow: inset 0 0 0 9999px var(--seo-info-bg); }
+.seo-review tr.seo-focus td:first-child { box-shadow: inset 3px 0 0 var(--button-bg, #2a65a8), inset 0 0 0 9999px var(--seo-info-bg); }
+.seo-review tr.seo-done td { opacity: 0.6; }
+.seo-review tr.seo-busy-row { cursor: progress; opacity: 0.7; }
+.seo-decision { white-space: nowrap; }
+.seo-decision .seo-btn + .seo-btn { margin-left: 4px; }
+.seo-warnline { color: var(--seo-mark); font-size: 0.75rem; margin-top: 2px; }
+.seo-pages { display: flex; gap: 14px; align-items: center; }
+.seo-keys { color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-keys kbd {
+  padding: 0 5px; border-radius: 4px; border: 1px solid var(--hairline-color, #ccc);
+  font-family: inherit; font-size: 0.75rem; background: var(--body-bg, #fff);
+}
+.seo-bulk {
+  position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 10px 14px; margin-top: 10px; border-radius: 8px; z-index: 5;
+  background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #e5e5e5);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
+}
+.seo-bulk[hidden] { display: none; }
+
+/* Всплывающие сообщения разбора. */
+.seo-toast-box { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
+.seo-toast {
+  display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 8px;
+  background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #ddd);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15); font-size: 0.8125rem;
+}
+
+/* Каталог: две кнопки записи, фильтры с облачками, счётчик. */
+.seo-panel {
+  padding: 14px 16px; margin: 0 0 16px; border-radius: 10px;
+  border: 1px solid var(--hairline-color, #e5e5e5); background: var(--body-bg, #fff);
+}
+.seo-panel h2 { margin: 0 0 4px; font-size: 1.0625rem; }
+.seo-run-form { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 10px; }
+.seo-parts { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.seo-parts label { display: inline-flex; gap: 4px; align-items: center; }
+.seo-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; margin: 12px 0; }
+.seo-filter { position: relative; }
+.seo-filter-label { font-weight: 500; margin-bottom: 4px; }
+.seo-tags {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 34px; padding: 3px 6px;
+  border: 1px solid var(--border-color, #ccc); border-radius: 6px; background: var(--body-bg, #fff); cursor: text;
+}
+.seo-tag-input { flex: 1; min-width: 90px; border: 0 !important; outline: none; background: transparent; padding: 4px 2px !important; }
+.seo-tag {
+  display: inline-flex; gap: 4px; align-items: center; padding: 2px 4px 2px 8px; border-radius: 999px;
+  background: var(--seo-info-bg); color: var(--seo-info); font-size: 0.8125rem;
+}
+.seo-tag button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0 4px; font-size: 1rem; line-height: 1; }
+.seo-dropdown {
+  position: absolute; left: 0; right: 0; z-index: 20; margin: 2px 0 0; padding: 4px 0; max-height: 260px; overflow: auto;
+  list-style: none; background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #ddd); border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.seo-dropdown li { list-style: none; padding: 5px 10px; cursor: pointer; }
+.seo-dropdown li:hover { background: var(--seo-info-bg); }
+.seo-range { display: flex; gap: 6px; align-items: center; }
+.seo-range input { width: 100%; box-sizing: border-box; }
+.seo-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.seo-chip-btn { border: 1px solid var(--hairline-color, #ddd); cursor: pointer; background: var(--darkened-bg, #f4f4f4); }
+.seo-chip-btn:hover { border-color: var(--link-fg, #2a65a8); }
+.seo-counter { font-size: 0.9375rem; flex-basis: 100%; }
+.seo-counter b { font-size: 1.25rem; font-variant-numeric: tabular-nums; color: var(--seo-down); }
+.seo-counting .seo-counter { opacity: 0.6; }
+
+/* Лоадеры: полоска сверху при любой подгрузке, крутилка в кнопке, лоадер в
+   блоке со счётчиком секунд, мерцание обновляемых цифр. */
+.seo-topbar {
+  position: fixed; top: 0; left: 0; z-index: 2000; height: 3px; width: 0; opacity: 0;
+  background: linear-gradient(90deg, var(--seo-info), var(--seo-down), var(--seo-info));
+  background-size: 200% 100%; box-shadow: 0 0 8px var(--seo-info);
+  transition: width 8s cubic-bezier(0.1, 0.7, 0.3, 1), opacity 0.3s;
+  animation: seo-topbar-flow 1.2s linear infinite;
+}
+.seo-topbar.seo-topbar-on { opacity: 1; }
+.seo-topbar.seo-topbar-done { transition: width 0.25s ease-out, opacity 0.35s 0.2s; opacity: 0; }
+@keyframes seo-topbar-flow { to { background-position: -200% 0; } }
+
+.seo-btn-busy { position: relative; color: transparent !important; pointer-events: none; }
+.seo-btn-busy::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid currentColor; border-color: var(--button-fg, #fff) var(--button-fg, #fff) transparent transparent;
+  animation: seo-spin 0.7s linear infinite;
+}
+.seo-btn.seo-btn-busy::after { border-color: var(--body-fg, #333) var(--body-fg, #333) transparent transparent; }
+
+.seo-inline-loader {
+  display: flex; gap: 12px; align-items: center; margin-top: 10px; padding: 12px 14px; border-radius: 8px;
+  background: var(--seo-info-bg); border: 1px solid var(--hairline-color, #e5e5e5);
+}
+.seo-inline-loader[hidden] { display: none; }
+.seo-inline-loader .seo-spin { width: 20px; height: 20px; }
+
+.seo-refreshing { position: relative; pointer-events: none; }
+.seo-refreshing::after {
+  content: ""; position: absolute; inset: 0; border-radius: 8px;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.35) 50%, transparent 80%);
+  background-size: 200% 100%; animation: seo-shimmer 1.1s linear infinite;
+}
+@keyframes seo-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+
+.seo-upload-progress { margin-top: 12px; max-width: 520px; }
+.seo-upload-progress[hidden] { display: none; }
+
+.seo-review tr.seo-removing td { opacity: 0; transition: opacity 0.25s; }
+.seo-remove { white-space: nowrap; width: 1%; }
+.seo-icon-btn {
+  border: 1px solid transparent; background: transparent; cursor: pointer; border-radius: 6px;
+  padding: 2px 6px; font-size: 1rem; line-height: 1.4; opacity: 0.55;
+}
+.seo-icon-btn:hover { opacity: 1; border-color: var(--hairline-color, #ddd); background: var(--darkened-bg, #f4f4f4); }
+.seo-dropdown li.seo-active { background: var(--seo-info-bg); }
+.seo-toast-error { border-color: var(--seo-up); }
+
+@media (prefers-reduced-motion: reduce) {
+  .seo-topbar, .seo-btn-busy::after, .seo-refreshing::after { animation: none; }
+  .seo-topbar { transition: opacity 0.2s; }
+}

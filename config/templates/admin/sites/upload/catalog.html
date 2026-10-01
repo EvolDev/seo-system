@@ -1,0 +1,115 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Каталог Collaborator после проверки (E1-08, ADR-044): две кнопки вместо
+«Записать в базу». «Обновить в базе» — площадки, которые уже есть;
+«Добавить новые» — только новые для базы, по фильтрам. Галочки — что
+писать: цены, метрики, карточку. Каждое нажатие — строка истории ниже.
+Фильтры, облачка и живой счётчик — seo/uploads.js.
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<p class="seo-lead" data-swap="lead">
+  {{ upload.file_name }} · выгрузка на {{ upload.prices_date|date:"d.m.Y" }} ·
+  строк {{ summary.rows }}, площадок {{ summary.sites }}{% if summary.blocked_total %}, заблокированных пропущено {{ summary.blocked_total }}{% endif %}.
+  {% if runs %}<a href="{% url 'admin:sites_upload_review' upload.pk %}">Открыть разбор</a>.{% endif %}
+</p>
+
+<section class="seo-panel" data-panel="known">
+  <h2 data-swap="known-title">Уже в базе — {{ known_total }}</h2>
+  <p class="seo-sub">Обновить цены, метрики и карточку у площадок, которые есть в базе. Фильтры сюда не действуют.</p>
+  <div class="seo-stats" data-swap="known-stats">
+    <div class="seo-stat seo-good"><b>{{ summary.known_groups.cheaper|default:0 }}</b><span>Collaborator дешевле рабочей цены</span></div>
+    <div class="seo-stat"><b>{{ summary.known_groups.changed|default:0 }}</b><span>цена изменилась: ▼ {{ summary.changed_down }}, ▲ {{ summary.changed_up }} — рабочая перейдёт сама</span></div>
+    <div class="seo-stat seo-bad"><b>{{ summary.known_groups.pricier|default:0 }}</b><span>дороже рабочей</span></div>
+    <div class="seo-stat"><b>{{ summary.known_groups.same|default:0 }}</b><span>без изменений</span></div>
+    <div class="seo-stat seo-warn"><b>{{ summary.known_groups.rejected|default:0 }}</b><span>отклоняли — с новой ценой</span></div>
+    <div class="seo-stat seo-warn"><b>{{ summary.known_needs_decision|default:0 }}</b><span>будут ждать решения (заявка в работе, другой продавец)</span></div>
+  </div>
+  <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="seo-run-form" data-run-form="known">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="known">
+    <span class="seo-parts">Обновить:
+      {% for value, label in parts %}<label><input type="checkbox" name="parts" value="{{ value }}" checked> {{ label }}</label>{% endfor %}
+    </span>
+    <button type="submit" class="default seo-run-btn" data-swap="known-btn"{% if not known_total %} disabled{% endif %}>Обновить в базе</button>
+  </form>
+  <div class="seo-inline-loader" data-loader hidden></div>
+  <p class="seo-hint">Снимите «метрики», если не хотите, чтобы DR и трафик Collaborator перекрыли ваш замер Ahrefs.</p>
+</section>
+
+<section class="seo-panel" data-panel="new">
+  <h2>Новые для базы — <span data-new-total>{{ new_total }}</span></h2>
+  <p class="seo-sub">Добавятся только те, что подходят фильтрам. Остальные не записываются и не отклоняются — в следующей выгрузке могут подойти. Пустой фильтр — все значения.</p>
+  {{ fields_data|json_script:"seo-filter-data" }}
+  <div class="seo-filters" data-filters data-count-url="{% url 'admin:sites_upload_count' upload.pk %}">
+    {% for field in fields %}
+      <div class="seo-filter" data-filter="{{ field.key }}" data-kind="{{ field.kind }}">
+        <div class="seo-filter-label">{{ field.label }}</div>
+        {% if field.kind == "any" %}
+          <div class="seo-tags" data-tags>
+            <input type="text" class="seo-tag-input" data-input placeholder="начните вводить…" aria-label="{{ field.label }}" autocomplete="off">
+          </div>
+          <ul class="seo-dropdown" data-dropdown hidden></ul>
+        {% else %}
+          <div class="seo-range">
+            <input type="text" inputmode="decimal" data-min placeholder="от{% if field.unit %}, {{ field.unit }}{% endif %}" aria-label="{{ field.label }} от">
+            <span>—</span>
+            <input type="text" inputmode="decimal" data-max placeholder="до{% if field.unit %}, {{ field.unit }}{% endif %}" aria-label="{{ field.label }} до">
+          </div>
+        {% endif %}
+        <div class="seo-chips" data-chips></div>
+      </div>
+    {% endfor %}
+  </div>
+  <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="seo-run-form" data-new-form data-run-form="new" data-upload="{{ upload.pk }}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="new">
+    <input type="hidden" name="filters" value="{}" data-filters-json>
+    <div class="seo-counter" data-counter>
+      Будет добавлено: <b data-passed>{{ new_total }}</b> из <span data-new-total>{{ new_total }}</span><span data-dropped></span>
+      <span class="seo-sub" data-filter-text>без фильтра</span>
+    </div>
+    <span class="seo-parts">Записать:
+      {% for value, label in parts %}<label><input type="checkbox" name="parts" value="{{ value }}" checked> {{ label }}</label>{% endfor %}
+    </span>
+    <button type="submit" class="default seo-run-btn" data-new-submit{% if not new_total %} disabled{% endif %}>Добавить новые</button>
+  </form>
+  <div class="seo-inline-loader" data-loader hidden></div>
+</section>
+
+<section class="seo-panel" data-swap="runs"{% if not runs %} hidden{% endif %}>
+  <h2>Что уже записано из этого файла</h2>
+  <div class="seo-table-wrap">
+    <table class="seo-upload-table">
+      <thead><tr><th>Когда</th><th>Кнопка</th><th>Что</th><th>Фильтр</th><th class="seo-r">Площадок</th><th class="seo-r">Новых</th><th class="seo-r">Ждут решения</th></tr></thead>
+      <tbody>
+        {% for run in runs %}
+          <tr>
+            <td>{{ run.at|date:"d.m.Y H:i" }}</td><td>{{ run.label }}</td><td>{{ run.parts|default:"—" }}</td>
+            <td>{{ run.filter_text|default:"—" }}</td><td class="seo-r">{{ run.sites }}</td>
+            <td class="seo-r">{{ run.created }}</td><td class="seo-r">{{ run.decide }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p><a href="{% url 'admin:sites_upload_review' upload.pk %}">Открыть разбор</a> · рабочий список «{{ list_name }}»</p>
+</section>
+
+<form method="post" action="{% url 'admin:sites_upload_recheck' upload.pk %}" class="seo-inline-form" data-run-form="recheck">
+  {% csrf_token %}
+  <button type="submit" class="seo-btn seo-run-btn">Пересчитать сводку</button>
+  <span class="seo-sub">если с проверки что-то менялось в базе — цифры выше посчитаются заново, около 10 секунд</span>
+  <div class="seo-inline-loader" data-loader hidden></div>
+</form>
+
+<details class="seo-details">
+  <summary>Отклоняли, дубли, ошибки, незнакомые значения</summary>
+  <div class="seo-boxes" data-swap="issues">{% include "admin/sites/upload/_issues.html" with data=issues %}</div>
+</details>
+<p><a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a></p>
+{% endblock %}

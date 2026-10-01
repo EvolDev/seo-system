@@ -1,0 +1,52 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Шаг 2 — разметка колонок прайса (E1-08, ADR-041). Сначала новые колонки —
+про них и вопрос; запомненные у продавца — свёрнуты, их можно поправить.
+Непустая колонка без поля — в «прочие данные»; «не загружать» — только явно.
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<form method="post" class="seo-upload-form" data-soft-form>
+  {% csrf_token %}
+  {% if errors %}<div class="errornote">{% for error in errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+  <div class="seo-note">
+    <p><b>{{ upload.file_name }}</b> · продавец {{ upload.seller.name }} · цены на {{ upload.prices_date|date:"d.m.Y" }}.</p>
+    <p>
+      Строка заголовков — <input type="number" name="header_row" value="{{ upload.header_row }}" min="1" class="seo-num">
+      (если не та — впишите номер и нажмите «Дальше»).
+      Валюта цен —
+      <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>.
+    </p>
+    <ul>
+      <li>Колонки без своего поля идут в «прочие данные» и видны в карточке площадки — из файла ничего не теряется.</li>
+      <li>Разметка запомнится у продавца {{ upload.seller.name }}: следующий файл с теми же колонками пройдёт без этого шага, про новую колонку спрошу только её.</li>
+    </ul>
+  </div>
+
+  {% if asked %}
+    <h2 class="seo-h2">Куда записать {% if known %}новые колонки{% else %}колонки{% endif %}</h2>
+    {% include "admin/sites/upload/_columns_table.html" with columns=asked %}
+  {% endif %}
+
+  {% if known %}
+    <details class="seo-details"{% if not asked %} open{% endif %}>
+      <summary>Уже размечены у продавца — {{ known|length }}</summary>
+      {% include "admin/sites/upload/_columns_table.html" with columns=known %}
+    </details>
+  {% endif %}
+
+  {% if empty %}
+    <p class="seo-sub">Пустые колонки, записывать из них нечего: {% for column in empty %}«{{ column.header }}»{% if not forloop.last %}, {% endif %}{% endfor %}.</p>
+    {% for column in empty %}<input type="hidden" name="field:{{ column.key }}" value="{{ column.field|default:'extra' }}">{% endfor %}
+  {% endif %}
+
+  <div class="submit-row">
+    <button type="submit" class="default seo-run-btn">Дальше: сводка</button>
+    <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+  </div>
+</form>
+{% endblock %}

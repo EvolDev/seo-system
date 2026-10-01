@@ -36,6 +36,8 @@ SETTING_KEYS: dict[str, str] = {
     "INDEXATION_SCHEDULE": (
         "Проверка индексации: enabled, first_check_days, retry_days, recheck_days, alert_after_days"
     ),
+    # Загрузка цен — 13-CONFIG.md §2.5
+    "OFFER_RECHECK": "Повторный разбор предложения продавца: min_change_pct",
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
@@ -77,10 +79,32 @@ class IndexationSchedule:
         return cls(**value)
 
 
+@dataclass(frozen=True)
+class OfferRecheck:
+    """Когда разобранное предложение продавца снова ждёт решения — `OFFER_RECHECK` (ADR-044).
+
+    Предложение другого продавца, которое человек уже видел и оставил, при
+    следующей загрузке снова попадает в разбор, только если цена изменилась
+    больше чем на `min_change_pct` процентов: цены в евро плывут с курсом.
+    """
+
+    min_change_pct: float
+
+    @classmethod
+    def parse(cls, value: Any) -> "OfferRecheck":
+        if not isinstance(value, dict) or set(value) != {"min_change_pct"}:
+            raise ValueError("Нужен объект ровно с полем min_change_pct.")
+        number = value["min_change_pct"]
+        if not isinstance(number, int | float) or isinstance(number, bool) or number < 0:
+            raise ValueError("min_change_pct — число процентов, не меньше нуля.")
+        return cls(float(number))
+
+
 # Настройки с проверкой формы значения: ошибку видно в админке при вводе,
 # а не в упавшей ночью задаче.
 SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "INDEXATION_SCHEDULE": IndexationSchedule.parse,
+    "OFFER_RECHECK": OfferRecheck.parse,
 }
 
 
@@ -101,6 +125,18 @@ def indexation_schedule(product_id: int | None) -> IndexationSchedule:
         return IndexationSchedule.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"INDEXATION_SCHEDULE: {error}") from error
+
+
+def offer_recheck() -> OfferRecheck:
+    """Действующий порог повторного разбора: общее значение, загрузки — не под продукт."""
+    value = get_setting("OFFER_RECHECK", None)
+    if value is None:
+        # Общее значение заводит миграция content.0004 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки OFFER_RECHECK — заведите общее значение.")
+    try:
+        return OfferRecheck.parse(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"OFFER_RECHECK: {error}") from error
 
 
 def set_product_setting(product_id: int, key: str, value: Any | None) -> None:

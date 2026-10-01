@@ -1,10 +1,11 @@
 """Блок 1 модели данных: продукты, площадки, решения по ним, снапшоты.
 
-Схема — `schema.sql` 1.7, как модели её повторяют — ADR-029: имена
+Схема — `schema.sql` 1.8, как модели её повторяют — ADR-029: имена
 таблиц, индексов и ограничений из схемы, значения по умолчанию в базе
 (`db_default`), `on_delete=PROTECT`. Несколько продуктов — ADR-030:
 площадка хранит только факты о себе, решение по ней — в `ProductSite`.
 Продавцы, предложения, рабочая цена площадки, заметки, курсы — ADR-043.
+Загрузки файлов продавцов и каталога, строки их разбора — ADR-044.
 """
 
 from collections.abc import Iterable
@@ -46,6 +47,32 @@ class PlacementType(models.TextChoices):
 
     GUEST_POST = "guest_post", "публикация"
     LINK_INSERTION = "link_insertion", "вставка ссылки"
+
+
+class UploadKind(models.TextChoices):
+    PRICE_LIST = "price_list", "Прайс продавца"
+    COLLABORATOR_CATALOG = "collaborator_catalog", "Каталог Collaborator"
+
+
+class UploadStatus(models.TextChoices):
+    NEW = "new", "Разметка колонок"
+    CHECKING = "checking", "Проверяется"
+    CHECKED = "checked", "Проверен, ждёт записи"
+    WRITING = "writing", "Записывается"
+    DONE = "done", "Записан"
+    FAILED = "failed", "Ошибка"
+
+
+class ReviewGroup(models.TextChoices):
+    """Вкладка разбора загрузки: как предложение из файла соотносится с базой (ADR-044)."""
+
+    CHEAPER = "cheaper", "Дешевле рабочей"
+    CHANGED = "changed", "Цена изменилась"
+    NEW = "new", "Новые"
+    REJECTED = "rejected", "Отклоняли"
+    PRICIER = "pricier", "Дороже рабочей"
+    OTHER_SERVICE = "other_service", "Другая услуга"
+    SAME = "same", "Без изменений"
 
 
 class AuditVerdict(models.TextChoices):
@@ -147,6 +174,8 @@ class Seller(models.Model):
         db_default=False,
         help_text="DR и трафик этого продавца показываются как наши замеры и идут в графики.",
     )
+    # Разметка колонок его прайсов: заголовок → поле (ADR-044). Пишет загрузка.
+    column_map = models.JSONField("разметка колонок", null=True, blank=True)
     created_at = models.DateTimeField("заведён", db_default=PgNow())
 
     class Meta:
@@ -631,6 +660,117 @@ class ExchangeRate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.currency} {self.rate} · {self.rate_date:%d.%m.%Y}"
+
+
+class Upload(models.Model):
+    """Загрузка файла продавца или каталога Collaborator (ADR-044).
+
+    Путь: файл и разметка колонок (`new`) → проверка в фоне (`checking`) →
+    сводка до записи (`checked`) → запись в фоне (`writing`) → разбор
+    (`done`). Результат — рабочий список. Файл лежит в папке загрузок
+    (`UPLOADS_DIR`), путь в `file_path` — от неё.
+    """
+
+    kind = PgEnumField("что загружаем", enum_type="upload_kind", choices=UploadKind.choices)
+    seller = models.ForeignKey(
+        Seller, models.PROTECT, verbose_name="продавец", related_name="uploads", db_index=False
+    )
+    prices_date = models.DateField("дата цен")
+    file_name = models.TextField("файл")
+    file_path = models.TextField("путь к файлу")
+    file_sha256 = models.CharField("отпечаток файла", max_length=64)
+    header_row = models.IntegerField("строка заголовков", null=True, blank=True)
+    columns = models.JSONField("колонки файла", null=True, blank=True)
+    mapping = models.JSONField("разметка", null=True, blank=True)
+    currency = models.CharField("валюта цен", max_length=3, null=True, blank=True)
+    status = PgEnumField(
+        "состояние",
+        enum_type="upload_status",
+        choices=UploadStatus.choices,
+        default=UploadStatus.NEW,
+        db_default=UploadStatus.NEW,
+    )
+    summary = models.JSONField("сводка до записи", null=True, blank=True)
+    result = models.JSONField("итог записи", null=True, blank=True)
+    error = models.TextField("ошибка", null=True, blank=True)
+    site_list = models.ForeignKey(
+        SiteList,
+        models.PROTECT,
+        verbose_name="рабочий список",
+        related_name="uploads",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    run_id = models.UUIDField("run_id", null=True, blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="загрузил",
+        related_name="uploads",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    created_at = models.DateTimeField("загружен", db_default=PgNow())
+    written_at = models.DateTimeField("записан", null=True, blank=True)
+
+    class Meta:
+        db_table = "uploads"
+        verbose_name = "загрузка"
+        verbose_name_plural = "загрузки"
+
+    def __str__(self) -> str:
+        return f"{self.seller} · {self.prices_date:%d.%m.%Y} · {self.file_name}"
+
+
+class UploadItem(models.Model):
+    """Строка разбора: предложение из файла и с чем его сравнили при записи.
+
+    Вкладка (`review_group`) — по положению на момент записи. Решено ли —
+    по `reviewed_at` предложения: решение принимают и в «Площадках», и в
+    карточке, разбор это видит.
+    """
+
+    upload = models.ForeignKey(
+        Upload, models.PROTECT, verbose_name="загрузка", related_name="items", db_index=False
+    )
+    site = models.ForeignKey(
+        Site, models.PROTECT, verbose_name="площадка", related_name="+", db_index=False
+    )
+    price = models.ForeignKey(
+        SitePrice,
+        models.PROTECT,
+        verbose_name="предложение из файла",
+        related_name="+",
+        db_index=False,
+    )
+    ref_price = models.ForeignKey(
+        SitePrice,
+        models.PROTECT,
+        verbose_name="рабочая цена до загрузки",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    review_group = PgEnumField("вкладка", enum_type="review_group", choices=ReviewGroup.choices)
+    needs_decision = models.BooleanField("ждало решения", default=False, db_default=False)
+    auto_applied = models.BooleanField("стало рабочей само", default=False, db_default=False)
+    site_created = models.BooleanField("новая в базе", default=False, db_default=False)
+    line = models.IntegerField("строка файла", null=True, blank=True)
+    source_value = models.TextField("адрес в файле", null=True, blank=True)
+
+    class Meta:
+        db_table = "upload_items"
+        verbose_name = "строка разбора"
+        verbose_name_plural = "строки разбора"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["upload", "review_group"], name="idx_upload_items_upload"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.upload_id} · {self.site_id} · {self.get_review_group_display()}"
 
 
 def ensure_product_sites(

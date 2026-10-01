@@ -47,7 +47,7 @@ def test_admin_site_is_ours() -> None:
 def test_groups_follow_the_work(admin_client: Client) -> None:
     menu = _menu(admin_client)
     assert [group["name"] for group in menu] == ["Работа", "Справочники", "Настройки", "Служебное"]
-    assert _names(menu[0]) == ["Площадки", "Размещения", "Ключи"]
+    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Ключи"]
     assert _names(menu[1]) == ["Каталог площадок", "Продавцы", "Рабочие списки", "Продукты"]
 
 
@@ -92,7 +92,7 @@ def test_home_starts_with_work(admin_client: Client) -> None:
     SiteList.objects.create(name="Сентябрь 2026")
     response = admin_client.get(reverse("admin:index"))
     cards = response.context["home_cards"]
-    assert [card["name"] for card in cards] == ["Площадки", "Размещения", "Ключи"]
+    assert [card["name"] for card in cards] == ["Площадки", "Загрузки", "Размещения", "Ключи"]
     assert cards[0]["url"] == reverse("admin:sites_productsitelatest_changelist")
     assert "Convertio, список «Сентябрь 2026»" in cards[0]["note"]
     # «Работа» — карточками; ниже — остальные группы, без повтора.
@@ -102,7 +102,13 @@ def test_home_starts_with_work(admin_client: Client) -> None:
 
 def test_home_without_products(admin_client: Client) -> None:
     cards = admin_client.get(reverse("admin:index")).context["home_cards"]
-    assert [(card["value"], card["note"]) for card in cards] == [("", "")] * 3
+    # Загрузки от продукта не зависят: «0 предложений ждут разбора» есть и без него.
+    assert [(card["value"], card["note"]) for card in cards] == [
+        ("", ""),
+        ("0", "предложений ждут разбора"),
+        ("", ""),
+        ("", ""),
+    ]
 
 
 def test_no_view_site_link(admin_client: Client) -> None:

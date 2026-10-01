@@ -1,0 +1,59 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Шаг 3 — сводка до записи (E1-08, ADR-044). Пока задача проверки или записи
+идёт, страница опрашивает состояние загрузки (seo/uploads.js) и сама
+переходит дальше.
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+{% if busy %}
+  <div class="seo-busy" data-state-url="{% url 'admin:sites_upload_state' upload.pk %}">
+    <div class="seo-spin" aria-hidden="true"></div>
+    <div>
+      <b data-state-label>{{ upload.get_status_display }}…</b>
+      <div class="seo-sub">Задача очереди «{% if upload.status == 'writing' %}upload_write{% else %}upload_check{% endif %}» — видна в «Запусках задач». Каталог Collaborator — около минуты, страницу можно закрыть.</div>
+    </div>
+  </div>
+{% elif upload.status == 'failed' %}
+  <div class="errornote">{{ upload.error }}</div>
+  <div class="submit-row">
+    {% if upload.kind == 'price_list' %}<a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">К колонкам</a>{% endif %}
+    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить другой файл</a>
+  </div>
+{% else %}
+  <p class="seo-lead">В базу ещё ничего не записано. Проверьте цифры — потом «Записать в базу», и откроется разбор.</p>
+  <div class="seo-stats">
+    <div class="seo-stat"><b>{{ summary.rows }}</b><span>строк в файле</span></div>
+    <div class="seo-stat"><b>{{ summary.sites }}</b><span>площадок</span></div>
+    <div class="seo-stat"><b>{{ summary.known }}</b><span>уже в базе</span></div>
+    <div class="seo-stat seo-good"><b>{{ summary.new }}</b><span>новых для базы</span></div>
+    <div class="seo-stat seo-good"><b>{{ summary.groups.cheaper }}</b><span>дешевле рабочей цены</span></div>
+    <div class="seo-stat"><b>{{ summary.groups.changed }}</b><span>цена изменилась: ▼ {{ summary.changed_down }}, ▲ {{ summary.changed_up }}</span></div>
+    <div class="seo-stat seo-bad"><b>{{ summary.groups.pricier }}</b><span>дороже рабочей</span></div>
+    <div class="seo-stat"><b>{{ summary.groups.other_service }}</b><span>другая услуга</span></div>
+    <div class="seo-stat"><b>{{ summary.groups.same }}</b><span>без изменений</span></div>
+    <div class="seo-stat seo-warn"><b>{{ summary.rejected_total }}</b><span>уже отклоняли</span></div>
+    <div class="seo-stat seo-warn"><b>{{ summary.duplicates_total|add:summary.errors_total }}</b><span>дубли и ошибки</span></div>
+    <div class="seo-stat seo-warn"><b>{{ summary.needs_decision }}</b><span>будут ждать решения</span></div>
+  </div>
+  <div class="seo-boxes">
+    {% include "admin/sites/upload/_issues.html" with data=summary %}
+  </div>
+  <p class="seo-hint">
+    После записи: новые площадки — в базе со статусом «Новая», всё из файла — в рабочем списке
+    «{{ list_name }}». Рабочая цена сама переходит на новую цену того же продавца; новые цены других
+    продавцов и площадки с заявкой в работе ждут вашего решения в разборе. Валюта цен — {{ summary.currency }}.
+  </p>
+  <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="submit-row" data-run-form="all" data-done-url="{% url 'admin:sites_upload_review' upload.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="default seo-run-btn">Записать в базу</button>
+    {% if upload.kind == 'price_list' %}<a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">Назад: колонки</a>{% endif %}
+    <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+    <div class="seo-inline-loader" data-loader hidden></div>
+  </form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,20 @@
+<div class="seo-table-wrap">
+  <table class="seo-upload-table">
+    <thead><tr><th>Колонка в файле</th><th>Первые значения</th><th>Куда записать</th><th>Уверенность</th></tr></thead>
+    <tbody>
+      {% for column in columns %}
+        <tr>
+          <td><b>{{ column.header }}</b><div class="seo-sub">колонка {{ column.letter }} · заполнено {{ column.filled }}</div></td>
+          <td class="seo-sub">{% for sample in column.samples %}{{ sample }}{% if not forloop.last %} · {% endif %}{% empty %}<span class="seo-flat">пусто в первых строках</span>{% endfor %}</td>
+          <td>
+            <select name="field:{{ column.key }}" aria-label="Поле для колонки {{ column.header }}" data-field-select>
+              {% for value, label in fields %}<option value="{{ value }}"{% if value == column.field %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            {% if column.hint %}<div class="seo-sub">{{ column.hint }}</div>{% endif %}
+          </td>
+          <td>{% if column.confidence %}<span class="seo-chip {% for key, cls in confidence.items %}{% if key == column.confidence %}{{ cls }}{% endif %}{% endfor %}" data-confidence>{{ column.confidence }}</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

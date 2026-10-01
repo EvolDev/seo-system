@@ -1100,3 +1100,7 @@ def _offers_tip(page_offers: list[SiteOffer], obj: ProductSiteLatest) -> str:
                 line += f"  {delta_text(change)}"
         lines.append(line)
     return "\n".join(lines)
+
+
+# Экран «Загрузки» (E1-08) — в своём модуле; регистрируется при загрузке этого.
+from apps.sites import upload_admin  # noqa: E402, F401

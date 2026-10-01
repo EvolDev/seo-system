@@ -26,7 +26,16 @@ from django.db.models import TextChoices
 from apps.keywords.models import AnchorType
 from apps.observability.models import CheckStatus, LlmStatus, Performer, TaskStatus
 from apps.placements.models import PlacementStatus
-from apps.sites.models import AuditAuthor, AuditVerdict, MetricSource, PlacementType, SiteStatus
+from apps.sites.models import (
+    AuditAuthor,
+    AuditVerdict,
+    MetricSource,
+    PlacementType,
+    ReviewGroup,
+    SiteStatus,
+    UploadKind,
+    UploadStatus,
+)
 
 TABLES = [
     # E1-01
@@ -58,6 +67,9 @@ TABLES = [
     "sellers",
     "site_notes",
     "exchange_rates",
+    # E1-08
+    "uploads",
+    "upload_items",
 ]
 
 VIEWS = [
@@ -89,6 +101,9 @@ ENUMS: dict[str, type[TextChoices]] = {
     "performer": Performer,
     "llm_status": LlmStatus,
     "task_status": TaskStatus,
+    "upload_kind": UploadKind,
+    "upload_status": UploadStatus,
+    "review_group": ReviewGroup,
 }
 
 REF = "ref"

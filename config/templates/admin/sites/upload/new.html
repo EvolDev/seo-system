@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+{% comment %}Шаг 1 — файл, что это, продавец, дата цен (E1-08, ADR-044).{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<form method="post" enctype="multipart/form-data" class="seo-upload-form" data-upload-form>
+  {% csrf_token %}
+  {% if form.non_field_errors %}<div class="errornote">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+  <fieldset class="module aligned">
+    <div class="form-row">
+      <label>{{ form.kind.label }}</label>
+      <div class="seo-radios">{% for radio in form.kind %}<label>{{ radio.tag }} {{ radio.choice_label }}</label>{% endfor %}</div>
+      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена.</div>
+    </div>
+    <div class="form-row" data-seller-row>
+      {{ form.seller.errors }}
+      <label for="{{ form.seller.id_for_label }}">{{ form.seller.label }}</label> {{ form.seller }}
+      <div class="help">Первый файл от продавца — колонки разметим один раз и запомним у него.</div>
+    </div>
+    <div class="form-row" data-seller-row>
+      {{ form.new_seller.errors }}
+      <label for="{{ form.new_seller.id_for_label }}">{{ form.new_seller.label }}</label> {{ form.new_seller }}
+      <label for="{{ form.new_seller_currency.id_for_label }}" class="seo-inline-label">{{ form.new_seller_currency.label }}</label> {{ form.new_seller_currency }}
+      <div class="help">Имя без учёта регистра: «Athena Smith» и «Athena smith» — один продавец.</div>
+    </div>
+    <div class="form-row">
+      {{ form.prices_date.errors }}
+      <label for="{{ form.prices_date.id_for_label }}">{{ form.prices_date.label }}</label> {{ form.prices_date }}
+      <div class="help">{{ form.prices_date.help_text }}</div>
+    </div>
+    <div class="form-row">
+      {{ form.file.errors }}
+      <label for="{{ form.file.id_for_label }}">{{ form.file.label }}</label> {{ form.file }}
+      <div class="help">{{ form.file.help_text }} Строку заголовков найду сама — над ней бывают заголовок листа и пустые строки.</div>
+    </div>
+  </fieldset>
+  <div class="submit-row">
+    <button type="submit" class="default seo-run-btn">Дальше</button>
+    <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">Отмена</a>
+  </div>
+  <div class="seo-upload-progress" data-upload-progress hidden>
+    <div class="seo-sub" data-upload-text>Отправляю файл…</div>
+    <div class="seo-bar"><i data-upload-bar style="width: 0%"></i></div>
+  </div>
+</form>
+{% endblock %}

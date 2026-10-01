@@ -23,7 +23,12 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
     (
         "Работа",
         "work",
-        [("sites", "productsitelatest"), ("placements", "placement"), ("keywords", "keyword")],
+        [
+            ("sites", "productsitelatest"),
+            ("sites", "upload"),
+            ("placements", "placement"),
+            ("keywords", "keyword"),
+        ],
     ),
     (
         "Справочники",
@@ -131,6 +136,10 @@ def _home_cards(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ),
             "keyword": (_number(numbers["keywords"]), "активных ключей продукта"),
         }
+    notes["upload"] = (
+        _number(numbers.get("review_pending", 0)),
+        "предложений ждут разбора",
+    )
     cards = []
     for model in models:
         value, note = notes.get(model["object_name"].lower(), ("", ""))
@@ -145,14 +154,20 @@ def _home_numbers() -> dict[str, Any]:
     # до того как модели готовы.
     from apps.keywords.models import Keyword
     from apps.placements.models import Placement, PlacementStatus
-    from apps.sites.models import Product, ProductSiteLatest, SiteList, SiteStatus
+    from apps.sites.models import Product, ProductSite, SiteList, SiteStatus, UploadItem
 
     product = Product.objects.filter(is_active=True).order_by("pk").first()
     site_list = SiteList.objects.order_by("-created_at", "-pk").first()
     numbers: dict[str, Any] = {"product": product, "site_list": site_list}
+    numbers["review_pending"] = UploadItem.objects.filter(
+        needs_decision=True, price__reviewed_at__isnull=True
+    ).count()
     if product is None:
         return numbers
-    rows = ProductSiteLatest.objects.filter(product_id=product.pk)
+    # Строки «Площадок» — это строки product_sites у неудалённых площадок; считать
+    # по таблице, а не по представлению: на 45 000 площадок каталога представление
+    # считало бы эти два числа полсекунды (E1-08).
+    rows = ProductSite.objects.filter(product_id=product.pk, site__is_deleted=False)
     if site_list is not None:
         rows = rows.filter(site_id__in=site_list.items.values("site_id"))
     numbers.update(
