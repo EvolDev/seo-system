@@ -1,13 +1,17 @@
 """Настройки: общее и локальное значение, выбор для продукта (E1-05, ADR-035)."""
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
 
 from apps.content.domain_settings import (
     PRODUCT_KEYS,
     SETTING_KEYS,
+    IndexationSchedule,
     get_setting,
+    indexation_schedule,
     set_product_setting,
+    validate_setting,
 )
 from apps.content.models import DomainSetting
 from apps.sites.models import Product
@@ -87,13 +91,13 @@ class TestSetProductSetting:
         set_product_setting(convertio.pk, "TOOL_CATEGORIES", ["Main", "Video"])
         assert get_setting("TOOL_CATEGORIES", convertio.pk) == ["Main", "Video"]
         set_product_setting(convertio.pk, "TOOL_CATEGORIES", None)
-        assert not DomainSetting.objects.exists()
+        assert not DomainSetting.objects.filter(product=convertio).exists()
 
     def test_same_value_keeps_updated_at(self, convertio: Product) -> None:
         set_product_setting(convertio.pk, "TOOL_CATEGORIES", ["Main"])
-        before = DomainSetting.objects.get().updated_at
+        before = DomainSetting.objects.get(product=convertio).updated_at
         set_product_setting(convertio.pk, "TOOL_CATEGORIES", ["Main"])
-        assert DomainSetting.objects.get().updated_at == before
+        assert DomainSetting.objects.get(product=convertio).updated_at == before
 
     def test_general_value_is_untouched(self, convertio: Product) -> None:
         DomainSetting.objects.create(key="DR_ZONES", value={"green": 50})
@@ -103,3 +107,63 @@ class TestSetProductSetting:
     def test_unknown_key(self, convertio: Product) -> None:
         with pytest.raises(ValueError, match="MY_SETTING"):
             set_product_setting(convertio.pk, "MY_SETTING", 1)
+
+
+SCHEDULE = {
+    "enabled": True,
+    "first_check_days": 3,
+    "retry_days": 1,
+    "recheck_days": 30,
+    "alert_after_days": 30,
+}
+
+
+class TestIndexationSchedule:
+    """Сроки проверки индексации — INDEXATION_SCHEDULE (E2-03)."""
+
+    def test_general_value_comes_from_migration_switched_off(self) -> None:
+        schedule = indexation_schedule(None)
+        assert schedule == IndexationSchedule(
+            enabled=False, first_check_days=3, retry_days=1, recheck_days=30, alert_after_days=30
+        )
+
+    def test_product_overrides_schedule(self, convertio: Product) -> None:
+        set_product_setting(convertio.pk, "INDEXATION_SCHEDULE", {**SCHEDULE, "retry_days": 2})
+        assert indexation_schedule(convertio.pk).retry_days == 2
+        assert indexation_schedule(None).retry_days == 1
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            ([], "ровно с полями"),
+            ({**SCHEDULE, "extra": 1}, "ровно с полями"),
+            ({k: v for k, v in SCHEDULE.items() if k != "enabled"}, "ровно с полями"),
+            ({**SCHEDULE, "enabled": "yes"}, "enabled"),
+            ({**SCHEDULE, "first_check_days": -1}, "first_check_days"),
+            ({**SCHEDULE, "recheck_days": 1.5}, "recheck_days"),
+            ({**SCHEDULE, "alert_after_days": True}, "alert_after_days"),
+            ({**SCHEDULE, "retry_days": 0}, "retry_days — не меньше одного"),
+        ],
+    )
+    def test_wrong_value_is_rejected(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            validate_setting("INDEXATION_SCHEDULE", value)
+
+    def test_zero_alert_and_first_check_are_allowed(self) -> None:
+        validate_setting(
+            "INDEXATION_SCHEDULE", {**SCHEDULE, "first_check_days": 0, "alert_after_days": 0}
+        )
+
+    def test_set_product_setting_validates(self, convertio: Product) -> None:
+        with pytest.raises(ValueError, match="retry_days"):
+            set_product_setting(convertio.pk, "INDEXATION_SCHEDULE", {**SCHEDULE, "retry_days": 0})
+
+    def test_missing_setting_is_a_configuration_error(self) -> None:
+        DomainSetting.objects.filter(key="INDEXATION_SCHEDULE").delete()
+        with pytest.raises(ImproperlyConfigured, match="INDEXATION_SCHEDULE"):
+            indexation_schedule(None)
+
+    def test_broken_setting_is_a_configuration_error(self) -> None:
+        DomainSetting.objects.filter(key="INDEXATION_SCHEDULE").update(value={"enabled": True})
+        with pytest.raises(ImproperlyConfigured, match="ровно с полями"):
+            indexation_schedule(None)

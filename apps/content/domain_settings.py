@@ -6,8 +6,11 @@
 строка здесь вместе с кодом, который её читает.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass, fields
 from typing import Any
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import F, Q
 
 from apps.content.models import DomainSetting
@@ -29,10 +32,75 @@ SETTING_KEYS: dict[str, str] = {
     "ANCHOR_REUSE_WINDOW": "Повтор анкора: days, max_on_similar_sites",
     "AUTHORITY_DOMAINS": "Белый список авторитетных доменов",
     "TOOL_CATEGORIES": "Разделы сайта продукта — значения keywords.tool",
+    # Проверки — 13-CONFIG.md §2.4
+    "INDEXATION_SCHEDULE": (
+        "Проверка индексации: enabled, first_check_days, retry_days, recheck_days, alert_after_days"
+    ),
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
 PRODUCT_KEYS = ("PRICE_REFERENCE", "PROJECT_TOPICS", "TOOL_CATEGORIES", "AUTHORITY_DOMAINS")
+
+
+@dataclass(frozen=True)
+class IndexationSchedule:
+    """Сроки проверки индексации — настройка `INDEXATION_SCHEDULE` (04-DOMAIN-RULES.md §4).
+
+    `enabled` — проверять ли по расписанию; кнопка в карточке работает
+    всегда. Сроки — в днях: первая проверка после публикации, повтор, пока
+    статьи нет в индексе, перепроверка статьи в индексе, оповещение после
+    стольких дней без индекса (0 — при первой же неудаче).
+    """
+
+    enabled: bool
+    first_check_days: int
+    retry_days: int
+    recheck_days: int
+    alert_after_days: int
+
+    @classmethod
+    def parse(cls, value: Any) -> "IndexationSchedule":
+        """Значение настройки → сроки; не та форма — ValueError с понятным текстом."""
+        names = [field.name for field in fields(cls)]
+        if not isinstance(value, dict) or set(value) != set(names):
+            raise ValueError("Нужен объект ровно с полями: " + ", ".join(names) + ".")
+        if not isinstance(value["enabled"], bool):
+            raise ValueError("enabled — true или false.")
+        for name in names[1:]:
+            # bool в Python — тоже int: true в поле срока не пропускаем.
+            number = value[name]
+            if not isinstance(number, int) or isinstance(number, bool) or number < 0:
+                raise ValueError(f"{name} — целое число дней, не меньше нуля.")
+        for name in ("retry_days", "recheck_days"):
+            if value[name] < 1:
+                raise ValueError(f"{name} — не меньше одного дня.")
+        return cls(**value)
+
+
+# Настройки с проверкой формы значения: ошибку видно в админке при вводе,
+# а не в упавшей ночью задаче.
+SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
+    "INDEXATION_SCHEDULE": IndexationSchedule.parse,
+}
+
+
+def validate_setting(key: str, value: Any) -> None:
+    """ValueError, если значение не подходит настройке; без проверки формы — ничего."""
+    parser = SETTING_PARSERS.get(key)
+    if parser is not None:
+        parser(value)
+
+
+def indexation_schedule(product_id: int | None) -> IndexationSchedule:
+    """Действующие сроки проверки индексации для продукта."""
+    value = get_setting("INDEXATION_SCHEDULE", product_id)
+    if value is None:
+        # Общее значение заводит миграция content.0003 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки INDEXATION_SCHEDULE — заведите общее значение.")
+    try:
+        return IndexationSchedule.parse(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"INDEXATION_SCHEDULE: {error}") from error
 
 
 def set_product_setting(product_id: int, key: str, value: Any | None) -> None:
@@ -44,6 +112,8 @@ def set_product_setting(product_id: int, key: str, value: Any | None) -> None:
     """
     if key not in SETTING_KEYS:
         raise ValueError(f"Неизвестная настройка {key!r}")
+    if value is not None:
+        validate_setting(key, value)
     current = DomainSetting.objects.filter(key=key, product_id=product_id).first()
     if value is None:
         if current is not None:

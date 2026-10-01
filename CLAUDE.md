@@ -51,7 +51,7 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 - Тесты: `make test`
 - Линтер и типы: `make check` (ruff lint + ruff format --check + mypy strict)
 - Автоисправление стиля: `make fmt`
-- Очередь: воркер и beat поднимает `make up`; после правки кода задач —
+- Очередь: воркер и beat поднимает `make up`; после правки кода задач или `.env` —
   `make restart-queue`; проверка —
   `docker compose run --rm app python manage.py queue_check`
 - Миграции: `make migrate`, пользователь админки: `make superuser`

@@ -1,0 +1,22 @@
+{% extends "admin/change_form.html" %}
+{% comment %}
+Карточка размещения: кнопка «Проверить индексацию» рядом с «Историей»
+(E2-03). Кнопка — форма POST: проверка стоит денег, по ссылке её не
+должен запускать ни браузер, ни случайный переход. Скрипт
+seo/indexation.js отправляет её без перехода и обновляет поля на месте;
+без скрипта форма уходит обычным путём.
+{% endcomment %}
+{% block object-tools-items %}
+{% if check_indexation_url %}
+<li>
+  <form method="post" action="{{ check_indexation_url }}" class="seo-object-tool"
+        data-indexation-form data-check-url="{{ indexation_urls.0 }}"
+        data-status-url="{{ indexation_urls.1 }}" data-placement="{{ original.pk }}"
+        data-name="{{ indexation_name }}">
+    {% csrf_token %}
+    <button type="submit" title="Поиск в Google по адресу статьи, около 0,1 цента">Проверить индексацию</button>
+  </form>
+</li>
+{% endif %}
+{{ block.super }}
+{% endblock %}

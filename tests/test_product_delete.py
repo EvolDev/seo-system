@@ -44,7 +44,7 @@ def test_unused_product_is_deleted_with_its_rows(
     assert admin_client.post(_delete_url(product), {"post": "yes"}).status_code == 302
     assert not Product.objects.filter(pk=product.pk).exists()
     assert not ProductSite.objects.exists()
-    assert not DomainSetting.objects.exists()
+    assert not DomainSetting.objects.filter(product__isnull=False).exists()
     assert Site.objects.filter(pk=site.pk).exists()
 
 

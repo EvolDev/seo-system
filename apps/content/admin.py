@@ -19,6 +19,7 @@ from apps.content.domain_settings import (
     SETTING_KEYS,
     get_setting,
     set_product_setting,
+    validate_setting,
 )
 from apps.content.models import DomainSetting
 from apps.sites.domains import normalize_domain
@@ -155,6 +156,19 @@ class ProductSettingsForm(forms.ModelForm):  # type: ignore[type-arg]
             set_product_setting(product.pk, key, _lines(self.cleaned_data[field]) or None)
 
 
+def _validate_value(cleaned: dict[str, Any] | None, form: forms.BaseForm) -> dict[str, Any] | None:
+    """Форма значения по ключу (`SETTING_PARSERS`) — ошибка у поля «значение»."""
+    if cleaned is None:
+        return None
+    key, value = cleaned.get("key"), cleaned.get("value")
+    if key and value is not None:
+        try:
+            validate_setting(key, value)
+        except ValueError as error:
+            form.add_error("value", str(error))
+    return cleaned
+
+
 class SettingValueField(forms.JSONField):
     """Значение настройки: у новой строки поле пустое, а не «null»."""
 
@@ -197,6 +211,9 @@ class OtherSettingForm(forms.ModelForm):  # type: ignore[type-arg]
             if taken.exists():
                 raise forms.ValidationError("Эта настройка у продукта уже переопределена.")
         return key
+
+    def clean(self) -> dict[str, Any] | None:
+        return _validate_value(super().clean(), self)
 
 
 class ProductOtherSettingsInline(TabularInline):
@@ -246,6 +263,9 @@ class GeneralSettingForm(forms.ModelForm):  # type: ignore[type-arg]
         if taken.exists():
             raise forms.ValidationError("Общее значение этой настройки уже есть.")
         return key
+
+    def clean(self) -> dict[str, Any] | None:
+        return _validate_value(super().clean(), self)
 
 
 @admin.register(DomainSetting)

@@ -92,6 +92,15 @@ class Placement(models.Model):
         "в индексе", null=True, blank=True, help_text="Пусто — не проверялось."
     )
     indexed_checked_at = models.DateTimeField("индексация проверена", null=True, blank=True)
+    skip_checks = models.BooleanField(
+        "не проверять",
+        default=False,
+        db_default=False,
+        help_text=(
+            "Статья больше не нужна: система не проверяет её по расписанию."
+            " Проверить вручную можно и так."
+        ),
+    )
     announce_on_homepage = models.BooleanField("анонс на главной", null=True, blank=True)
     clicks_from_homepage = models.SmallIntegerField("кликов от главной", null=True, blank=True)
     comment = models.TextField(

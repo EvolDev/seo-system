@@ -1,5 +1,6 @@
 """Настройки в админке: страница продукта и раздел «Настройки» (E1-05, ADR-035)."""
 
+import json
 from typing import Any
 
 import pytest
@@ -213,7 +214,8 @@ class TestGeneralSettings:
         DomainSetting.objects.create(key="DR_ZONES", value={"green": 50, "yellow": 35})
         DomainSetting.objects.create(key="DR_ZONES", product=product, value={"green": 30})
         response = admin_client.get(reverse("admin:content_domainsetting_changelist"))
-        assert response.context["cl"].result_count == 1
+        # Общие: DR_ZONES и INDEXATION_SCHEDULE из миграции content.0003.
+        assert response.context["cl"].result_count == 2
 
     def test_add_general_value(self, admin_client: Client) -> None:
         url = reverse("admin:content_domainsetting_add")
@@ -226,16 +228,44 @@ class TestGeneralSettings:
         data = {"key": "DR_ZONES", "value": '{"green": 40}', "description": ""}
         response = admin_client.post(reverse("admin:content_domainsetting_add"), data)
         assert response.status_code == 200
-        assert DomainSetting.objects.count() == 1
+        assert DomainSetting.objects.filter(key="DR_ZONES").count() == 1
 
     def test_unknown_key_is_rejected(self, admin_client: Client) -> None:
         data = {"key": "MY_SETTING", "value": "1", "description": ""}
         response = admin_client.post(reverse("admin:content_domainsetting_add"), data)
         assert response.status_code == 200
-        assert not DomainSetting.objects.exists()
+        assert not DomainSetting.objects.filter(key="MY_SETTING").exists()
 
     def test_general_value_cannot_be_deleted(self, admin_client: Client) -> None:
         setting = DomainSetting.objects.create(key="DR_ZONES", value={"green": 50})
         url = reverse("admin:content_domainsetting_delete", args=[setting.pk])
         assert admin_client.post(url, {"post": "yes"}).status_code == 403
         assert DomainSetting.objects.filter(pk=setting.pk).exists()
+
+
+class TestSettingValueShape:
+    """Значение с проверкой формы (INDEXATION_SCHEDULE): ошибка видна в форме (E2-03)."""
+
+    def test_wrong_general_value_is_rejected(self, admin_client: Client) -> None:
+        setting = DomainSetting.objects.get(key="INDEXATION_SCHEDULE", product=None)
+        url = reverse("admin:content_domainsetting_change", args=[setting.pk])
+        data = {"key": "INDEXATION_SCHEDULE", "value": '{"enabled": true}', "description": ""}
+        response = admin_client.post(url, data)
+        assert response.status_code == 200
+        assert "ровно с полями" in str(response.context["adminform"].errors)
+        setting.refresh_from_db()
+        assert setting.value["enabled"] is False
+
+    def test_general_schedule_can_be_switched_on(self, admin_client: Client) -> None:
+        setting = DomainSetting.objects.get(key="INDEXATION_SCHEDULE", product=None)
+        url = reverse("admin:content_domainsetting_change", args=[setting.pk])
+        value = {**setting.value, "enabled": True}
+        _post(admin_client, url, {"key": "INDEXATION_SCHEDULE", "value": json.dumps(value)})
+        setting.refresh_from_db()
+        assert setting.value["enabled"] is True
+
+    def test_wrong_product_value_is_rejected(self, admin_client: Client, product: Product) -> None:
+        row = {"key": "INDEXATION_SCHEDULE", "value": '{"retry_days": 0}', "description": ""}
+        response = admin_client.post(_change_url(product), _form(product, **_inline_rows(row)))
+        assert response.status_code == 200
+        assert not DomainSetting.objects.filter(product=product).exists()

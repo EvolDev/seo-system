@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.6 от 01.10.2026 — размещение можно убрать из плановых проверок (E2-03)
 -- Версия 1.5 от 30.09.2026 — стоимость API в центах с долями (ADR-040)
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
@@ -194,6 +195,7 @@ CREATE TABLE placements (
     currency               char(3) DEFAULT 'EUR',
     is_indexed             boolean,
     indexed_checked_at     timestamptz,
+    skip_checks            boolean NOT NULL DEFAULT false, -- «не проверять»: без плановых проверок
     announce_on_homepage   boolean,
     clicks_from_homepage   smallint,
     comment                text,

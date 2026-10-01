@@ -161,6 +161,19 @@ CELERY_BEAT_SCHEDULE = {
         # Пропущенный пульс (воркер лежал) не копится: выбрасывается до следующего.
         "options": {"expires": 50 * 60},
     },
+    # Проверка индексации (E2-03): кому пора — решают сроки в настройке
+    # INDEXATION_SCHEDULE; там же она выключается. Сводка оповещений — после
+    # проверок, когда их результаты уже в журнале.
+    "indexation": {
+        "task": "indexation_schedule_run",
+        "schedule": crontab(hour=6, minute=0),
+        "options": {"expires": 12 * 60 * 60},
+    },
+    "indexation_alerts": {
+        "task": "indexation_alerts",
+        "schedule": crontab(hour=6, minute=30),
+        "options": {"expires": 12 * 60 * 60},
+    },
 }
 
 # --- Кеш: Redis, следующая база после очереди (E2-02) ---

@@ -221,6 +221,15 @@ class TestSearch:
         assert len(provider.calls) == 3
         assert ApiUsage.objects.count() == 3
 
+    def test_fresh_skips_cache_but_fills_it(self, provider: FakeProvider, budget: int) -> None:
+        search("site:example.com")
+        search("site:example.com", fresh=True)
+        assert len(provider.calls) == 2
+        assert ApiUsage.objects.count() == 2
+        # Свежий ответ лёг в кеш: обычный поиск после него бесплатен.
+        search("site:example.com")
+        assert len(provider.calls) == 2
+
     def test_cache_expires(self, provider: FakeProvider, budget: int, settings: Settings) -> None:
         # 0 часов — кеш сразу устарел: второй запрос снова к провайдеру.
         settings.SERP_CACHE_HOURS = 0

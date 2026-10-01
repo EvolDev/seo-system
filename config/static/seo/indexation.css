@@ -1,0 +1,85 @@
+/* Проверка индексации в админке (E2-03): кнопки и всплывающие окна.
+   Цвета — переменные расцветок (admin-palettes.css), поэтому окна и
+   кнопки выглядят своими во всех четырёх оформлениях. */
+
+/* Кнопка в карточке выглядит как соседняя ссылка «История». */
+.object-tools .seo-object-tool { display: inline; margin: 0; }
+.object-tools .seo-object-tool button {
+  display: block;
+  float: left;
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--object-tools-bg);
+  color: var(--object-tools-fg);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.object-tools .seo-object-tool button:hover { background: var(--object-tools-hover-bg); }
+.object-tools .seo-object-tool button:disabled { opacity: 0.6; cursor: progress; }
+
+/* Кнопка ↻ в колонке «в индексе». */
+.seo-index-check {
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--link-fg, inherit);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.seo-index-check:hover { background: var(--darkened-bg, rgba(127, 127, 127, 0.15)); }
+.seo-index-check:disabled { cursor: progress; opacity: 0.6; }
+.seo-index-check.is-busy { animation: seo-spin 1s linear infinite; }
+@keyframes seo-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .seo-index-check.is-busy { animation: none; }
+}
+.seo-indexed .seo-busy-text { color: var(--body-quiet-color, #888); font-size: 0.75rem; }
+
+/* Всплывающие окна в правом нижнем углу. */
+.seo-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.seo-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 4px solid var(--body-quiet-color, #888);
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+.seo-toast.is-info { border-left-color: var(--primary, #79aec8); }
+.seo-toast.is-error { border-left-color: var(--error-fg, #ba2121); background: var(--message-error-bg, #ffefef); }
+.seo-toast.is-warning { border-left-color: #c7a000; background: var(--message-warning-bg, #ffc); }
+.seo-toast.is-success { border-left-color: #2e8540; background: var(--message-success-bg, #dfd); }
+.seo-toast-text { flex: 1; overflow-wrap: anywhere; }
+.seo-toast-text strong { display: block; margin-bottom: 2px; }
+.seo-toast-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.seo-toast-close:hover { opacity: 1; }

@@ -6,7 +6,10 @@
 
 Порядок одного поиска:
 1. Тот же запрос (текст, глубина, страна) за последние `SERP_CACHE_HOURS`
-   часов — ответ из кеша, денег не тратит.
+   часов — ответ из кеша, денег не тратит. `fresh=True` — кеш не читается,
+   ответ всё равно в него пишется: так ищет проверка, которой нужен ответ
+   на сейчас, — индексация (E2-03). Вчерашний ответ, ещё живой в кеше,
+   сдвинул бы ежедневную проверку на сутки.
 2. Потрачено за сегодня не меньше `SERP_DAILY_BUDGET_CENTS` —
    `SerpBudgetExceeded`: задача очереди встаёт на паузу до полуночи
    (config/queue.py), разработчику — одно оповещение за сутки.
@@ -45,14 +48,17 @@ CACHE_PREFIX = "serp:page"
 ALERT_PREFIX = "serp:budget-alert"
 
 
-def search(query: str, *, depth: int = 10, country: str = "us") -> SerpPage:
-    """Выдача Google по запросу: `depth` результатов, страна — код из двух букв."""
+def search(query: str, *, depth: int = 10, country: str = "us", fresh: bool = False) -> SerpPage:
+    """Выдача Google по запросу: `depth` результатов, страна — код из двух букв.
+
+    `fresh` — не брать ответ из кеша (см. описание модуля).
+    """
     query = " ".join(query.split())
     country = country.lower()
     _validate(query, depth, country)
 
     key = _cache_key(query, depth, country)
-    cached = cache.get(key)
+    cached = None if fresh else cache.get(key)
     if cached is not None:
         logger.info("выдача из кеша", extra={"query": query, "depth": depth, "country": country})
         return SerpPage.from_dict(cached)

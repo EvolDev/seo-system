@@ -258,6 +258,7 @@ Clideo) сюда не входит — его показывают ссылко�
 | currency | char(3) | |
 | is_indexed | bool | null = не проверялось |
 | indexed_checked_at | timestamptz | |
+| skip_checks | bool | «не проверять»: без плановых проверок индексации и живости; кнопка работает (E2-03, `schema.sql` 1.6) |
 | announce_on_homepage | bool | |
 | clicks_from_homepage | smallint | сколько кликов до статьи |
 | comment | text | что не так с полученной статьёй |
@@ -576,6 +577,13 @@ Markdown не считаются, границы абзацев, заголов�
 
 Второй индекс — сердце напоминаний: «что проверять сегодня» становится
 одним запросом.
+
+`result` проверки индексации (`placement`, `indexation`, E2-03, ADR-042):
+`url` — проверенный адрес статьи, `queries` — запросы к выдаче,
+`found_by` — `site` или `url` (каким запросом нашлась), `position` — место
+в выдаче, `manual` — запущена кнопкой; при неудаче — `seen` (что было в
+выдаче вместо статьи), `failing_days` и, один раз на серию неудач, `alert`.
+`next_check_at` — полночь дня проверки плюс срок из `INDEXATION_SCHEDULE`.
 
 ### `llm_calls`
 

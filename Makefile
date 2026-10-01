@@ -17,9 +17,11 @@ down:  ## Остановить окружение; данные Postgres и оч
 logs:  ## Логи всех сервисов
 	$(COMPOSE) logs -f
 
-# Воркер и beat не перечитывают код сами, в отличие от runserver.
-restart-queue:  ## Перезапустить воркер и beat — после правки кода задач
-	$(COMPOSE) restart worker beat
+# Воркер и beat не перечитывают код сами, в отличие от runserver. Пересоздаём,
+# а не перезапускаем: `restart` оставляет переменные окружения с момента
+# создания контейнера, и новый ключ из .env воркер бы не увидел.
+restart-queue:  ## Пересоздать воркер и beat — после правки кода задач или .env
+	$(COMPOSE) up -d --no-build --force-recreate worker beat
 
 migrate:  ## Применить миграции
 	$(RUN) python manage.py migrate

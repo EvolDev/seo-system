@@ -54,6 +54,7 @@ nav:
       - how-to/product-settings.md
       - how-to/find-sites.md
       - how-to/change-appearance.md
+      - how-to/check-indexation.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md
