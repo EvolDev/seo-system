@@ -20,15 +20,20 @@ from apps.sites.importing.report import Outcome, Report, Section
 from apps.sites.importing.run import ImportOptions, run_import
 from apps.sites.importing.workbook import ImportAbort
 from apps.sites.models import (
+    PlacementType,
     Product,
     ProductSite,
+    Seller,
     Site,
     SiteAudit,
     SiteList,
     SiteListItem,
     SiteMetric,
+    SiteNote,
+    SitePrice,
     SiteStatus,
 )
+from apps.sites.offers import TABLE_SOURCE
 
 pytestmark = pytest.mark.django_db
 
@@ -79,42 +84,43 @@ def _status(domain: str, product: Product) -> ProductSite:
     return ProductSite.objects.get(site__domain=domain, product=product)
 
 
-class TestFirstImport:
-    @pytest.fixture
-    def book(self, make_workbook: MakeWorkbook) -> Path:
-        return make_workbook(
-            base=[
-                (
-                    "a.com",
-                    {
-                        **PUBLISHED,
-                        "Комментарий к площадке": "Делают инсёрт в существующую статью",
-                        "Пример статьи на Clideo": "https://www.a.com/clideo-article",
-                    },
-                ),
-                ("b.com", ORDERED),
-                (
-                    "c.com",
-                    {
-                        "Анкор1": "convert",
-                        "Ссылка1": "https://convertio.co/",
-                        "Комментарий к площадке": "Отказались писать",
-                    },
-                ),
-                (
-                    "d.com",
-                    {
-                        "Комментарий к площадке": "Nofollow, отбрасываем",
-                        "Тип ссылки статья": "nofollow",
-                    },
-                ),
-                ("e.com", {}),
-                ("f.com", {"Пометка о рекламе статья": "Да"}),
-                ("g.com", {"Пример статьи на Clideo": "https://other.com/post"}),
-            ],
-            keywords=KEYWORDS,
-        )
+@pytest.fixture
+def book(make_workbook: MakeWorkbook) -> Path:
+    return make_workbook(
+        base=[
+            (
+                "a.com",
+                {
+                    **PUBLISHED,
+                    "Комментарий к площадке": "Делают инсёрт в существующую статью",
+                    "Пример статьи на Clideo": "https://www.a.com/clideo-article",
+                },
+            ),
+            ("b.com", ORDERED),
+            (
+                "c.com",
+                {
+                    "Анкор1": "convert",
+                    "Ссылка1": "https://convertio.co/",
+                    "Комментарий к площадке": "Отказались писать",
+                },
+            ),
+            (
+                "d.com",
+                {
+                    "Комментарий к площадке": "Nofollow, отбрасываем",
+                    "Тип ссылки статья": "nofollow",
+                },
+            ),
+            ("e.com", {}),
+            ("f.com", {"Пометка о рекламе статья": "Да"}),
+            ("g.com", {"Пример статьи на Clideo": "https://other.com/post"}),
+        ],
+        keywords=KEYWORDS,
+    )
 
+
+class TestFirstImport:
     def test_decisions_under_convertio(
         self, book: Path, products: tuple[Product, Product], run: Callable[..., Report]
     ) -> None:
@@ -186,9 +192,7 @@ class TestFirstImport:
     ) -> None:
         run(book)
         site = Site.objects.get(domain="a.com")
-        assert site.notes == "Делают инсёрт в существующую статью"
         assert site.language == "en"
-        assert Site.objects.get(domain="d.com").notes is None
         metric = SiteMetric.objects.get(site=site)
         assert timezone.localtime(metric.checked_at) == timezone.make_aware(
             dt.datetime(2026, 9, 27)
@@ -198,6 +202,95 @@ class TestFirstImport:
         assert items.count() == 7
         assert all(item.first_seen for item in items)
         assert KeywordPosition.objects.filter(keyword__keyword="convert").count() == 4
+
+
+class TestPricesAndNotes:
+    """Цены — предложения Collaborator, комментарии — в истории заметок (ADR-043)."""
+
+    def test_prices_are_collaborator_offers_and_working(
+        self, book: Path, products: tuple[Product, Product], run: Callable[..., Report]
+    ) -> None:
+        run(book)
+        site = Site.objects.get(domain="a.com")
+        price = SitePrice.objects.get(site=site)
+        assert price.seller == Seller.collaborator()
+        assert price.placement_type == PlacementType.GUEST_POST
+        assert (price.placement_cents, price.writing_cents) == (54457, 4084)
+        # Первая цена — рабочая сама, решать по ней нечего.
+        assert site.price_id == price.pk
+        assert price.reviewed_at is not None
+
+    def test_comments_go_to_history(
+        self, book: Path, products: tuple[Product, Product], run: Callable[..., Report]
+    ) -> None:
+        convertio, _ = products
+        report = run(book)
+        notes = {
+            (note.site.domain, note.product, note.body)
+            for note in SiteNote.objects.select_related("site", "product")
+        }
+        assert ("a.com", None, "Делают инсёрт в существующую статью") in notes
+        # Отказ — заметка под Convertio; причина остаётся и в решении по продукту.
+        assert ("d.com", convertio, "Nofollow, отбрасываем") in notes
+        assert all(note.source == TABLE_SOURCE for note in SiteNote.objects.all())
+        assert report.counts["site_notes"][Outcome.CREATED] == len(notes)
+
+    def test_second_run_adds_no_notes(
+        self, book: Path, products: tuple[Product, Product], run: Callable[..., Report]
+    ) -> None:
+        run(book)
+        notes = SiteNote.objects.count()
+        run(book)
+        assert SiteNote.objects.count() == notes
+
+    def test_new_comment_is_new_note(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        run(make_workbook(base=[("a.com", {"Комментарий к площадке": "Пишут быстро"})]))
+        run(
+            make_workbook(
+                base=[("a.com", {"Комментарий к площадке": "Подняли цену"})], name="2.xlsx"
+            )
+        )
+        bodies = set(SiteNote.objects.values_list("body", flat=True))
+        assert bodies == {"Пишут быстро", "Подняли цену"}
+
+    def test_working_price_is_not_changed_by_import(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        price = "Цена размещения статья, EUR"
+        run(make_workbook(base=[("a.com", {price: 200})], name="1.xlsx"))
+        site = Site.objects.get(domain="a.com")
+        working = site.price_id
+        # Та же дата, другая цена: рабочая не переписывается — рядом новое предложение.
+        run(make_workbook(base=[("a.com", {price: 220})], name="2.xlsx"))
+        # Новая дата — тоже новое предложение, ждёт решения.
+        run(
+            make_workbook(base=[("a.com", {price: 230})], name="3.xlsx"),
+            as_of=dt.date(2026, 10, 27),
+        )
+        site.refresh_from_db()
+        assert site.price_id == working
+        offers = SitePrice.objects.filter(site=site).order_by("pk")
+        assert [o.placement_cents for o in offers] == [20000, 22000, 23000]
+        assert [o.reviewed_at is None for o in offers] == [False, True, True]
+
+    def test_same_price_on_new_date_needs_no_decision(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        book = make_workbook(base=[("a.com", {})])
+        run(book)
+        run(book, as_of=dt.date(2026, 10, 27))
+        assert not SitePrice.objects.filter(reviewed_at__isnull=True).exists()
 
 
 class TestRepeatedImport:

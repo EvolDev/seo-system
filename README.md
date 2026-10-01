@@ -95,6 +95,10 @@ Docker `pgdata`, очередь задач — в томе `redisdata`.
 Любая команда Django:
 `docker compose run --rm app python manage.py <команда>`.
 
+Курсы валют для сравнения цен продавцов система берёт сама раз в день;
+на новой базе первый раз — вручную:
+`docker compose run --rm app python manage.py exchange_rates`.
+
 Новая зависимость: `uv add <пакет>` (или `uv add --dev <пакет>`), затем
 `make up` для пересборки образа.
 

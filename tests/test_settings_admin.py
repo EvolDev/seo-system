@@ -1,6 +1,7 @@
 """Настройки в админке: страница продукта и раздел «Настройки» (E1-05, ADR-035)."""
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -138,13 +139,11 @@ class TestProductPage:
         assert _local(product) == {}
 
     def test_threshold_turns_on_expected_spend(
-        self, admin_client: Client, product: Product
+        self, admin_client: Client, product: Product, offer: Callable[..., SitePrice]
     ) -> None:
         # Критерий приёмки: после ввода порога expected_spend считается, без него — пусто.
         site = Site.objects.create(domain="example.com")
-        SitePrice.objects.create(
-            site=site, placement_cents=40000, announce_cents=10000, writing_cents=4000
-        )
+        offer(site, 40000, announce_cents=10000, writing_cents=4000)
 
         def spend() -> Any:
             with connection.cursor() as cursor:

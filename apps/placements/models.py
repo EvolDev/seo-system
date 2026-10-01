@@ -12,10 +12,14 @@
 import datetime as dt
 from typing import ClassVar
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.keywords.models import AnchorType
+
+# Формат размещения — колонка «Тип ссылки» Excel; общий с ценами площадки (ADR-043).
+from apps.sites.models import PlacementType
 from config.db import PgEnumField, PgNow
 from config.run_id import current_run_id
 
@@ -28,13 +32,6 @@ class PlacementStatus(models.TextChoices):
     PUBLISHED = "published", "Опубликовано"
     REJECTED = "rejected", "Отклонено"
     CANCELLED = "cancelled", "Отменено"
-
-
-class PlacementType(models.TextChoices):
-    """Формат размещения — колонка «Тип ссылки» Excel. Не dofollow/nofollow."""
-
-    GUEST_POST = "guest_post", "Guest Post"
-    LINK_INSERTION = "link_insertion", "Link Insertion"
 
 
 class Placement(models.Model):
@@ -105,6 +102,26 @@ class Placement(models.Model):
     clicks_from_homepage = models.SmallIntegerField("кликов от главной", null=True, blank=True)
     comment = models.TextField(
         "комментарий", null=True, blank=True, help_text="Что не так с полученной статьёй."
+    )
+    # Через кого куплено и кто из сотрудников вёл (ADR-041). Сотрудник —
+    # пользователь системы, можно без права входа.
+    seller = models.ForeignKey(
+        "sites.Seller",
+        models.PROTECT,
+        verbose_name="продавец",
+        related_name="placements",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="сотрудник",
+        related_name="placements",
+        null=True,
+        blank=True,
+        db_index=False,
     )
     run_id = models.UUIDField("run_id", null=True, blank=True, default=current_run_id)
     created_at = models.DateTimeField("создано", db_default=PgNow())

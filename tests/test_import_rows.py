@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from apps.placements.models import PlacementStatus, PlacementType
+from apps.placements.models import PlacementStatus
 from apps.sites.importing.report import Report, Section
 from apps.sites.importing.rows import (
     BASE_REQUIRED,
@@ -27,6 +27,7 @@ from apps.sites.importing.rows import (
     parse_keywords,
 )
 from apps.sites.importing.workbook import ImportAbort, open_workbook, position_columns, read_sheet
+from apps.sites.models import PlacementType
 
 MakeWorkbook = Callable[..., Path]
 

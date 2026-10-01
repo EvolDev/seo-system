@@ -124,7 +124,7 @@ class PlacementAdmin(NoDeleteAdmin):
     list_filter = ("product", "status", "placement_type", "is_indexed", "skip_checks")
     search_fields = ("site__domain", "article_url", "collaborator_order_id")
     list_select_related = ("site", "product")
-    autocomplete_fields = ("site",)
+    autocomplete_fields = ("site", "seller")
     # «В индексе» и время проверки пишет проверка; результат, увиденный
     # человеком, — запись в журнале проверок (E1-09), а не правка поля.
     readonly_fields = (

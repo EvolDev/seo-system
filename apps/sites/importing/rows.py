@@ -8,12 +8,13 @@ import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 
-from apps.placements.models import PlacementStatus, PlacementType
+from apps.placements.models import PlacementStatus
 from apps.sites.domains import normalize_domain
 from apps.sites.importing import values
 from apps.sites.importing.languages import language_code
 from apps.sites.importing.report import Report, Section
 from apps.sites.importing.workbook import Sheet, SheetRow, position_columns
+from apps.sites.models import PlacementType
 
 # Основная вкладка «База линкбилдинга».
 BASE_SHEET = "База линкбилдинга"

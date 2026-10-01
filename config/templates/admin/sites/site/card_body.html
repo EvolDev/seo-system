@@ -1,0 +1,132 @@
+{% load l10n %}
+{% comment %}
+Карточка площадки (E1-07, ADR-043): метрики, рабочая цена, предложения
+продавцов, история цен, прочие данные, заметки. Одна и та же разметка — в
+окне справа (seo/site-card.js подгружает её без перезагрузки) и на
+отдельной странице card.html. Формы с data-card-form окно отправляет само
+и показывает обновлённую карточку; без скрипта они уходят обычным путём.
+{% endcomment %}
+<div class="seo-card-content">
+  <div class="seo-card-head">
+    <div>
+      <h2 class="seo-card-title">{{ site.domain }}</h2>
+      <div class="seo-sub">
+        {% if latest %}DR {{ latest.dr|default:"—" }}{{ metrics_mark }} · трафик {{ latest.organic_traffic|default:"—" }}{% if latest.metrics_at %} · замер {{ latest.metrics_at|date:"d.m.Y" }}{% endif %}{% else %}Метрик нет{% endif %}
+      </div>
+      {% if statuses %}
+      <div class="seo-sub">
+        {% for row in statuses %}{{ row.product.name }}: <b>{{ row.get_status_display }}</b>{% if row.reject_reason %} — {{ row.reject_reason }}{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="seo-card-tools">
+      <a href="{{ change_url }}">Факты о площадке</a>
+      <button type="button" class="seo-card-close" data-card-close aria-label="Закрыть карточку">✕</button>
+    </div>
+  </div>
+
+  <section>
+    <h3>Рабочая цена</h3>
+    {% if working %}
+    <div class="seo-card-working">{{ working_price|default:"—" }} · {{ working.get_placement_type_display }} · {{ working.seller }} <span class="seo-sub">цена от {{ working.checked_at|date:"d.m.Y" }}</span></div>
+    <div class="seo-sub">Написание: {% if working_writing %}{{ working_writing }}{% else %}не предлагает — пишем сами{% endif %} · анонс: {{ working_announce }}</div>
+    {% else %}
+    <p class="seo-sub">Нет — выберите предложение ниже.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h3>Предложения продавцов</h3>
+    {% if offer_rows %}
+    <div class="seo-table-wrap">
+      <table class="seo-card-table">
+        <thead><tr><th>Продавец</th><th>Услуга</th><th>Цена</th><th>К рабочей</th><th>Написание</th><th>Анонс</th><th>Серая</th><th>Дата</th><th></th></tr></thead>
+        <tbody>
+        {% for row in offer_rows %}
+          <tr class="{% if row.is_working %}seo-working{% endif %}">
+            <td>{{ row.offer.seller_name }}{% if row.pending and not row.is_working %} <span class="seo-chip seo-info">новое</span>{% endif %}</td>
+            <td>{{ row.offer.get_placement_type_display }}</td>
+            <td>{{ row.price }}</td>
+            <td>{% if row.is_working %}<span class="seo-chip seo-down">рабочая</span>{% elif row.other_service %}<span class="seo-flat">другая услуга</span>{% elif row.delta %}{{ row.delta }}{% endif %}</td>
+            <td>{{ row.writing|default:"—" }}</td>
+            <td>{{ row.announce }}</td>
+            <td>{{ row.gray }}</td>
+            <td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td>
+            <td>
+              {% if can_change and not row.is_working %}
+              <form method="post" action="{{ fix_url }}" data-card-form>{% csrf_token %}
+                <input type="hidden" name="offer" value="{{ row.offer.pk|unlocalize }}">
+                <button type="submit" class="seo-btn">Сделать рабочей</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_change and has_pending %}
+    <form method="post" action="{{ keep_url }}" data-card-form class="seo-inline-form">{% csrf_token %}
+      <button type="submit" class="seo-btn">Оставить как есть</button>
+      <span class="seo-sub">снять пометки «новое», рабочую цену не менять</span>
+    </form>
+    {% endif %}
+    {% else %}
+    <p class="seo-sub">Цен нет.</p>
+    {% endif %}
+    <p class="seo-sub">Последнее предложение каждого продавца по каждой услуге, дешёвые в евро — первыми. Сравниваем только цену размещения одной услуги; написание и анонс — справочно.{% if can_change %} <a href="{{ add_offer_url }}">Добавить предложение</a>{% endif %}</p>
+  </section>
+
+  <section>
+    <details>
+      <summary>История цен ({{ history|length }})</summary>
+      {% if history %}
+      <div class="seo-table-wrap">
+        <table class="seo-card-table"><tbody>
+        {% for row in history %}
+          <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{{ row.price }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
+        {% endfor %}
+        </tbody></table>
+      </div>
+      {% else %}
+      <p class="seo-sub">Старых цен нет.</p>
+      {% endif %}
+    </details>
+  </section>
+
+  <section>
+    <h3>Прочие данные из файлов</h3>
+    {% for offer in extras %}
+    <div class="seo-extra">
+      <div class="seo-sub">{{ offer.seller_name }} · {{ offer.checked_at|date:"d.m.Y" }}</div>
+      <div class="seo-kv">{% for key, value in offer.extra.items %}<span>{{ key }}: <b>{{ value }}</b></span>{% endfor %}</div>
+    </div>
+    {% empty %}
+    <p class="seo-sub">Нет.</p>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h3>Заметки</h3>
+    {% if can_change %}
+    <form method="post" action="{{ note_url }}" data-card-form class="seo-note-form">{% csrf_token %}
+      <textarea name="body" rows="2" required placeholder="Новая заметка" aria-label="Текст заметки"></textarea>
+      <div>
+        <select name="product" aria-label="Продукт">
+          <option value="">Без продукта</option>
+          {% for product in products %}<option value="{{ product.pk|unlocalize }}">{{ product.name }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="seo-btn seo-btn-primary">Добавить заметку</button>
+      </div>
+    </form>
+    {% endif %}
+    <ul class="seo-notes-list">
+      {% for note in notes %}
+      <li>{{ note.body|linebreaksbr }}<span class="seo-sub">{{ note.created_at|date:"d.m.Y H:i" }} · {% if note.author %}{{ note.author }}{% else %}{{ note.source|default:"—" }}{% endif %}{% if note.product %} · {{ note.product.name }}{% endif %}</span></li>
+      {% empty %}
+      <li class="seo-sub">Заметок нет.</li>
+      {% endfor %}
+    </ul>
+    <p class="seo-sub">Заметки не правятся и не удаляются: это история. Смена рабочей цены и отказ попадают сюда сами.</p>
+  </section>
+</div>

@@ -1,11 +1,12 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.7 от 01.10.2026 — продавцы, рабочая цена площадки, заметки, курсы валют (ADR-043)
 -- Версия 1.6 от 01.10.2026 — размещение можно убрать из плановых проверок (E2-03)
 -- Версия 1.5 от 30.09.2026 — стоимость API в центах с долями (ADR-040)
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 31 таблица, 8 представлений)
+-- (проверена применением на PostgreSQL 16: 34 таблицы и заглушка auth_user, 9 представлений, 1 функция)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -18,6 +19,13 @@
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- Пользователи — таблица Django (django.contrib.auth), её создаёт Django. Здесь
+-- заглушка: только колонка, на которую ссылаются автор заметки и сотрудник у
+-- размещения, чтобы схема применялась сама по себе (ADR-029, уточнение 01.10.2026).
+CREATE TABLE auth_user (
+    id  integer PRIMARY KEY
+);
 
 -- ---------- Перечисления ----------
 
@@ -59,6 +67,22 @@ CREATE TABLE products (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- Продавец площадок: перекупщик со своим прайсом или каталог (ADR-041, ADR-043).
+-- Collaborator — тоже продавец, ровно один с is_collaborator.
+CREATE TABLE sellers (
+    id               bigserial PRIMARY KEY,
+    name             text NOT NULL,
+    contacts         text,
+    notes            text,
+    currency         char(3) NOT NULL DEFAULT 'EUR',    -- валюта прайсов по умолчанию
+    is_collaborator  boolean NOT NULL DEFAULT false,
+    metrics_trusted  boolean NOT NULL DEFAULT false,    -- его DR и трафик — как наши замеры
+    created_at       timestamptz NOT NULL DEFAULT now()
+);
+-- Имя без учёта регистра: «Athena Smith» и «Athena smith» — один продавец.
+CREATE UNIQUE INDEX sellers_name_key ON sellers (lower(name));
+CREATE UNIQUE INDEX sellers_collaborator_key ON sellers (is_collaborator) WHERE is_collaborator;
+
 -- Площадка сама по себе: факты, которые не зависят от продукта.
 -- Статус, причина отказа и соответствие тематике — в product_sites.
 CREATE TABLE sites (
@@ -74,8 +98,8 @@ CREATE TABLE sites (
     links_allowed       smallint,
     link_type           text,               -- заявленный тип ссылки: dofollow / nofollow
     marks_as_ad         boolean,            -- «Пометка о рекламе статья» = Да
-    notes               text,
     content_selector    text,               -- ручной CSS-селектор тела статьи для краулера
+    price_id            bigint,             -- рабочая цена: предложение из site_prices (ADR-043)
     is_deleted          boolean NOT NULL DEFAULT false,
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now()
@@ -108,22 +132,33 @@ CREATE TABLE site_metrics (
     top_geo_traffic integer,
     total_keywords  integer,
     source          metric_source NOT NULL DEFAULT 'manual',
+    seller_id       bigint REFERENCES sellers(id),     -- замер со слов продавца; пусто — наш
     raw             jsonb,
     checked_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_metrics_site ON site_metrics(site_id, checked_at DESC);
 
+-- Предложение продавца на дату: одна услуга — одна цена (ADR-043). Снимок: новая
+-- цена — новая строка. Сравнивается только цена услуги; написание, анонс и серая
+-- цена — справочно. reviewed_at пусто — по предложению ещё не решили.
 CREATE TABLE site_prices (
     id               bigserial PRIMARY KEY,
     site_id          bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-    placement_cents  integer,
+    seller_id        bigint NOT NULL REFERENCES sellers(id),
+    placement_type   placement_type NOT NULL DEFAULT 'guest_post',
+    placement_cents  integer,                           -- цена услуги
     announce_cents   integer,
     writing_cents    integer,
+    gray_cents       integer,                           -- серая цена: площадка принимает серые тематики
     currency         char(3) NOT NULL DEFAULT 'EUR',
+    extra            jsonb,                             -- «прочие данные» строки файла: заголовок → значение
     source           metric_source NOT NULL DEFAULT 'manual',
+    reviewed_at      timestamptz,
     checked_at       timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_prices_site ON site_prices(site_id, checked_at DESC);
+CREATE INDEX idx_prices_site ON site_prices(site_id, seller_id, placement_type, checked_at DESC);
+CREATE INDEX idx_prices_pending ON site_prices(site_id) WHERE reviewed_at IS NULL;
+ALTER TABLE sites ADD FOREIGN KEY (price_id) REFERENCES site_prices(id);
 
 CREATE TABLE gray_scans (
     id             bigserial PRIMARY KEY,
@@ -178,6 +213,31 @@ CREATE TABLE site_list_items (
 );
 CREATE INDEX idx_list_items_site ON site_list_items(site_id);
 
+-- Заметки о площадке — история: не правятся и не удаляются (ADR-043). Автор —
+-- пользователь, или источник — файл («таблица линкбилдинга»). Продукт — если
+-- заметка про решение под него.
+CREATE TABLE site_notes (
+    id          bigserial PRIMARY KEY,
+    site_id     bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    product_id  bigint REFERENCES products(id),
+    body        text NOT NULL,
+    author_id   integer REFERENCES auth_user(id),
+    source      text,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_site_notes_site ON site_notes(site_id, created_at DESC);
+
+-- Курс ЕЦБ: сколько единиц валюты за 1 евро на дату. Для сравнения цен в разных
+-- валютах; деньги в разных валютах не складываются (ADR-043).
+CREATE TABLE exchange_rates (
+    id          bigserial PRIMARY KEY,
+    currency    char(3) NOT NULL,
+    rate_date   date NOT NULL,
+    rate        numeric(14,6) NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (currency, rate_date)
+);
+
 -- ---------- Блок 2. Размещения ----------
 
 CREATE TABLE placements (
@@ -199,6 +259,8 @@ CREATE TABLE placements (
     announce_on_homepage   boolean,
     clicks_from_homepage   smallint,
     comment                text,
+    seller_id              bigint REFERENCES sellers(id),    -- через кого куплено
+    employee_id            integer REFERENCES auth_user(id), -- кто из сотрудников вёл
     run_id                 uuid,
     created_at             timestamptz NOT NULL DEFAULT now(),
     updated_at             timestamptz NOT NULL DEFAULT now()
@@ -516,6 +578,17 @@ CREATE TABLE api_usage (
 );
 CREATE INDEX idx_usage_provider ON api_usage(provider, created_at DESC);
 
+-- ---------- Функции ----------
+
+-- Курс для пересчёта в евро: сколько единиц валюты за 1 евро, последний известный
+-- (ADR-043). Евро — 1; курса нет — пусто, и сумма в евро тоже пуста.
+CREATE FUNCTION eur_rate(cur char(3)) RETURNS numeric
+LANGUAGE sql STABLE AS $$
+    SELECT CASE WHEN cur = 'EUR' THEN 1
+                ELSE (SELECT r.rate FROM exchange_rates r WHERE r.currency = cur
+                      ORDER BY r.rate_date DESC LIMIT 1) END
+$$;
+
 -- ---------- Представления ----------
 
 CREATE VIEW v_keyword_coverage AS
@@ -609,47 +682,113 @@ FROM articles a
 WHERE a.origin = 'system'
 GROUP BY 1;
 
--- Площадка «на сегодня»: последние метрики, цены и серость. Только факты,
--- от продукта не зависят; статус и вердикт — в v_product_site_latest.
--- reference_total — то, что сравнивается с ценовым ориентиром продукта:
--- размещение + анонс. Написание в него не входит никогда (промпт аудитора).
+-- Текущие предложения площадки: последнее предложение каждого продавца за каждую
+-- услугу; цена услуги — ещё и в евро по последнему курсу ЕЦБ, только для сравнения
+-- и показа (ADR-043). Отсюда пометки в v_site_latest и список предложений на экранах.
+CREATE VIEW v_site_offers AS
+SELECT o.id, o.site_id, o.seller_id, sl.name AS seller, o.placement_type,
+       o.placement_cents, o.currency,
+       round(o.placement_cents / eur_rate(o.currency))::integer AS placement_eur_cents,
+       o.announce_cents, o.writing_cents, o.gray_cents, o.extra,
+       o.reviewed_at, o.checked_at
+FROM (SELECT DISTINCT ON (x.site_id, x.seller_id, x.placement_type) *
+      FROM site_prices x
+      ORDER BY x.site_id, x.seller_id, x.placement_type, x.checked_at DESC, x.id DESC) o
+JOIN sellers sl ON sl.id = o.seller_id;
+
+-- Площадка «на сегодня»: метрики, рабочая цена, пометки разбора, серость, заметки.
+-- Только то, что не зависит от продукта; статус и вердикт — в v_product_site_latest.
+-- Метрики — последний доверенный замер (наш или от продавца с metrics_trusted), нет
+-- такого — последний со слов продавца, metrics_trusted = false (ADR-043).
+-- Цена — рабочая (sites.price_id). Евро — eur_rate(), только для сравнения и
+-- показа. reference_total — то, что сравнивается с ценовым ориентиром продукта:
+-- размещение + анонс, в евро; написание в него не входит никогда (промпт
+-- аудитора). Нет рабочей цены или курса — пусто.
+-- Пометки разбора — по цене услуги, без написания и анонса:
+-- new_price — текущее предложение того же продавца за ту же услугу, если оно не
+-- рабочее; cheaper — самое дешёвое текущее предложение другого продавца за ту же
+-- услугу, если оно дешевле рабочей в евро; *_pending — по нему ещё не решили;
+-- offers_pending — у площадки есть неразобранные предложения.
 CREATE VIEW v_site_latest AS
 SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        s.links_allowed, s.link_type, s.marks_as_ad,
        m.dr, m.organic_traffic, m.total_keywords, m.top_geo, m.checked_at AS metrics_at,
-       pr.placement_cents, pr.announce_cents, pr.writing_cents, pr.checked_at AS prices_at,
-       coalesce(pr.placement_cents, 0) + coalesce(pr.announce_cents, 0) AS reference_total_cents,
-       g.ratio AS gray_ratio
+       m.trusted AS metrics_trusted, ms.name AS metrics_seller,
+       pr.id AS price_id, pr.seller_id AS price_seller_id, ps.name AS price_seller,
+       pr.placement_type AS price_type,
+       pr.placement_cents, pr.announce_cents, pr.writing_cents,
+       pr.currency AS price_currency, pr.checked_at AS prices_at,
+       round(pr.placement_cents / eur_rate(pr.currency))::integer AS placement_eur_cents,
+       round(pr.writing_cents / eur_rate(pr.currency))::integer AS writing_eur_cents,
+       round((pr.placement_cents + coalesce(pr.announce_cents, 0)) / eur_rate(pr.currency))::integer
+         AS reference_total_cents,
+       np.id AS new_price_id, np.placement_cents AS new_price_cents,
+       np.currency AS new_price_currency, np.reviewed_at IS NULL AS new_price_pending,
+       ch.id AS cheaper_id, ch.seller AS cheaper_seller, ch.placement_cents AS cheaper_cents,
+       ch.currency AS cheaper_currency, ch.placement_eur_cents AS cheaper_eur_cents,
+       ch.reviewed_at IS NULL AS cheaper_pending,
+       EXISTS (SELECT 1 FROM site_prices x
+               WHERE x.site_id = s.id AND x.reviewed_at IS NULL) AS offers_pending,
+       g.ratio AS gray_ratio,
+       nc.notes AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at
 FROM sites s
-LEFT JOIN LATERAL (SELECT * FROM site_metrics x WHERE x.site_id = s.id
-                   ORDER BY checked_at DESC LIMIT 1) m ON true
-LEFT JOIN LATERAL (SELECT * FROM site_prices x WHERE x.site_id = s.id
-                   ORDER BY checked_at DESC LIMIT 1) pr ON true
+LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.top_geo, x.checked_at,
+                          x.seller_id, x.seller_id IS NULL OR xs.metrics_trusted AS trusted
+                   FROM site_metrics x LEFT JOIN sellers xs ON xs.id = x.seller_id
+                   WHERE x.site_id = s.id
+                   ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC
+                   LIMIT 1) m ON true
+LEFT JOIN sellers ms ON ms.id = m.seller_id
+LEFT JOIN site_prices pr ON pr.id = s.price_id
+LEFT JOIN sellers ps ON ps.id = pr.seller_id
+LEFT JOIN LATERAL (SELECT o.id, o.placement_cents, o.currency, o.reviewed_at
+                   FROM v_site_offers o
+                   WHERE o.site_id = s.id AND o.seller_id = pr.seller_id
+                     AND o.placement_type = pr.placement_type AND o.id <> pr.id) np ON true
+LEFT JOIN LATERAL (SELECT o.id, o.seller, o.placement_cents, o.currency, o.placement_eur_cents,
+                          o.reviewed_at
+                   FROM v_site_offers o
+                   WHERE o.site_id = s.id AND o.placement_type = pr.placement_type
+                     AND o.seller_id <> pr.seller_id
+                     AND o.placement_eur_cents < round(pr.placement_cents / eur_rate(pr.currency))
+                   ORDER BY o.placement_eur_cents, o.id LIMIT 1) ch ON true
 LEFT JOIN LATERAL (SELECT * FROM gray_scans x WHERE x.site_id = s.id
                    ORDER BY checked_at DESC LIMIT 1) g ON true
+LEFT JOIN LATERAL (SELECT count(*) AS notes FROM site_notes x WHERE x.site_id = s.id) nc ON true
+LEFT JOIN LATERAL (SELECT x.body, x.created_at FROM site_notes x WHERE x.site_id = s.id
+                   ORDER BY x.created_at DESC, x.id DESC LIMIT 1) ln ON true
 WHERE NOT s.is_deleted;
 
 -- Площадка в работе продукта «на сегодня»: статус, последний аудит под этот
 -- продукт, его опубликованные размещения и другие наши продукты, уже
 -- размещённые на площадке (ADR-030).
--- we_write и expected_spend вычисляются здесь и больше нигде (одна точка правды).
+-- we_write и expected_spend вычисляются здесь и больше нигде (одна точка правды),
+-- от рабочей цены, в евро (ADR-043).
 -- Порог написания — writing_eur из настройки PRICE_REFERENCE: локальное значение
 -- продукта перекрывает общее. ≤ порога — пишет площадка, > порога или пусто —
--- пишем мы. expected_spend — сколько заплатим площадке на самом деле.
--- Настройки нет — expected_spend пусто: порог не угадываем.
+-- пишем мы. У вставки ссылки писать нечего — we_write пусто. expected_spend —
+-- сколько заплатим площадке на самом деле. Настройки или цены нет — пусто:
+-- порог не угадываем.
 CREATE VIEW v_product_site_latest AS
 SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.reject_reason, ps.imported_undecided,
        l.domain, l.language, l.topics, l.declared_topics,
        l.links_allowed, l.link_type, l.marks_as_ad,
        l.dr, l.organic_traffic, l.total_keywords, l.top_geo, l.metrics_at,
-       l.placement_cents, l.announce_cents, l.writing_cents, l.prices_at,
-       l.reference_total_cents,
-       (l.writing_cents IS NULL OR l.writing_cents > w.writing_cents) AS we_write,
+       l.metrics_trusted, l.metrics_seller,
+       l.price_id, l.price_seller_id, l.price_seller, l.price_type,
+       l.placement_cents, l.announce_cents, l.writing_cents, l.price_currency, l.prices_at,
+       l.placement_eur_cents, l.writing_eur_cents, l.reference_total_cents,
+       CASE WHEN l.price_type = 'link_insertion' THEN NULL
+            ELSE l.writing_eur_cents IS NULL OR l.writing_eur_cents > w.writing_cents END AS we_write,
        l.reference_total_cents
          + CASE WHEN w.writing_cents IS NULL THEN NULL
-                WHEN l.writing_cents <= w.writing_cents THEN l.writing_cents
+                WHEN l.writing_eur_cents <= w.writing_cents THEN l.writing_eur_cents
                 ELSE 0 END AS expected_spend_cents,
+       l.new_price_id, l.new_price_cents, l.new_price_currency, l.new_price_pending,
+       l.cheaper_id, l.cheaper_seller, l.cheaper_cents, l.cheaper_currency,
+       l.cheaper_eur_cents, l.cheaper_pending, l.offers_pending,
        l.gray_ratio,
+       l.notes_count, l.last_note, l.last_note_at,
        a.verdict AS last_verdict, a.score AS last_score, a.created_at AS audited_at,
        pp.published AS placements_published,
        op.names AS other_products_placed

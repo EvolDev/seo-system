@@ -232,3 +232,41 @@ def make_workbook(tmp_path: Path) -> Callable[..., Path]:
         return path
 
     return build
+
+
+# Предложение продавца в тестах (E1-07, ADR-043). Продавец по умолчанию —
+# Collaborator: его заводит миграция `sites.0007`, в тестовой базе он есть.
+OfferFactory = Callable[..., Any]
+
+
+@pytest.fixture
+def offer(db: None) -> OfferFactory:
+    """Создаёт предложение: `offer(site, 24000, seller=..., working=True, **поля)`.
+
+    `working` — сразу рабочая цена площадки, без заметки в истории (как
+    первая цена при импорте); такое предложение уже разобрано.
+    """
+    # Модели — внутри: conftest читается до того, как Django готов.
+    from django.utils import timezone
+
+    from apps.sites.models import Seller, Site, SitePrice
+
+    def make(
+        site: Any,
+        cents: int | None = 10000,
+        *,
+        seller: Any = None,
+        working: bool = True,
+        **fields: Any,
+    ) -> Any:
+        if working:
+            fields.setdefault("reviewed_at", timezone.now())
+        price = SitePrice.objects.create(
+            site=site, seller=seller or Seller.collaborator(), placement_cents=cents, **fields
+        )
+        if working:
+            Site.all_objects.filter(pk=site.pk).update(price=price)
+            site.price = price
+        return price
+
+    return make

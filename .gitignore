@@ -19,7 +19,7 @@ __pycache__/
 htmlcov/
 
 # Сборка пользовательской документации (mkdocs build)
-site/
+/site/
 
 # Скриншоты для агента
 screens/

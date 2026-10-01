@@ -4,6 +4,7 @@
 `v_overdue_checks` — в `test_observability_models` (E1-03).
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -29,6 +30,8 @@ from apps.sites.models import (
 )
 
 pytestmark = pytest.mark.django_db
+
+OfferFactory = Callable[..., SitePrice]
 
 EARLY = datetime(2026, 8, 1, tzinfo=UTC)
 LATE = datetime(2026, 9, 1, tzinfo=UTC)
@@ -133,24 +136,26 @@ class TestSiteLatest:
     def _latest(self, site: Site) -> dict[str, Any]:
         return _one("SELECT * FROM v_site_latest WHERE id = %s", site.pk)
 
-    def test_latest_snapshots(self, site: Site) -> None:
+    def test_latest_snapshots_and_working_price(self, site: Site, offer: OfferFactory) -> None:
         SiteMetric.objects.create(site=site, dr=40, checked_at=EARLY)
         SiteMetric.objects.create(site=site, dr=55, checked_at=LATE)
-        SitePrice.objects.create(site=site, placement_cents=30000, checked_at=LATE)
-        SitePrice.objects.create(site=site, placement_cents=20000, checked_at=EARLY)
+        # Цена — рабочая, а не последняя по дате (ADR-043).
+        offer(site, 30000, checked_at=EARLY)
+        offer(site, 20000, checked_at=LATE, working=False)
         GrayScan.objects.create(site=site, ratio="12.50", checked_at=LATE)
 
         row = self._latest(site)
         assert (row["dr"], row["placement_cents"], str(row["gray_ratio"])) == (55, 30000, "12.50")
 
-    def test_reference_total_is_placement_plus_announce_without_writing(self, site: Site) -> None:
-        SitePrice.objects.create(
-            site=site, placement_cents=40000, announce_cents=10000, writing_cents=5000
-        )
+    def test_reference_total_is_placement_plus_announce_without_writing(
+        self, site: Site, offer: OfferFactory
+    ) -> None:
+        offer(site, 40000, announce_cents=10000, writing_cents=5000)
         assert self._latest(site)["reference_total_cents"] == 50000
 
-    def test_reference_total_without_prices_is_zero(self, site: Site) -> None:
-        assert self._latest(site)["reference_total_cents"] == 0
+    def test_without_working_price_reference_total_is_empty(self, site: Site) -> None:
+        # Раньше было 0, будто бесплатно (долг из PROGRESS, закрыт в E1-07).
+        assert self._latest(site)["reference_total_cents"] is None
 
     def test_deleted_site_is_hidden(self, site: Site) -> None:
         Site.all_objects.filter(pk=site.pk).update(is_deleted=True)
@@ -167,10 +172,12 @@ class TestProductSiteLatest:
             product.pk,
         )
 
+    @pytest.fixture(autouse=True)
+    def _offers(self, offer: OfferFactory) -> None:
+        self.offer = offer
+
     def _price(self, site: Site, writing_cents: int | None) -> None:
-        SitePrice.objects.create(
-            site=site, placement_cents=40000, announce_cents=10000, writing_cents=writing_cents
-        )
+        self.offer(site, 40000, announce_cents=10000, writing_cents=writing_cents)
 
     def _threshold(self, writing_eur: int, product: Product | None = None) -> None:
         DomainSetting.objects.create(

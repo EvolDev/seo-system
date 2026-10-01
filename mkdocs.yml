@@ -62,6 +62,7 @@ nav:
       - reference/glossary.md
       - reference/background-tasks.md
       - reference/api-spend.md
+      - reference/sellers-prices-notes.md
   - Как это устроено:
       - explanation/index.md
       - explanation/site-evaluation.md

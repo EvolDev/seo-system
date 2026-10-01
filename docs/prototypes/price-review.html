@@ -1,0 +1,1215 @@
+<!doctype html>
+<!-- Прототип загрузки прайса, разбора цен и рабочей цены (E1-07, E1-08), согласован 01.10.2026.
+     Открыть в браузере; данные выдуманные. Решения — ADR-043. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сверка прайсов</title>
+<style>
+/* Макет: как админка проекта — шапка, хлебные крошки, меню слева, рабочая область, фильтры справа */
+:root{
+  --bg:#ffffff;--panel:#f5f6f8;--panel-2:#eceff3;--line:#dde1e6;--line-strong:#c4cad2;
+  --fg:#1c2127;--muted:#66707b;--link:#2a65a8;--link-fg:#ffffff;--link-soft:#e7eff9;
+  --down:#17803a;--down-soft:#e3f3e8;--up:#c4302b;--up-soft:#fbe9e8;--warn:#8a5a00;--warn-soft:#fff3d1;
+  --sel:#fff8db;--hover:#f6f8fb;--overlay:rgba(20,26,34,.35);--shadow:0 10px 30px rgba(20,30,45,.18);
+  --series:#2a65a8;--series-wash:rgba(42,101,168,.10);--grid:#e6e9ed;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15181c;--panel:#1c2025;--panel-2:#252a30;--line:#30363d;--line-strong:#454c55;
+    --fg:#e4e7eb;--muted:#9aa3ad;--link:#79b0f0;--link-fg:#0d1117;--link-soft:#1f2c3d;
+    --down:#4cc26e;--down-soft:#14301d;--up:#ff6b63;--up-soft:#3a1a19;--warn:#e8b54a;--warn-soft:#352a10;
+    --sel:#2e2a17;--hover:#1b2026;--overlay:rgba(0,0,0,.55);--shadow:0 10px 30px rgba(0,0,0,.55);
+    --series:#4f8fdc;--series-wash:rgba(79,143,220,.12);--grid:#2c3238;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15181c;--panel:#1c2025;--panel-2:#252a30;--line:#30363d;--line-strong:#454c55;
+  --fg:#e4e7eb;--muted:#9aa3ad;--link:#79b0f0;--link-fg:#0d1117;--link-soft:#1f2c3d;
+  --down:#4cc26e;--down-soft:#14301d;--up:#ff6b63;--up-soft:#3a1a19;--warn:#e8b54a;--warn-soft:#352a10;
+  --sel:#2e2a17;--hover:#1b2026;--overlay:rgba(0,0,0,.55);--shadow:0 10px 30px rgba(0,0,0,.55);
+    --series:#4f8fdc;--series-wash:rgba(79,143,220,.12);--grid:#2c3238;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font)}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--link)}
+:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-block:12px;padding-inline:20px;border-bottom:1px solid var(--line)}
+.brand{font-size:22px;font-weight:300;letter-spacing:.01em}
+.who{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.proto{background:var(--warn-soft);color:var(--warn);padding-block:7px;padding-inline:20px;font-size:13px}
+.crumbs{background:var(--panel-2);padding-block:9px;padding-inline:20px;font-size:13px}
+.crumbs button{background:none;border:0;padding:0;color:var(--link);cursor:pointer}
+
+.shell{display:grid;grid-template-columns:220px minmax(0,1fr)}
+.side{padding:16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:14px}
+.grp{background:var(--panel);border-radius:4px;overflow:hidden}
+.grp h4{margin:0;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);background:var(--panel-2)}
+.grp button{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:8px 12px;color:var(--link);cursor:pointer;font-weight:500}
+.grp button.on{background:var(--link-soft)}
+.grp button[disabled]{color:var(--muted);cursor:default;font-weight:400}
+.grp .new{font-size:10px;text-transform:uppercase;letter-spacing:.06em;background:var(--down-soft);color:var(--down);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:1px}
+.main{padding-block:18px 90px;padding-inline:22px;min-width:0}
+h1{font-size:22px;font-weight:400;margin:0 0 4px;text-wrap:balance}
+h2{font-size:18px;font-weight:500;margin:0}
+h3{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 8px}
+.lead{color:var(--muted);margin:0 0 16px;max-width:75ch}
+.muted{color:var(--muted)}
+.sub{font-size:12px;color:var(--muted)}
+.hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+
+.btn{border:1px solid var(--line-strong);background:var(--bg);border-radius:4px;padding:5px 11px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--link);border-color:var(--link);color:var(--link-fg)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.small{padding:3px 8px;font-size:12.5px}
+.btn[disabled]{opacity:.45;cursor:default}
+.link{background:none;border:0;padding:0;color:var(--link);cursor:pointer;text-align:left}
+.link:hover{text-decoration:underline}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--panel);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--hover)}
+td.r,th.r{text-align:right}
+.cb{width:30px}
+
+.chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;font-size:12px;white-space:nowrap;background:var(--panel-2);color:var(--muted)}
+.chip.dn{background:var(--down-soft);color:var(--down)}
+.chip.up{background:var(--up-soft);color:var(--up)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.info{background:var(--link-soft);color:var(--link)}
+.chip.ghost{background:none;border:1px solid var(--line-strong)}
+.dn{color:var(--down)} .up{color:var(--up)}
+.delta{white-space:nowrap;font-variant-numeric:tabular-nums}
+.delta small{font-size:11px;opacity:.85}
+.flat{color:var(--muted);white-space:nowrap}
+.approx{color:var(--muted);font-size:12px;white-space:nowrap}
+.price b{font-weight:600;font-variant-numeric:tabular-nums}
+.wr{white-space:nowrap}
+.sm{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--warn);background:var(--warn-soft);border-radius:3px;padding:0 4px;margin-left:4px;cursor:help}
+.status{font-size:12px;white-space:nowrap}
+.status.rej{color:var(--up)} .status.ok{color:var(--down)}
+.warnline{margin-top:4px;font-size:12px;color:var(--up)}
+
+/* «Площадки»: список и фильтры */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:18px;align-items:start}
+.filters{background:var(--panel);border-radius:4px;padding:12px;display:flex;flex-direction:column;gap:12px}
+.filters label{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:500}
+.filters select,.toolbar select,.toolbar input,.form select,.form input,.form textarea{border:1px solid var(--line-strong);background:var(--bg);border-radius:4px;padding:5px 8px;min-width:0}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar .grow{flex:1 1 220px}
+.msg{background:var(--down-soft);color:var(--down);border-radius:4px;padding:8px 12px;margin-bottom:12px}
+.msg.warn{background:var(--warn-soft);color:var(--warn)}
+
+/* Мастер загрузки */
+.steps{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;padding:0;margin:0 0 18px;font-size:13px}
+.steps li{color:var(--muted)} .steps li.on{color:var(--fg);font-weight:600} .steps li.done{color:var(--down)}
+.form{display:grid;gap:14px;max-width:620px}
+.form .row{display:flex;flex-direction:column;gap:5px}
+.form .row>span{font-weight:500}
+.radios{display:flex;flex-wrap:wrap;gap:8px}
+.radios label{display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:4px;padding:6px 10px;cursor:pointer}
+.radios label.off{opacity:.5;cursor:default}
+.drop{border:2px dashed var(--line-strong);border-radius:6px;padding:18px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.drop.ok{border-style:solid;border-color:var(--down);background:var(--down-soft)}
+.note{background:var(--link-soft);border-radius:4px;padding:10px 12px;font-size:13px;max-width:80ch}
+.note ul{margin:6px 0 0;padding-left:18px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.conf{font-size:11px}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:0 0 16px}
+.stat{border:1px solid var(--line);border-radius:4px;padding:10px 12px}
+.stat b{display:block;font-size:22px;font-weight:500;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.dn b{color:var(--down)} .stat.up b{color:var(--up)} .stat.warn b{color:var(--warn)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.box{border:1px solid var(--line);border-radius:4px;padding:12px}
+.box ul{margin:0;padding-left:18px}
+.busy{display:flex;align-items:center;gap:10px;padding:14px;border:1px solid var(--line);border-radius:4px;max-width:520px}
+.spin{width:16px;height:16px;border:2px solid var(--line-strong);border-top-color:var(--link);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+
+/* Разбор */
+.rev-head{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between;margin-bottom:14px}
+.progress{min-width:220px}
+.bar{height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--down)}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tab{border:1px solid var(--line-strong);background:var(--bg);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px}
+.tab b{font-weight:600;margin-left:4px;font-variant-numeric:tabular-nums}
+.tab.on{background:var(--link);border-color:var(--link);color:var(--link-fg)}
+.tab.zero{opacity:.5}
+.tabnote{font-size:13px;color:var(--muted);margin:-4px 0 12px;max-width:90ch}
+tr.focus td{background:var(--sel)}
+tr.focus td:first-child{box-shadow:inset 3px 0 0 var(--link)}
+tr.done td{opacity:.55}
+tr.details td{background:var(--panel)}
+.det{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr);gap:16px}
+.det table td,.det table th{padding:5px 8px}
+.kv{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px}
+.kv span b{font-weight:600}
+.notes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.notes li{font-size:13px}
+.notes .sub{display:block}
+.keys{font-size:12px;color:var(--muted);margin-top:10px}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:3px;padding:0 4px;background:var(--bg)}
+.bulk{position:sticky;bottom:12px;margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--fg);color:var(--bg);border-radius:6px;padding:8px 12px;box-shadow:var(--shadow)}
+.bulk .btn{border-color:transparent}
+.exp{background:none;border:0;cursor:pointer;color:var(--muted);font-size:13px;padding:2px 4px}
+
+/* Карточка площадки */
+.back{position:fixed;inset:0;background:var(--overlay);z-index:20}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(780px,100%);background:var(--bg);box-shadow:var(--shadow);z-index:21;overflow-y:auto;padding-block:calc(18px + env(safe-area-inset-top,0px)) calc(28px + env(safe-area-inset-bottom,0px));padding-inline:22px;display:flex;flex-direction:column;gap:20px}
+.dr-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.wkline{font-size:15px}
+tr.wk td{background:var(--down-soft)}
+details summary{cursor:pointer;color:var(--link)}
+
+/* Значки и графики */
+.spark{background:none;border:1px solid transparent;border-radius:3px;padding:0 2px;margin-left:3px;cursor:pointer;color:var(--muted);vertical-align:-2px;line-height:0}
+.spark:hover{color:var(--link);border-color:var(--line-strong)}
+.spark svg{width:16px;height:12px}
+.notesbtn{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:1px 8px;cursor:pointer;color:var(--fg);font-variant-numeric:tabular-nums;white-space:nowrap}
+.notesbtn:hover{border-color:var(--link);color:var(--link)}
+.pop{position:fixed;z-index:35;width:min(400px,calc(100% - 16px));background:var(--bg);border:1px solid var(--line-strong);border-radius:6px;box-shadow:var(--shadow);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.pop-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.pop-head .btn{padding:1px 8px}
+.chart{position:relative}
+.chart svg{display:block;overflow:visible;touch-action:pan-y}
+.chart .grid{stroke:var(--grid);stroke-width:1}
+.chart .ax{fill:var(--muted);font-size:10.5px;font-family:var(--font)}
+.chart .val{fill:var(--fg);font-size:11.5px;font-weight:600;font-family:var(--font)}
+.chart .line{fill:none;stroke:var(--series);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .wash{fill:var(--series-wash);stroke:none}
+.chart .dot{fill:var(--series);stroke:var(--bg);stroke-width:2}
+.chart .xh{stroke:var(--line-strong);stroke-width:1}
+.chart .hit{fill:transparent;cursor:crosshair}
+.ctip{position:absolute;top:0;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line-strong);border-radius:4px;padding:3px 7px;font-size:12px;white-space:nowrap;pointer-events:none;box-shadow:var(--shadow)}
+.ctip b{font-variant-numeric:tabular-nums}
+.tbl summary{font-size:12px}
+.tbl table td{padding:3px 8px;font-size:12px}
+.charts2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.charts2 h4{margin:0 0 4px;font-size:13px;font-weight:600}
+
+.tip{position:fixed;z-index:40;max-width:380px;background:var(--panel);color:var(--fg);border:1px solid var(--line-strong);border-radius:4px;padding:8px 10px;font-size:12.5px;box-shadow:var(--shadow);white-space:pre-line;pointer-events:none}
+.toast{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;display:flex;gap:14px;align-items:center;background:var(--fg);color:var(--bg);border-radius:6px;padding:10px 14px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+.toast button{background:none;border:0;color:var(--bg);text-decoration:underline;cursor:pointer;font-weight:600}
+.tips{border:1px solid var(--line);border-radius:4px;padding:12px 14px;margin-bottom:16px;max-width:80ch}
+.tips ol{margin:6px 0 0;padding-left:20px}
+
+@media (max-width:1100px){.cols{grid-template-columns:minmax(0,1fr)}.filters{order:-1;flex-direction:row;flex-wrap:wrap}.filters label{flex:1 1 160px}.det{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:820px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .side{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding-block:10px}
+  .grp{display:flex;flex:0 0 auto;background:none}
+  .grp h4{display:none}
+  .grp button{border:0;border-radius:4px}
+  .main{padding-inline:16px}
+  .top,.proto,.crumbs{padding-inline:16px}
+}
+</style>
+
+<div class="top"><div class="brand">SEO-система</div><div class="who">rodzedrim</div></div>
+<div class="proto">Прототип для обсуждения. Данные выдуманные, ничего не сохраняется: обновите страницу — всё начнётся сначала. Курс ЕЦБ в примере: 1 € = 1.1355 $ на 30.09.2026.</div>
+<div class="crumbs" id="crumbs"></div>
+<div class="shell">
+  <nav class="side" id="nav" aria-label="Меню"></nav>
+  <main class="main" id="main"></main>
+</div>
+<div class="back" id="back" hidden></div>
+<aside class="drawer" id="drawer" tabindex="-1" hidden aria-label="Карточка площадки"></aside>
+<div class="pop" id="pop" hidden role="dialog" aria-label="График изменений"></div>
+<div class="tip" id="tip" hidden></div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+(function () {
+'use strict';
+
+// ---------- Справочники и данные примера ----------
+const RATE = 1.1355, RATE_DATE = '30.09.2026', TODAY = '01.10.2026', USER = 'rodzedrim';
+const TABLE = 'таблица линкбилдинга';
+const SELLERS = {
+  col: {name: 'Collaborator', cur: 'EUR', contacts: 'каталог collaborator.pro', kind: 'каталог', trusted: true},
+  lh: {name: 'LinkHub Media', cur: 'USD', contacts: 'sales@linkhub.example', kind: 'продавец', trusted: false},
+  st: {name: 'Starlinks', cur: 'USD', contacts: 'Telegram: @starlinks_example', kind: 'продавец', trusted: false},
+  mo: {name: 'Maria Outreach', cur: 'EUR', contacts: 'maria@outreach.example', kind: 'продавец', trusted: false}
+};
+// Доверенные источники метрик: Ahrefs (API) — всегда, продавцы — по флажку в «Продавцах».
+const isTrusted = src => src === 'ahrefs' || !!(SELLERS[src] && SELLERS[src].trusted);
+const srcName = src => src === 'ahrefs' ? 'Ahrefs' : SELLERS[src].name;
+const TYPE = {GP: 'публикация', LI: 'вставка ссылки'};
+const SYM = {EUR: '€', USD: '$'};
+const SEP_LIST = 'Сентябрь 2026';
+let seq = 0;
+
+function O(s, t, p, d, x) {
+  x = x || {};
+  return {id: ++seq, s, t, p, cur: SELLERS[s].cur, d, w: x.w ?? null, a: x.a ?? null, g: x.g ?? null, extra: x.extra || null};
+}
+function N(author, date, text, product) { return {author, date, text, product: product || null}; }
+// История замеров для примера: раз в месяц — выгрузка Collaborator или Ahrefs.
+function history(domain, dr, traffic) {
+  const dates = ['27.04.2026', '27.05.2026', '27.06.2026', '27.07.2026', '27.08.2026', '27.09.2026'];
+  const srcs = ['col', 'col', 'ahrefs', 'col', 'ahrefs', 'col'];
+  let h = 0;
+  for (const c of domain) h = (h * 31 + c.charCodeAt(0)) & 0x7fffffff;
+  const rnd = () => { h = (h * 1103515245 + 12345) & 0x7fffffff; return h / 0x7fffffff; };
+  return dates.map((d, i) => {
+    const back = dates.length - 1 - i;
+    if (!back) return {d, src: srcs[i], dr, traffic};
+    return {d, src: srcs[i], dr: Math.max(1, Math.round(dr - back * rnd() * 1.4 + (rnd() - 0.5) * 2)),
+      traffic: Math.round(traffic * (1 - back * (0.02 + rnd() * 0.05)) * (0.92 + rnd() * 0.16))};
+  });
+}
+function S(domain, dr, traffic, status, reason, offers, wk, notes, msrc) {
+  return {domain, status, reason: reason || null, offers, wk: wk == null ? null : offers[wk].id,
+    metrics: msrc ? [{d: TODAY, src: msrc, dr, traffic}] : history(domain, dr, traffic),
+    notes: notes || [], pending: new Set(), lists: new Set([SEP_LIST])};
+}
+
+const BASE = [
+  S('readwritetech.com', 71, 84200, 'Новая', null, [O('col', 'GP', 240, '27.09.2026', {w: 15, a: 0}), O('col', 'GP', 220, '27.06.2026', {w: 15, a: 0}), O('col', 'GP', 230, '27.08.2026', {w: 15, a: 0})], 0, [N(TABLE, '27.09.2026', 'Отвечают быстро, правки принимают')]),
+  S('pixelpost.io', 58, 31400, 'Одобрена', null, [O('col', 'GP', 180, '27.09.2026', {w: 50, a: 20})], 0),
+  S('converterguide.net', 64, 52000, 'Новая', null, [O('col', 'GP', 320, '27.09.2026', {a: 0}), O('col', 'GP', 300, '27.07.2026', {a: 0})], 0),
+  S('mediaworkflow.co', 49, 12900, 'Новая', null, [O('col', 'GP', 150, '27.09.2026', {w: 10})], 0),
+  S('thecreatorsdesk.com', 66, 40100, 'Размещались', null, [O('col', 'GP', 410, '27.09.2026', {w: 45, a: 0}), O('col', 'GP', 380, '27.06.2026', {w: 45, a: 0}), O('col', 'GP', 395, '27.08.2026', {w: 45, a: 0})], 0, [N(USER, '12.09.2026', 'Статья вышла за 3 дня, ссылка на месте')]),
+  S('officehacks.blog', 44, 8700, 'Новая', null, [O('col', 'GP', 95, '27.09.2026', {a: 0})], 0),
+  S('filetypes.info', 61, 27500, 'Новая', null, [O('col', 'GP', 210, '27.09.2026', {w: 30})], 0),
+  S('smallbizdigest.com', 55, 19800, 'Новая', null, [O('lh', 'GP', 230, '15.09.2026'), O('lh', 'GP', 250, '15.07.2026')], 0),
+  S('devtoolsweekly.com', 68, 61000, 'Одобрена', null, [O('lh', 'GP', 300, '15.09.2026'), O('col', 'GP', 360, '27.09.2026', {w: 40, a: 0})], 0),
+  S('remoteworkhub.org', 52, 15200, 'Новая', null, [O('lh', 'GP', 175, '15.09.2026')], 0),
+  S('audioeditorpro.com', 47, 9900, 'Отклонена', 'Серая тематика в поиске, отбрасываем', [O('col', 'GP', 130, '27.09.2026')], 0, [N(TABLE, '27.09.2026', 'Серая тематика в поиске, отбрасываем', 'Convertio')]),
+  S('cryptonewsfeed.net', 59, 33000, 'Отклонена', 'Nofollow, отбрасываем', [O('col', 'GP', 190, '27.09.2026', {a: 0})], 0, [N(TABLE, '27.09.2026', 'Nofollow, отбрасываем', 'Convertio')]),
+  S('learnvideoediting.com', 57, 22400, 'Новая', null, [O('col', 'GP', 200, '27.09.2026', {w: 20})], 0),
+  S('studentlifehacks.com', 41, 6100, 'Новая', null, [], null),
+  S('marketingpulse.io', 63, 45000, 'Новая', null, [O('col', 'GP', 260, '27.09.2026', {w: 20, a: 50}), O('st', 'GP', 250, '20.09.2026'), O('mo', 'LI', 140, '22.09.2026')], 0, [N(USER, '28.09.2026', 'Starlinks обещал скидку, если возьмём 3 статьи')]),
+  S('techsavvymom.com', 50, 14000, 'Одобрена', null, [O('col', 'GP', 170, '27.09.2026', {w: 25, a: 0})], 0),
+  S('freelancetoolkit.com', 46, 11000, 'Новая', null, [O('lh', 'GP', 150, '15.09.2026')], 0),
+  S('webdesignledger.io', 60, 29000, 'Новая', null, [O('lh', 'GP', 200, '15.09.2026')], 0),
+  S('pdfnewsroom.com', 53, 17500, 'Новая', null, [O('col', 'GP', 140, '27.09.2026', {w: 10, a: 0}), O('st', 'GP', 120, '20.09.2026')], 0),
+  S('imageconvertlab.com', 45, 7300, 'Новая', null, [O('col', 'GP', 110, '27.09.2026', {a: 0})], 0),
+  S('dailytechbrief.net', 69, 98000, 'Размещались', null, [O('col', 'GP', 480, '27.09.2026', {w: 60, a: 100}), O('col', 'GP', 450, '27.07.2026', {w: 60, a: 100})], 0, [N(USER, '20.09.2026', 'Анонс на главной дорогой — не брали')])
+];
+const sites = new Map(BASE.map(s => [s.domain, s]));
+{ const s = sites.get('pdfnewsroom.com'); s.pending.add(s.offers[1].id); s.lists.add('Starlinks · 20.09.2026'); }
+sites.get('marketingpulse.io').lists.add('Starlinks · 20.09.2026');
+
+const FILE = {
+  name: 'linkhub-pricelist-october.xlsx',
+  headers: ['Website', 'Category', 'Country', 'DA', 'PA', 'DR', 'TF', 'Ahrefs Traffic', 'GP Price', 'LI Price', 'Grey Price', 'Rel Attribute', 'Contact'],
+  rows: [
+    ['readwritetech.com', 'Technology', 'USA', 58, 52, 71, 40, '84 200', '$210', '', '$420', 'Do-Follow', ''],
+    ['pixelpost.io', 'Photography', 'UK', 47, 44, 58, 31, '31 400', '$190', '$120', '', 'Do-Follow', ''],
+    ['converterguide.net', 'Software', 'USA', 55, 49, 64, 35, '52 000', '$260', '', '', 'Do-Follow', ''],
+    ['mediaworkflow.co', 'Media', 'Canada', 41, 38, 49, 22, '12 900', '$160', '', '', 'Do-Follow', ''],
+    ['thecreatorsdesk.com', 'Business', 'USA', 60, 55, 66, 44, '40 100', '$380', '$250', '$700', 'Do-Follow', ''],
+    ['officehacks.blog', 'Productivity', 'USA', 36, 33, 44, 18, '8 700', '$120', '', '', 'Do-Follow', ''],
+    ['filetypes.info', 'Technology', 'Germany', 52, 47, 61, 29, '27 500', '$280', '', '', 'Do-Follow', ''],
+    ['smallbizdigest.com', 'Business', 'USA', 45, 41, 55, 25, '19 800', '$210', '', '', 'Do-Follow', ''],
+    ['devtoolsweekly.com', 'Technology', 'USA', 57, 50, 68, 39, '61 000', '$340', '', '', 'Do-Follow', ''],
+    ['remoteworkhub.org', 'Lifestyle', 'USA', 43, 40, 52, 21, '15 200', '$175', '', '', 'Do-Follow', ''],
+    ['audioeditorpro.com', 'Software', 'India', 39, 35, 47, 15, '9 900', '$95', '', '$300', 'Do-Follow', ''],
+    ['cryptonewsfeed.net', 'Finance', 'UAE', 48, 45, 59, 27, '33 000', '$150', '', '', 'No-Follow', ''],
+    ['learnvideoediting.com', 'Education', 'USA', 46, 42, 57, 26, '22 400', '', '$140', '', 'Do-Follow', ''],
+    ['studentlifehacks.com', 'Education', 'USA', 33, 30, 41, 14, '6 100', '$90', '', '', 'Do-Follow', ''],
+    ['marketingpulse.io', 'Marketing', 'USA', 54, 50, 63, 33, '45 000', '$230', '$160', '', 'Do-Follow', ''],
+    ['techsavvymom.com', 'Lifestyle', 'USA', 42, 39, 50, 20, '14 000', '$200', '', '', 'Do-Follow', ''],
+    ['freelancetoolkit.com', 'Business', 'USA', 38, 35, 46, 17, '11 000', '$150', '', '', 'Do-Follow', ''],
+    ['webdesignledger.io', 'Design', 'USA', 50, 46, 60, 28, '29 000', '$200', '', '', 'Do-Follow', ''],
+    ['gadgetflowdaily.com', 'Technology', 'USA', 51, 47, 62, 30, '38 000', '$220', '$150', '$500', 'Do-Follow', 'sales@gadgetflow.example'],
+    ['pdftoolsreview.com', 'Software', 'USA', 44, 40, 54, 23, '16 300', '$160', '', '', 'Do-Follow', ''],
+    ['photostudiotips.net', 'Photography', 'Australia', 37, 34, 46, 19, '7 800', '$110', '$80', '', 'Do-Follow', ''],
+    ['edtechinsider.org', 'Education', 'USA', 48, 45, 58, 27, '24 600', '$240', '', '', 'Do-Follow', ''],
+    ['growthhackers.blog', 'Marketing', 'India', 30, 28, 39, 12, '4 100', '$70', '', '$200', 'Do-Follow', ''],
+    ['pixelpost.io', 'Photography', 'UK', 47, 44, 58, 31, '31 400', '$205', '', '', 'Do-Follow', ''],
+    ['', 'News', 'USA', 35, 30, 40, 15, '5 000', '$1 2OO', '', '', 'Do-Follow', ''],
+    ['https://www.quickconvertnews.com/blog/', 'News', 'USA', 40, 36, 50, 20, '12 000', '$130', '', '', 'Do-Follow', '']
+  ]
+};
+const FIELDS = [
+  ['domain', 'Площадка (домен или адрес)'], ['gp', 'Цена публикации'], ['li', 'Цена вставки ссылки'],
+  ['grey', 'Серая цена'], ['writing', 'Цена написания'], ['announce', 'Цена анонса'], ['dr', 'DR'],
+  ['traffic', 'Трафик'], ['linktype', 'Тип ссылки'], ['extra', 'Прочие данные'], ['skip', 'Не загружать']
+];
+const GUESS = {
+  'Website': ['domain', 'точно'], 'Category': ['extra', 'не знаю'], 'Country': ['extra', 'не знаю'],
+  'DA': ['extra', 'не знаю'], 'PA': ['extra', 'не знаю'], 'DR': ['dr', 'точно'], 'TF': ['extra', 'не знаю'],
+  'Ahrefs Traffic': ['traffic', 'похоже'], 'GP Price': ['gp', 'точно'], 'LI Price': ['li', 'точно'],
+  'Grey Price': ['grey', 'похоже'], 'Rel Attribute': ['linktype', 'похоже'], 'Contact': ['extra', 'не знаю']
+};
+
+const imports = [
+  {id: 'wb', title: 'Линкбилдинг Convertio.co.xlsx', seller: 'col', kind: 'Таблица линкбилдинга', date: '27.09.2026', rows: 1978, list: SEP_LIST, done: null, total: null},
+  {id: 'st', title: 'starlinks-september.xlsx', seller: 'st', kind: 'Прайс продавца', date: '20.09.2026', rows: 12, list: 'Starlinks · 20.09.2026', done: 8, total: 9}
+];
+
+const DECIDE = new Set(['cheaper', 'changed', 'pricier', 'other', 'rejected']);
+const TABS = [
+  ['cheaper', 'Дешевле рабочей', 'Другой продавец предлагает ту же услугу дешевле рабочей цены. Сравниваем только цену размещения в евро по курсу ЕЦБ; написание и анонс — справочно.'],
+  ['changed', 'Цена изменилась', 'Тот же продавец прислал другую цену. ▼ — подешевело, ▲ — подорожало. Рабочая цена сама не меняется.'],
+  ['new', 'Новые', 'Площадок не было в базе или у них не было цены. Рабочей стала первая пришедшая цена (публикация, если есть). Площадки добавлены в рабочий список загрузки.'],
+  ['rejected', 'Отклоняли', 'Площадки, которые мы уже отклоняли для Convertio. Цена записана, рабочую можно сменить, но сначала посмотрите причину.'],
+  ['pricier', 'Дороже рабочей', 'Другой продавец предлагает дороже рабочей цены. Обычно — «Оставить».'],
+  ['other', 'Другая услуга', 'У площадки рабочая цена — за другую услугу (например, публикация), а в файле — вставка ссылки. Не сравниваем, решаете вы.'],
+  ['same', 'Без изменений', 'Цена та же, что уже есть. Решать ничего не нужно.'],
+  ['issues', 'Ошибки и дубли', 'Строки, которые не удалось разобрать, и площадки, которые в файле встречаются дважды.']
+];
+
+// ---------- Помощники ----------
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const dnum = d => { const [a, b, c] = d.split('.'); return Number(c + b + a); };
+const fmtNum = n => n == null ? '' : String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+function money(v, cur) {
+  if (v == null) return '';
+  const r = Math.round(v * 100) / 100;
+  return SYM[cur] + (Number.isInteger(r) ? fmtNum(r) : r.toFixed(2));
+}
+const toEur = (v, cur) => cur === 'EUR' ? v : v / RATE;
+const oEur = o => toEur(o.p, o.cur);
+function priceHtml(o) {
+  if (!o) return '<span class="muted">—</span>';
+  return `<span class="price"><b>${money(o.p, o.cur)}</b>${o.cur !== 'EUR' ? ` <span class="approx">≈ €${fmtNum(oEur(o))}</span>` : ''}</span>`;
+}
+const sellerName = s => SELLERS[s].name;
+const offerLabel = o => `${sellerName(o.s)} · ${TYPE[o.t]} ${money(o.p, o.cur)}`;
+const workingOf = site => site.offers.find(o => o.id === site.wk) || null;
+function currentOffers(site) {
+  const m = new Map();
+  for (const o of site.offers) {
+    const k = o.s + o.t, c = m.get(k);
+    if (!c || dnum(o.d) > dnum(c.d) || (dnum(o.d) === dnum(c.d) && o.id > c.id)) m.set(k, o);
+  }
+  return [...m.values()].sort((a, b) => oEur(a) - oEur(b));
+}
+function delta(n, ref) {
+  if (!n || !ref) return null;
+  if (n.cur === ref.cur) return {v: n.p - ref.p, cur: n.cur, pct: ref.p ? (n.p - ref.p) / ref.p * 100 : 0, approx: false};
+  const v = oEur(n) - oEur(ref);
+  return {v, cur: 'EUR', pct: oEur(ref) ? v / oEur(ref) * 100 : 0, approx: true};
+}
+function deltaHtml(d) {
+  if (!d) return '';
+  if (Math.abs(d.v) < 0.5) return '<span class="flat">= без изменений</span>';
+  const up = d.v > 0;
+  return `<span class="delta ${up ? 'up' : 'dn'}">${up ? '▲' : '▼'} ${d.approx ? '≈' : ''}${money(Math.round(Math.abs(d.v)), d.cur)} <small>${up ? '+' : '−'}${Math.round(Math.abs(d.pct))}%</small></span>`;
+}
+function deltaText(d) {
+  if (!d || Math.abs(d.v) < 0.5) return '';
+  return `${d.v > 0 ? '▲' : '▼'} ${d.approx ? '≈' : ''}${money(Math.round(Math.abs(d.v)), d.cur)}`;
+}
+function writingHtml(o) {
+  if (!o || o.w == null) return '';
+  return `<span class="wr" data-tipt="Площадка может написать статью сама">📝 ${o.w === 0 ? 'бесплатно' : money(o.w, o.cur)}</span>`;
+}
+const announceText = o => !o || o.a == null ? 'нет' : o.a === 0 ? 'бесплатно' : money(o.a, o.cur);
+function planned(o) {
+  if (!o) return null;
+  let total = o.p + (o.a || 0);
+  if (o.t === 'GP' && o.w != null && toEur(o.w, o.cur) <= 50) total += o.w;
+  return toEur(total, o.cur);
+}
+function statusHtml(s) {
+  const cls = s === 'Отклонена' ? 'rej' : s === 'Размещались' || s === 'Одобрена' ? 'ok' : '';
+  return `<span class="status ${cls}">${esc(s)}</span>`;
+}
+// Метрики «на сегодня»: последний замер доверенного источника, нет такого — продавца.
+function metricNow(site) {
+  const ms = site.metrics.slice().sort((a, b) => dnum(b.d) - dnum(a.d));
+  return ms.find(m => isTrusted(m.src)) || ms[0] || null;
+}
+const drOf = site => { const m = metricNow(site); return m ? m.dr : null; };
+const trOf = site => { const m = metricNow(site); return m ? m.traffic : null; };
+function metricMark(site) {
+  const m = metricNow(site);
+  return m && !isTrusted(m.src) ? `<span class="sm" data-tipt="Замеров доверенных источников нет — по словам продавца ${esc(srcName(m.src))}">прод.</span>` : '';
+}
+const SPARK = '<svg viewBox="0 0 16 12" aria-hidden="true"><polyline points="1,10 5,6 8,8 12,3 15,4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+function sparkBtn(site, kind) {
+  const s = chartSeries(site, kind);
+  if (!s || s.pts.length < 2) return '';
+  const names = {dr: 'DR', traffic: 'трафика', price: 'цены'};
+  return `<button type="button" class="spark" data-act="chart" data-domain="${esc(site.domain)}" data-kind="${kind}" aria-label="График ${names[kind]}" data-tipt="График ${names[kind]}">${SPARK}</button>`;
+}
+function notesBtn(site) {
+  if (!site.notes.length) return '';
+  const last = site.notes[0];
+  return `<button type="button" class="notesbtn" data-act="open-site" data-domain="${esc(site.domain)}" data-tipt="${esc(`${last.text}\n${last.date} · ${last.author}`)}" aria-label="Заметки: ${site.notes.length}">💬 ${site.notes.length}</button>`;
+}
+
+// ---------- Графики изменений ----------
+const charts = new Map();
+let chartSeq = 0;
+const dateVal = d => { const [a, b, c] = d.split('.'); return Date.UTC(+c, +b - 1, +a); };
+function trustedNames() {
+  return ['Ahrefs', ...Object.values(SELLERS).filter(s => s.trusted).map(s => s.name)].join(', ');
+}
+function chartSeries(site, kind) {
+  if (kind === 'price') {
+    const wk = workingOf(site);
+    if (!wk) return null;
+    const pts = site.offers.filter(o => o.s === wk.s && o.t === wk.t).sort((a, b) => dnum(a.d) - dnum(b.d)).map(o => ({d: o.d, v: o.p, src: o.s}));
+    return {title: `Цена: ${sellerName(wk.s)} · ${TYPE[wk.t]}`, pts, step: true, fmt: v => money(v, wk.cur), tick: v => money(v, wk.cur),
+      note: 'Цена рабочего продавца за эту услугу по датам прайсов.'};
+  }
+  const pts = site.metrics.filter(m => isTrusted(m.src)).sort((a, b) => dnum(a.d) - dnum(b.d)).map(m => ({d: m.d, v: kind === 'dr' ? m.dr : m.traffic, src: m.src}));
+  return kind === 'dr'
+    ? {title: 'DR', pts, step: false, fmt: v => String(Math.round(v)), tick: v => String(Math.round(v)), note: `Только доверенные источники: ${trustedNames()}.`}
+    : {title: 'Органический трафик', pts, step: false, fmt: v => fmtNum(v), tick: v => v >= 1000 ? `${Math.round(v / 100) / 10}k` : String(Math.round(v)), note: `Только доверенные источники: ${trustedNames()}.`};
+}
+function niceScale(lo, hi) {
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const raw = (hi - lo) / 3, mag = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / mag;
+  const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+  const min = Math.floor(lo / step) * step, max = Math.ceil(hi / step) * step, ticks = [];
+  for (let v = min; v <= max + step / 2; v += step) ticks.push(Math.round(v * 1000) / 1000);
+  return {ticks, min, max};
+}
+function chartHtml(series, w) {
+  const pts = series.pts;
+  if (pts.length < 2) {
+    return `<p class="muted">${pts.length ? `Пока один замер: ${esc(series.fmt(pts[0].v))} от ${pts[0].d}.` : 'Замеров нет.'} Графику нужно хотя бы два.</p>`;
+  }
+  w = w || 360;
+  const h = 150, L = 44, R = 56, T = 14, B = 22, iw = w - L - R, ih = h - T - B;
+  const ts = pts.map(p => dateVal(p.d)), t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const {ticks, min, max} = niceScale(Math.min(...pts.map(p => p.v)), Math.max(...pts.map(p => p.v)));
+  const x = t => L + (t1 === t0 ? iw / 2 : (t - t0) / (t1 - t0) * iw);
+  const y = v => T + ih - (v - min) / (max - min) * ih;
+  let d = '';
+  pts.forEach((p, i) => {
+    const px = x(ts[i]).toFixed(1), py = y(p.v).toFixed(1);
+    d += i === 0 ? `M${px},${py}` : series.step ? `H${px}V${py}` : `L${px},${py}`;
+  });
+  const xs = ts.map(x), ys = pts.map(p => y(p.v)), last = pts.length - 1;
+  const grid = ticks.map(v => `<line class="grid" x1="${L}" x2="${L + iw}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="ax" x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${esc(series.tick(v))}</text>`).join('');
+  const short = s => s.slice(0, 5);
+  const id = 'c' + (++chartSeq);
+  charts.set(id, {xs, ys, pts, fmt: series.fmt, w});
+  const rows = pts.slice().reverse().map(p => `<tr><td class="num">${p.d}</td><td class="num">${esc(series.fmt(p.v))}</td><td class="sub">${esc(p.src ? srcName(p.src) : '')}</td></tr>`).join('');
+  return `<div class="chart" data-chart="${id}">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(series.title)}: с ${pts[0].d} по ${pts[last].d}, сейчас ${esc(series.fmt(pts[last].v))}">
+      ${grid}
+      <path class="wash" d="${d}V${T + ih}H${L}Z"/><path class="line" d="${d}"/>
+      <text class="ax" x="${L}" y="${h - 6}">${short(pts[0].d)}</text><text class="ax" x="${L + iw}" y="${h - 6}" text-anchor="end">${short(pts[last].d)}</text>
+      <circle class="dot" cx="${xs[last].toFixed(1)}" cy="${ys[last].toFixed(1)}" r="4"/>
+      <text class="val" x="${(xs[last] + 9).toFixed(1)}" y="${(ys[last] + 4).toFixed(1)}">${esc(series.fmt(pts[last].v))}</text>
+      <line class="xh" x1="-10" x2="-10" y1="${T}" y2="${T + ih}" visibility="hidden"/>
+      <circle class="dot hd" r="4" cx="-10" cy="-10" visibility="hidden"/>
+      <rect class="hit" x="${L}" y="${T - 6}" width="${iw}" height="${ih + 12}"/>
+    </svg><div class="ctip" hidden></div></div>
+    <details class="tbl"><summary>Таблицей</summary><table><tbody>${rows}</tbody></table></details>`;
+}
+function offersTip(site) {
+  const wk = workingOf(site);
+  return currentOffers(site).map(o => {
+    const tag = wk && o.id === wk.id ? ' — рабочая' : (wk && o.t === wk.t ? '  ' + deltaText(delta(o, wk)) : '  (другая услуга)');
+    const w = o.w != null ? ` · 📝 ${money(o.w, o.cur)}` : '';
+    return `${sellerName(o.s)} · ${TYPE[o.t]} ${money(o.p, o.cur)}${o.cur !== 'EUR' ? ' ≈ €' + fmtNum(oEur(o)) : ''}${w} · ${o.d}${tag}`;
+  }).join('\n') || 'Цен нет';
+}
+
+// ---------- Действия над рабочей ценой ----------
+function fixOffer(site, offerId) {
+  const old = workingOf(site), nw = site.offers.find(o => o.id === offerId);
+  if (!nw || (old && old.id === nw.id)) return false;
+  site.wk = nw.id;
+  for (const id of [...site.pending]) {
+    const o = site.offers.find(x => x.id === id);
+    if (o && o.t === nw.t) site.pending.delete(id);
+  }
+  site.pending.delete(nw.id);
+  site.notes.unshift(N(USER, TODAY, `Цена: ${old ? offerLabel(old) + ' → ' : 'рабочей стала '}${offerLabel(nw)}`));
+  return true;
+}
+function syncRows(site) {
+  if (!state.review) return;
+  for (const r of state.review.rows) {
+    if (r.domain !== site.domain || r.decided || !DECIDE.has(r.cat)) continue;
+    if (r.offerId === site.wk) r.decided = 'fixed';
+    else if (!site.pending.has(r.offerId)) r.decided = 'kept';
+  }
+}
+function snapshot(domains) {
+  return {
+    sites: domains.map(d => { const s = sites.get(d); return {d, wk: s.wk, pending: [...s.pending], notes: s.notes.slice()}; }),
+    rows: state.review ? state.review.rows.map(r => r.decided) : null
+  };
+}
+function restore(snap) {
+  for (const x of snap.sites) { const s = sites.get(x.d); s.wk = x.wk; s.pending = new Set(x.pending); s.notes = x.notes; }
+  if (snap.rows && state.review) state.review.rows.forEach((r, i) => { r.decided = snap.rows[i]; });
+}
+
+// ---------- Состояние ----------
+const state = {
+  route: 'imports', tipsHidden: false, drawer: null, toast: null,
+  w: null, review: null,
+  list: {q: '', offers: 'all', seller: 'all', notes: 'all', list: 'all', sel: new Set(), action: 'accept', actSeller: 'lh', msg: null}
+};
+function newWizard() {
+  const mapping = {}, guess = {};
+  for (const h of FILE.headers) { mapping[h] = GUESS[h][0]; guess[h] = GUESS[h][1]; }
+  return {step: 1, kind: 'price', seller: 'lh', date: '2026-10-01', file: null, mapping, guess, touched: new Set(), plan: null, busy: false, error: null};
+}
+
+// ---------- Разбор файла ----------
+function normDomain(v) {
+  if (!v) return '';
+  let s = String(v).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(s) ? s : '';
+}
+function parsePrice(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).replace(/[$€\s  ]/g, '').replace(',', '.');
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+}
+function classify(site, t, p) {
+  if (!site) return 'new';
+  if (site.status === 'Отклонена') return 'rejected';
+  const wk = workingOf(site);
+  if (!wk) return 'new';
+  if (wk.t !== t) return 'other';
+  const d = delta({p, cur: 'USD', s: 'lh', t}, wk);
+  if (Math.abs(d.v) < 0.5) return 'same';
+  if (wk.s === 'lh') return 'changed';
+  return d.v < 0 ? 'cheaper' : 'pricier';
+}
+function planImport(map) {
+  const idx = f => FILE.headers.findIndex(h => map[h] === f);
+  const iDom = idx('domain'), iGp = idx('gp'), iLi = idx('li'), iGrey = idx('grey'), iDr = idx('dr'), iTr = idx('traffic');
+  const extraCols = FILE.headers.map((h, i) => [h, i]).filter(([h]) => map[h] === 'extra' || map[h] === 'linktype');
+  const errors = [], byDomain = new Map();
+  FILE.rows.forEach((row, n) => {
+    const line = n + 2, raw = row[iDom], domain = normDomain(raw);
+    const gp = iGp >= 0 ? parsePrice(row[iGp]) : null, li = iLi >= 0 ? parsePrice(row[iLi]) : null;
+    if (!domain) { errors.push({line, msg: `нет площадки${raw ? ` («${raw}»)` : ''}${Number.isNaN(gp) ? `, цена «${row[iGp]}» не распознана` : ''} — строка пропущена`}); return; }
+    if (Number.isNaN(gp) || Number.isNaN(li)) { errors.push({line, msg: `${domain}: цена не распознана — строка пропущена`}); return; }
+    const extra = {};
+    for (const [h, i] of extraCols) if (row[i] !== '' && row[i] != null) extra[h] = row[i];
+    const rec = {line, domain, raw: String(raw), gp, li, grey: iGrey >= 0 ? parsePrice(row[iGrey]) : null,
+      dr: iDr >= 0 ? Number(row[iDr]) : null, traffic: iTr >= 0 ? Number(String(row[iTr]).replace(/\s/g, '')) : null, extra};
+    if (!byDomain.has(domain)) byDomain.set(domain, []);
+    byDomain.get(domain).push(rec);
+  });
+  const dups = [], rows = [];
+  for (const [domain, recs] of byDomain) {
+    const pick = f => { const v = recs.map(r => r[f]).filter(x => x != null); return v.length ? Math.min(...v) : null; };
+    const rec = {...recs[0], gp: pick('gp'), li: pick('li'), grey: pick('grey')};
+    if (recs.length > 1) dups.push({domain, lines: recs.map(r => r.line), prices: recs.map(r => r.gp).filter(x => x != null), used: rec.gp});
+    const site = sites.get(domain) || null;
+    for (const t of ['GP', 'LI']) {
+      const p = t === 'GP' ? rec.gp : rec.li;
+      if (p == null) continue;
+      const wk = site ? workingOf(site) : null;
+      rows.push({id: rows.length + 1, domain, t, p, grey: t === 'GP' ? rec.grey : null, extra: rec.extra,
+        isNew: !site, url: rec.raw !== domain ? rec.raw : null, dr: rec.dr, traffic: rec.traffic,
+        cat: classify(site, t, p), refId: wk ? wk.id : null, hasGp: rec.gp != null, decided: null, offerId: null});
+    }
+  }
+  return {rows, dups, errors, sites: byDomain.size, known: [...byDomain.keys()].filter(d => sites.has(d)).length};
+}
+function applyImport(plan) {
+  const list = `${sellerName('lh')} · ${TODAY}`;
+  for (const r of plan.rows) {
+    let site = sites.get(r.domain);
+    if (!site) {
+      site = S(r.domain, r.dr, r.traffic, 'Новая', null, [], null, [], 'lh');
+      site.lists = new Set();
+      sites.set(r.domain, site);
+    }
+    site.lists.add(list);
+    if (!site.metrics.some(m => m.src === 'lh' && m.d === TODAY)) site.metrics.push({d: TODAY, src: 'lh', dr: r.dr, traffic: r.traffic});
+    const o = O('lh', r.t, r.p, TODAY, {g: r.grey, extra: Object.keys(r.extra).length ? r.extra : null});
+    site.offers.push(o);
+    r.offerId = o.id;
+    if (r.cat === 'new') {
+      if (!site.wk && (r.t === 'GP' || !r.hasGp)) {
+        site.wk = o.id;
+        r.auto = true;
+        site.notes.unshift(N(USER, TODAY, `Цена: рабочей стала ${offerLabel(o)} — первая цена площадки`));
+      }
+    } else if (DECIDE.has(r.cat)) {
+      site.pending.add(o.id);
+    }
+  }
+  imports.unshift({id: 'new', title: FILE.name, seller: 'lh', kind: 'Прайс продавца', date: TODAY, rows: FILE.rows.length, list, done: 0, total: plan.rows.filter(r => DECIDE.has(r.cat)).length});
+  state.review = {rows: plan.rows, dups: plan.dups, errors: plan.errors, list, tab: 'cheaper', hideDone: true, sort: 'gain', focus: 0, open: new Set(), sel: new Set()};
+  state.list.list = 'all';
+}
+
+// ---------- Отрисовка: меню и крошки ----------
+function navHtml() {
+  const b = (route, label, extra) => `<button type="button" data-route="${route}" class="${state.route === route || (route === 'imports' && ['wizard', 'review'].includes(state.route)) ? 'on' : ''}">${label}${extra || ''}</button>`;
+  const off = label => `<button type="button" disabled title="В прототипе нет">${label}</button>`;
+  return `<div class="grp"><h4>Работа</h4>${b('sites', 'Площадки')}${b('imports', 'Загрузки', '<span class="new">новое</span>')}${off('Размещения')}${off('Ключи')}</div>
+  <div class="grp"><h4>Справочники</h4>${off('Каталог площадок')}${b('sellers', 'Продавцы', '<span class="new">новое</span>')}${off('Рабочие списки')}${off('Продукты')}</div>`;
+}
+function crumbsHtml() {
+  const home = '<button type="button" data-route="sites">Начало</button>';
+  const map = {
+    sites: 'Площадки', sellers: 'Продавцы', imports: 'Загрузки',
+    wizard: '<button type="button" data-route="imports">Загрузки</button> › Новая загрузка',
+    review: `<button type="button" data-route="imports">Загрузки</button> › Разбор: ${esc(sellerName('lh'))} · ${TODAY}`
+  };
+  return `${home} › ${map[state.route]}`;
+}
+
+// ---------- Экран «Загрузки» ----------
+function importsHtml() {
+  const tips = state.tipsHidden ? '' : `<div class="tips"><b>Что попробовать</b><ol>
+    <li>«Загрузить файл» → пройдите шаги: файл, колонки, сводка до записи.</li>
+    <li>В разборе: вкладки «Дешевле рабочей» и «Цена изменилась», кнопки в строке, массовые действия по галочкам. Клавиши: <kbd>J</kbd>/<kbd>K</kbd> — по строкам, <kbd>A</kbd> — сделать рабочей, <kbd>S</kbd> — оставить, <kbd>X</kbd> — отметить, <kbd>O</kbd> — подробнее.</li>
+    <li>«Площадки»: колонки «Цена», «Предложения» (наведите), «Написание»; фильтр «Предложения → есть дешевле»; действие «Зафиксировать продавца…».</li>
+    <li>Щёлкните домен или 💬 — откроется карточка: графики DR и трафика, все цены продавцов, история, заметки.</li>
+    <li>Значок <svg viewBox="0 0 16 12" width="16" height="12" aria-hidden="true" style="vertical-align:-1px"><polyline points="1,10 5,6 8,8 12,3 15,4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg> рядом с DR, трафиком и ценой — график изменений. В графиках только доверенные источники; «Продавцы → Метрикам доверяем» меняет, чьи замеры считаются нашими.</li></ol>
+    <div class="actions"><button type="button" class="btn small" data-act="hide-tips">Скрыть</button></div></div>`;
+  const rows = imports.map(im => {
+    const prog = im.total == null ? '<span class="muted">—</span>' : `${im.done} из ${im.total}${im.done < im.total ? ' <span class="chip warn">ждёт разбора</span>' : ' <span class="chip dn">разобрано</span>'}`;
+    const title = im.id === 'new' ? `<button type="button" class="link" data-route="review">${esc(im.title)}</button>` : esc(im.title);
+    return `<tr><td>${title}<div class="sub">${esc(im.kind)}</div></td><td>${esc(sellerName(im.seller))}</td><td class="num">${im.date}</td><td class="r num">${fmtNum(im.rows)}</td><td>${prog}</td><td>${esc(im.list)}</td></tr>`;
+  }).join('');
+  return `<h1>Загрузки</h1><p class="lead">Прайсы продавцов и выгрузки каталога. Каждая загрузка — рабочий список и разбор цен против базы площадок.</p>
+  ${tips}
+  <div class="toolbar"><button type="button" class="btn primary" data-act="start-import">Загрузить файл</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Файл</th><th>Продавец</th><th>Дата цен</th><th class="r">Строк</th><th>Разобрано</th><th>Рабочий список</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// ---------- Мастер загрузки ----------
+function stepsHtml(step) {
+  const names = ['Файл', 'Колонки', 'Сводка до записи', 'Разбор'];
+  return `<ol class="steps">${names.map((n, i) => `<li class="${i + 1 === step ? 'on' : i + 1 < step ? 'done' : ''}">${i + 1 < step ? '✓' : i + 1}. ${n}</li>`).join('')}</ol>`;
+}
+function wizardHtml() {
+  const w = state.w;
+  if (w.step === 1) return wizardFile(w);
+  if (w.step === 2) return wizardMap(w);
+  return wizardSummary(w);
+}
+function wizardFile(w) {
+  const sellerOpts = ['lh', 'st', 'mo'].map(s => `<option value="${s}" ${w.seller === s ? 'selected' : ''}>${esc(sellerName(s))}</option>`).join('') + '<option value="add">+ Новый продавец…</option>';
+  const fileBox = w.file
+    ? `<div class="drop ok"><div><b>${esc(w.file)}</b> · 26 строк, 13 колонок</div><div class="sub">${w.file === FILE.name ? 'Пример прайса.' : 'В прототипе файл не читается — подставлен пример прайса LinkHub Media.'}</div><button type="button" class="btn small" data-act="w-clear">Выбрать другой</button></div>`
+    : `<div class="drop"><div>Перетащите сюда xlsx или csv — или выберите файл.</div><input type="file" id="w-file" accept=".xlsx,.xls,.csv"><button type="button" class="btn small" data-act="w-sample">Взять пример: ${esc(FILE.name)}</button></div>`;
+  return `<h1>Новая загрузка</h1>${stepsHtml(1)}
+  <div class="form">
+    <div class="row"><span>Что загружаем</span><div class="radios">
+      <label><input type="radio" name="kind" value="price" checked> Прайс продавца</label>
+      <label><input type="radio" name="kind" value="catalog" disabled> Каталог Collaborator</label>
+      <label class="off"><input type="radio" name="kind" value="placements" disabled> Размещения продукта</label></div>
+      <span class="sub">Каталог и размещения — той же загрузкой, в прототипе показан прайс.</span></div>
+    <label class="row"><span>Продавец</span><select id="w-seller">${sellerOpts}</select>
+      <span class="sub">Валюта по умолчанию: ${SELLERS[w.seller] ? SELLERS[w.seller].cur : 'USD'}. Первый файл от продавца — колонки разметим один раз и запомним.</span></label>
+    <label class="row"><span>Дата цен</span><input type="date" id="w-date" value="${w.date}"><span class="sub">Цены станут снимком на эту дату. Повторная загрузка с той же датой обновит его, а не задвоит.</span></label>
+    <div class="row"><span>Файл</span>${fileBox}</div>
+  </div>
+  ${w.error ? `<div class="msg warn" style="margin-top:12px">${esc(w.error)}</div>` : ''}
+  <div class="actions"><button type="button" class="btn" data-route="imports">Отмена</button><button type="button" class="btn primary" data-act="w-next">Дальше: колонки</button></div>`;
+}
+function wizardMap(w) {
+  const samples = i => FILE.rows.slice(0, 3).map(r => r[i]).filter(v => v !== '' && v != null).map(v => esc(v)).join(' · ') || '<span class="muted">пусто в первых строках</span>';
+  const rows = FILE.headers.map((h, i) => {
+    const opts = FIELDS.map(([v, l]) => `<option value="${v}" ${w.mapping[h] === v ? 'selected' : ''}>${l}</option>`).join('');
+    const conf = w.touched.has(h) ? '<span class="chip info conf">вы выбрали</span>'
+      : w.guess[h] === 'точно' ? '<span class="chip dn conf">точно</span>'
+      : w.guess[h] === 'похоже' ? '<span class="chip warn conf">похоже — проверьте</span>'
+      : '<span class="chip conf">не знаю → прочие данные</span>';
+    const warn = h === 'Ahrefs Traffic' && !w.touched.has(h) ? '<div class="sub">У продавцов «Traffic» бывает и органический, и общий.</div>' : '';
+    return `<tr><td><b>${esc(h)}</b></td><td class="sub">${samples(i)}</td><td><select data-map="${esc(h)}" aria-label="Поле для колонки ${esc(h)}">${opts}</select>${warn}</td><td>${conf}</td></tr>`;
+  }).join('');
+  return `<h1>Колонки файла</h1>${stepsHtml(2)}
+  <div class="note">Строка заголовков найдена: строка 1. Валюта цен — <b>USD</b>: в значениях стоит «$». Колонки, которым нет своего поля, идут в «прочие данные» и видны в карточке площадки — из файла ничего не теряется.
+  <ul><li>Разметка запомнится у продавца ${esc(sellerName(w.seller === 'add' ? 'lh' : w.seller))}: следующий файл с теми же колонками пройдёт без этого шага.</li><li>Появится новая колонка — спрошу только про неё.</li></ul></div>
+  <div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Колонка в файле</th><th>Первые значения</th><th>Куда записать</th><th>Уверенность</th></tr></thead><tbody>${rows}</tbody></table></div>
+  ${w.error ? `<div class="msg warn" style="margin-top:12px">${esc(w.error)}</div>` : ''}
+  <div class="actions"><button type="button" class="btn" data-act="w-back">Назад</button><button type="button" class="btn primary" data-act="w-next">Дальше: сводка</button></div>`;
+}
+function wizardSummary(w) {
+  if (w.busy) {
+    return `<h1>Запись</h1>${stepsHtml(3)}<div class="busy"><div class="spin" aria-hidden="true"></div><div>${esc(w.busy)}<div class="sub">Задача очереди «Загрузка прайса» — видна в «Запусках задач».</div></div></div>`;
+  }
+  const p = w.plan, c = cat => p.rows.filter(r => r.cat === cat).length;
+  const ch = p.rows.filter(r => r.cat === 'changed');
+  const chDn = ch.filter(r => r.p < sites.get(r.domain).offers.find(o => o.id === r.refId).p).length;
+  const stat = (n, label, cls) => `<div class="stat ${cls || ''}"><b>${n}</b><span>${label}</span></div>`;
+  const rej = p.rows.filter(r => r.cat === 'rejected').map(r => `<li><b>${esc(r.domain)}</b> — ${esc(sites.get(r.domain).reason)}</li>`).join('');
+  const dups = p.dups.map(d => `<li><b>${esc(d.domain)}</b>: строки ${d.lines.join(' и ')}, публикация ${d.prices.map(v => money(v, 'USD')).join(' и ')} — взята меньшая ${money(d.used, 'USD')}</li>`).join('');
+  const errs = p.errors.map(e => `<li>Строка ${e.line}: ${esc(e.msg)}</li>`).join('');
+  const urls = p.rows.filter(r => r.url && r.t === 'GP').map(r => `<li>«${esc(r.url)}» → ${esc(r.domain)}</li>`).join('');
+  return `<h1>Сводка до записи</h1>${stepsHtml(3)}
+  <p class="lead">В базу ещё ничего не записано. Проверьте цифры — потом «Записать», и откроется разбор.</p>
+  <div class="stats">
+    ${stat(FILE.rows.length, 'строк в файле')}${stat(p.sites, 'площадок')}${stat(p.known, 'уже в базе')}${stat(p.sites - p.known, 'новых для базы', 'dn')}
+    ${stat(c('cheaper'), 'дешевле рабочей цены', 'dn')}${stat(ch.length, `цена изменилась: ▼ ${chDn}, ▲ ${ch.length - chDn}`)}${stat(c('pricier'), 'дороже рабочей', 'up')}
+    ${stat(c('other'), 'другая услуга')}${stat(c('same'), 'без изменений')}${stat(c('rejected'), 'уже отклоняли', 'warn')}${stat(p.dups.length + p.errors.length, 'дубли и ошибки', 'warn')}
+  </div>
+  <div class="two">
+    <div class="box"><h3>Уже отклоняли</h3><ul>${rej || '<li class="muted">нет</li>'}</ul></div>
+    <div class="box"><h3>Дубли в файле</h3><ul>${dups || '<li class="muted">нет</li>'}</ul></div>
+    <div class="box"><h3>Ошибки</h3><ul>${errs || '<li class="muted">нет</li>'}</ul></div>
+    <div class="box"><h3>Адреса вместо доменов</h3><ul>${urls || '<li class="muted">нет</li>'}</ul></div>
+  </div>
+  <p class="hint">После записи: новые площадки — в базе со статусом «Новая», всё из файла — в рабочем списке «${esc(sellerName('lh'))} · ${TODAY}», рабочие цены у известных площадок не меняются, пока вы не решите.</p>
+  <div class="actions"><button type="button" class="btn" data-act="w-back">Назад</button><button type="button" class="btn primary" data-act="w-write">Записать в базу</button></div>`;
+}
+
+// ---------- Разбор ----------
+function visibleRows() {
+  const rv = state.review;
+  if (rv.tab === 'issues') return [];
+  let rows = rv.rows.filter(r => r.cat === rv.tab && !(rv.hideDone && r.decided));
+  const d = r => { const s = sites.get(r.domain), ref = s.offers.find(o => o.id === r.refId), o = s.offers.find(x => x.id === r.offerId); const x = r.cat === 'other' ? null : delta(o, ref); return x ? toEur(x.v, x.cur) : 1e9; };
+  if (rv.sort === 'gain') rows = rows.slice().sort((a, b) => d(a) - d(b));
+  else rows = rows.slice().sort((a, b) => (drOf(sites.get(b.domain)) || 0) - (drOf(sites.get(a.domain)) || 0));
+  return rows;
+}
+function reviewHtml() {
+  const rv = state.review;
+  const need = rv.rows.filter(r => DECIDE.has(r.cat)), done = need.filter(r => r.decided).length;
+  const imp = imports.find(i => i.id === 'new'); if (imp) imp.done = done;
+  const count = cat => cat === 'issues' ? rv.dups.length + rv.errors.length : rv.rows.filter(r => r.cat === cat && (!DECIDE.has(r.cat) || !r.decided)).length;
+  const tabs = TABS.map(([k, l]) => { const n = count(k); return `<button type="button" class="tab ${rv.tab === k ? 'on' : ''} ${n ? '' : 'zero'}" data-act="tab" data-tab="${k}">${l}<b>${n}</b></button>`; }).join('');
+  const note = TABS.find(t => t[0] === rv.tab)[2];
+  let body;
+  if (rv.tab === 'issues') {
+    body = `<div class="two"><div class="box"><h3>Дубли в файле</h3><ul>${rv.dups.map(d => `<li><b>${esc(d.domain)}</b>: строки ${d.lines.join(' и ')} — публикация ${d.prices.map(v => money(v, 'USD')).join(' и ')}, взята меньшая</li>`).join('') || '<li class="muted">нет</li>'}</ul></div>
+      <div class="box"><h3>Ошибки</h3><ul>${rv.errors.map(e => `<li>Строка ${e.line}: ${esc(e.msg)}</li>`).join('') || '<li class="muted">нет</li>'}</ul><p class="hint">Исправьте строку в файле и загрузите его снова — уже записанное не задвоится.</p></div></div>`;
+  } else {
+    const rows = visibleRows();
+    if (rv.focus >= rows.length) rv.focus = Math.max(0, rows.length - 1);
+    const decidable = DECIDE.has(rv.tab);
+    const allSel = rows.length && rows.every(r => rv.sel.has(r.id));
+    body = rows.length ? `<div class="toolbar">
+        ${decidable ? `<label><input type="checkbox" id="sel-all" ${allSel ? 'checked' : ''}> выбрать все на вкладке</label>` : ''}
+        <label>Порядок <select id="rv-sort"><option value="gain" ${rv.sort === 'gain' ? 'selected' : ''}>сначала самая большая выгода</option><option value="dr" ${rv.sort === 'dr' ? 'selected' : ''}>по DR</option></select></label>
+        <label><input type="checkbox" id="rv-hide" ${rv.hideDone ? 'checked' : ''}> скрывать разобранные</label></div>
+      <div class="tablewrap"><table><thead><tr>${decidable ? '<th class="cb"></th>' : ''}<th>Площадка</th><th class="r">DR</th><th>Услуга</th><th>Рабочая цена сейчас</th><th>Из файла</th><th>Разница</th><th>Решение</th><th></th></tr></thead>
+      <tbody>${rows.map((r, i) => reviewRowHtml(r, i, decidable)).join('')}</tbody></table></div>
+      ${decidable ? '<div class="keys"><kbd>J</kbd>/<kbd>K</kbd> — по строкам · <kbd>A</kbd> — сделать рабочей · <kbd>S</kbd> — оставить как есть · <kbd>X</kbd> — отметить · <kbd>O</kbd> — подробнее</div>' : ''}`
+      : `<div class="msg">${count(rv.tab) || rv.rows.some(r => r.cat === rv.tab) ? 'На этой вкладке всё разобрано.' : 'Таких строк нет.'}</div>`;
+  }
+  const selRows = rv.rows.filter(r => rv.sel.has(r.id) && !r.decided);
+  const bulk = selRows.length ? `<div class="bulk" role="region" aria-label="Действия с отмеченными"><b>Отмечено: ${selRows.length}</b>
+    <button type="button" class="btn small primary" data-act="bulk-fix">Сделать рабочей ценой</button>
+    <button type="button" class="btn small" data-act="bulk-keep">Оставить как есть</button>
+    <button type="button" class="btn small" data-act="bulk-clear">Снять отметки</button></div>` : '';
+  return `<div class="rev-head"><div><h1>Разбор: ${esc(sellerName('lh'))} · ${TODAY}</h1>
+    <div class="sub">${esc(FILE.name)} · рабочий список «${esc(rv.list)}» · курс ЕЦБ 1.1355 на ${RATE_DATE}</div></div>
+    <div class="progress"><div class="sub">Разобрано ${done} из ${need.length}</div><div class="bar"><i style="width:${need.length ? Math.round(done / need.length * 100) : 100}%"></i></div></div></div>
+  <div class="tabs" role="tablist">${tabs}</div>
+  <p class="tabnote">${esc(note)}</p>
+  ${body}${bulk}`;
+}
+function reviewRowHtml(r, i, decidable) {
+  const rv = state.review, site = sites.get(r.domain);
+  const o = site.offers.find(x => x.id === r.offerId), ref = site.offers.find(x => x.id === r.refId) || null;
+  const wkNow = workingOf(site);
+  let diff;
+  if (r.cat === 'other') diff = `<span class="flat">рабочая — ${ref ? TYPE[ref.t] : '—'}</span>`;
+  else if (r.cat === 'new') diff = '<span class="flat">—</span>';
+  else diff = deltaHtml(delta(o, ref)) + `<div class="sub">${r.cat === 'changed' ? 'к прошлой цене продавца' : 'к рабочей цене'}</div>`;
+  let dec;
+  if (r.cat === 'new') dec = r.auto ? '<span class="chip dn">стала рабочей сама</span>' : `<span class="chip">рабочей стала ${wkNow ? TYPE[wkNow.t] : '—'}</span>`;
+  else if (r.cat === 'same') dec = '<span class="muted">—</span>';
+  else if (r.decided === 'fixed') dec = '<span class="chip dn">✓ рабочая цена</span>';
+  else if (r.decided === 'kept') dec = '<span class="chip">оставлена прежняя</span>';
+  else dec = `<div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn small primary" data-act="fix-row" data-row="${r.id}">Сделать рабочей</button><button type="button" class="btn small" data-act="keep-row" data-row="${r.id}">Оставить</button></div>`;
+  const tags = [];
+  if (r.isNew) tags.push('<span class="chip info">новая в базе</span>');
+  if (r.url) tags.push(`<span class="chip ghost" data-tipt="В файле: ${esc(r.url)}">из адреса</span>`);
+  const rej = r.cat === 'rejected' ? `<div class="warnline">Отклонена для Convertio: ${esc(site.reason)}</div>` : '';
+  const refCell = ref ? `${priceHtml(ref)}<div class="sub">${esc(sellerName(ref.s))} · ${TYPE[ref.t]}</div>${ref.w != null ? `<div class="sub">${writingHtml(ref)}</div>` : ''}` : '<span class="muted">не было</span>';
+  const fileCell = `${priceHtml(o)}${o.g != null ? `<div class="sub">серая: ${money(o.g, o.cur)}</div>` : ''}`;
+  const focus = i === rv.focus ? 'focus' : '';
+  const done = r.decided && DECIDE.has(r.cat) ? 'done' : '';
+  const open = rv.open.has(r.id);
+  let html = `<tr class="${focus} ${done}" data-ri="${i}">
+    ${decidable ? `<td class="cb"><input type="checkbox" data-sel-row="${r.id}" ${rv.sel.has(r.id) ? 'checked' : ''} ${r.decided ? 'disabled' : ''} aria-label="Отметить ${esc(r.domain)}"></td>` : ''}
+    <td><button type="button" class="link" data-act="open-site" data-domain="${esc(r.domain)}">${esc(r.domain)}</button> ${tags.join(' ')}<div>${statusHtml(site.status)}</div>${rej}</td>
+    <td class="r num">${drOf(site) ?? ''}${metricMark(site)}${sparkBtn(site, 'dr')}<div class="sub">${fmtNum(trOf(site))}</div></td>
+    <td>${TYPE[r.t]}</td><td>${refCell}</td><td>${fileCell}</td><td>${diff}</td><td>${dec}</td>
+    <td><button type="button" class="exp" data-act="toggle-row" data-row="${r.id}" aria-expanded="${open}" aria-label="Подробнее">${open ? '▾' : '▸'}</button></td></tr>`;
+  if (open) html += `<tr class="details"><td colspan="${decidable ? 9 : 8}">${detailsHtml(site, o)}</td></tr>`;
+  return html;
+}
+function detailsHtml(site, highlight) {
+  const wk = workingOf(site);
+  const offers = currentOffers(site).map(o => `<tr class="${wk && o.id === wk.id ? 'wk' : ''}"><td>${esc(sellerName(o.s))}${o.id === (highlight && highlight.id) ? ' <span class="chip info">из файла</span>' : ''}</td><td>${TYPE[o.t]}</td><td>${priceHtml(o)}</td><td>${wk && o.id === wk.id ? '<span class="chip dn">рабочая</span>' : wk && o.t === wk.t ? deltaHtml(delta(o, wk)) : '<span class="flat">другая услуга</span>'}</td><td>${writingHtml(o)}</td><td class="sub">${o.d}</td></tr>`).join('');
+  const extra = highlight && highlight.extra ? Object.entries(highlight.extra).map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('') : '<span class="muted">нет</span>';
+  const notes = site.notes.slice(0, 3).map(n => `<li>${esc(n.text)}<span class="sub">${n.date} · ${esc(n.author)}${n.product ? ' · ' + esc(n.product) : ''}</span></li>`).join('') || '<li class="muted">Заметок нет</li>';
+  return `<div class="det"><div><h3>Все цены площадки</h3><div class="tablewrap"><table><tbody>${offers || '<tr><td class="muted">нет</td></tr>'}</tbody></table></div></div>
+    <div><h3>Прочие данные из файла</h3><div class="kv">${extra}</div></div>
+    <div><h3>Заметки</h3><ul class="notes">${notes}</ul></div></div>`;
+}
+
+// ---------- «Площадки» ----------
+function cheaperOf(site) {
+  const wk = workingOf(site);
+  if (!wk) return null;
+  return currentOffers(site).filter(o => o.t === wk.t && o.s !== wk.s && oEur(o) < oEur(wk) - 0.5).sort((a, b) => oEur(a) - oEur(b))[0] || null;
+}
+function newPriceOf(site) {
+  const wk = workingOf(site);
+  if (!wk) return null;
+  const latest = currentOffers(site).find(o => o.s === wk.s && o.t === wk.t);
+  return latest && latest.id !== wk.id ? latest : null;
+}
+function offersCell(site) {
+  const wk = workingOf(site), parts = [];
+  const np = newPriceOf(site);
+  if (np) { const d = delta(np, wk); parts.push(`<span class="chip ${site.pending.has(np.id) ? (d.v > 0 ? 'up' : 'dn') : ''}">${d.v > 0 ? '▲' : '▼'} новая ${money(np.p, np.cur)}</span>`); }
+  const ch = cheaperOf(site);
+  if (ch) { const d = delta(ch, wk); parts.push(`<span class="chip ${site.pending.has(ch.id) ? 'dn' : ''}">▼ ${d.approx ? '≈' : ''}${money(Math.round(Math.abs(d.v)), d.cur)} · ${esc(sellerName(ch.s))}</span>`); }
+  const others = currentOffers(site).length - (wk ? 1 : 0);
+  if (!parts.length && others > 0) parts.push(`<span class="muted">ещё ${others}</span>`);
+  if (!wk && site.offers.length === 0) parts.push('<span class="chip warn">нет цены</span>');
+  return `<span data-tipt="${esc(offersTip(site))}">${parts.join(' ') || '<span class="muted">—</span>'}</span>`;
+}
+function filteredSites() {
+  const f = state.list;
+  return [...sites.values()].filter(s => {
+    if (f.q && !s.domain.includes(f.q.trim().toLowerCase())) return false;
+    if (f.list !== 'all' && !s.lists.has(f.list)) return false;
+    if (f.offers === 'pending' && !s.pending.size) return false;
+    if (f.offers === 'cheaper' && !cheaperOf(s)) return false;
+    if (f.offers === 'noprice' && workingOf(s)) return false;
+    if (f.seller !== 'all' && !s.offers.some(o => o.s === f.seller)) return false;
+    if (f.notes === 'yes' && !s.notes.length) return false;
+    if (f.notes === 'no' && s.notes.length) return false;
+    return true;
+  }).sort((a, b) => (drOf(b) || 0) - (drOf(a) || 0));
+}
+function sitesHtml() {
+  const f = state.list, rows = filteredSites();
+  const lists = new Set(); sites.forEach(s => s.lists.forEach(l => lists.add(l)));
+  const sel = (id, val, opts) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const sellerOpts = Object.keys(SELLERS).map(k => [k, sellerName(k)]);
+  const allSel = rows.length && rows.every(s => f.sel.has(s.domain));
+  const body = rows.map(s => {
+    const wk = workingOf(s), plan = planned(wk);
+    const price = wk ? `${priceHtml(wk)}${sparkBtn(s, 'price')}<div class="sub">${TYPE[wk.t]} · ${esc(sellerName(wk.s))}</div>` : '<span class="muted">—</span>';
+    const notes = notesBtn(s);
+    return `<tr><td class="cb"><input type="checkbox" data-sel-site="${esc(s.domain)}" ${f.sel.has(s.domain) ? 'checked' : ''} aria-label="Отметить ${esc(s.domain)}"></td>
+      <td><button type="button" class="link" data-act="open-site" data-domain="${esc(s.domain)}">${esc(s.domain)}</button></td>
+      <td>${statusHtml(s.status)}</td><td class="r num">${drOf(s) ?? ''}${metricMark(s)}${sparkBtn(s, 'dr')}</td><td class="r num">${fmtNum(trOf(s))}${sparkBtn(s, 'traffic')}</td>
+      <td>${price}</td><td>${offersCell(s)}</td><td>${writingHtml(wk)}</td>
+      <td class="r num">${plan == null ? '' : '€' + fmtNum(plan)}</td><td class="r">${notes}</td></tr>`;
+  }).join('');
+  const msg = f.msg ? `<div class="msg ${f.msg.warn ? 'warn' : ''}">${esc(f.msg.text)}</div>` : '';
+  return `<h1>Площадки</h1><p class="lead">Convertio. Рабочая цена — одна на площадку для всех продуктов: от неё «плановые расходы» и сравнение с ориентиром 550 €. Наведите на «Предложения» — все цены продавцов.</p>
+  ${msg}
+  <div class="toolbar">
+    <input class="grow" type="search" id="q" placeholder="Домен или адрес" value="${esc(f.q)}" aria-label="Поиск по домену">
+    <label>Действие ${sel('act', f.action, [['accept', 'Принять новые цены'], ['seller', 'Зафиксировать продавца…'], ['keep', 'Оставить как есть']])}</label>
+    ${f.action === 'seller' ? sel('act-seller', f.actSeller, sellerOpts) : ''}
+    <button type="button" class="btn primary" data-act="apply-action" ${f.sel.size ? '' : 'disabled'}>Выполнить</button>
+    <span class="sub">отмечено ${f.sel.size} из ${rows.length}</span>
+  </div>
+  <div class="cols">
+    <div class="tablewrap"><table><thead><tr><th class="cb"><input type="checkbox" id="sel-all-sites" ${allSel ? 'checked' : ''} aria-label="Отметить все"></th><th>Домен</th><th>Статус</th><th class="r">DR</th><th class="r">Трафик</th><th>Цена</th><th>Предложения</th><th>Написание</th><th class="r">Плановые расходы</th><th class="r">Заметки</th></tr></thead>
+    <tbody>${body || '<tr><td colspan="10" class="muted">Ничего не нашлось — смягчите фильтры.</td></tr>'}</tbody></table></div>
+    <div class="filters" aria-label="Фильтры">
+      <label>Список ${sel('f-list', f.list, [['all', 'Все площадки'], ...[...lists].map(l => [l, l])])}</label>
+      <label>Предложения ${sel('f-offers', f.offers, [['all', 'Все'], ['pending', 'Есть новые, не разобраны'], ['cheaper', 'Есть дешевле рабочей'], ['noprice', 'Нет рабочей цены']])}</label>
+      <label>Продавец ${sel('f-seller', f.seller, [['all', 'Все'], ...sellerOpts])}</label>
+      <label>Заметки ${sel('f-notes', f.notes, [['all', 'Все'], ['yes', 'Есть'], ['no', 'Нет']])}</label>
+    </div>
+  </div>`;
+}
+function applyListAction() {
+  const f = state.list, domains = [...f.sel], snap = snapshot(domains);
+  let changed = 0, skipped = 0;
+  for (const d of domains) {
+    const s = sites.get(d), wk = workingOf(s);
+    if (f.action === 'accept') {
+      const np = newPriceOf(s);
+      if (np && fixOffer(s, np.id)) changed++; else skipped++;
+    } else if (f.action === 'seller') {
+      const cur = currentOffers(s).filter(o => o.s === f.actSeller);
+      const pick = cur.find(o => wk && o.t === wk.t) || cur.find(o => o.t === 'GP') || cur[0];
+      if (pick && fixOffer(s, pick.id)) changed++; else skipped++;
+    } else {
+      if (s.pending.size) { s.pending.clear(); changed++; } else skipped++;
+    }
+    syncRows(s);
+  }
+  const what = f.action === 'keep' ? 'Пометки сняты' : 'Рабочая цена изменена';
+  f.msg = {text: `${what}: ${changed}.${skipped ? ` Пропущено: ${skipped} — ${f.action === 'seller' ? `у них нет предложения ${sellerName(f.actSeller)} или оно уже рабочее` : f.action === 'accept' ? 'новой цены того же продавца нет' : 'нечего снимать'}.` : ''}`, warn: !changed};
+  f.sel.clear();
+  if (changed) toast(`${what} у ${changed} площ.`, snap);
+}
+
+// ---------- «Продавцы» ----------
+function sellersHtml() {
+  const rows = Object.entries(SELLERS).map(([k, s]) => {
+    const cnt = [...sites.values()].filter(x => x.offers.some(o => o.s === k)).length;
+    const wk = [...sites.values()].filter(x => { const w = workingOf(x); return w && w.s === k; }).length;
+    const last = [...sites.values()].flatMap(x => x.offers).filter(o => o.s === k).map(o => o.d).sort((a, b) => dnum(b) - dnum(a))[0] || '—';
+    return `<tr><td><b>${esc(s.name)}</b><div class="sub">${esc(s.kind)}</div></td><td>${s.cur}</td><td class="r num">${cnt}</td><td class="r num">${wk}</td><td class="num">${last}</td><td><label><input type="checkbox" data-trust="${k}" ${s.trusted ? 'checked' : ''}> ${s.trusted ? 'да' : 'нет'}</label></td><td class="sub">${esc(s.contacts)}</td></tr>`;
+  }).join('');
+  return `<h1>Продавцы</h1><p class="lead">Collaborator — тоже продавец. Имя без учёта регистра: «Athena Smith» и «Athena smith» — один продавец. Разметка колонок файла запоминается здесь.</p>
+  <p class="lead">«Метрикам доверяем»: DR и трафик такого продавца показываются как наши и идут в графики. У остальных — хранятся, но видны, только если доверенных замеров нет, с пометкой <span class="sm">прод.</span> Ahrefs (API) — доверенный всегда. Попробуйте включить LinkHub Media после загрузки.</p>
+  <div class="tablewrap"><table><thead><tr><th>Продавец</th><th>Валюта</th><th class="r">Площадок с ценами</th><th class="r">Рабочих цен</th><th>Последний прайс</th><th>Метрикам доверяем</th><th>Контакты</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// ---------- Карточка площадки ----------
+function metricsBlock(site) {
+  const m = metricNow(site);
+  const untrusted = site.metrics.filter(x => !isTrusted(x.src)).sort((a, b) => dnum(b.d) - dnum(a.d))[0];
+  const note = m && !isTrusted(m.src)
+    ? `<p class="hint">Замеров доверенных источников нет. По словам продавца ${esc(srcName(m.src))}: DR ${m.dr}, трафик ${fmtNum(m.traffic)} — в графики не попадают.</p>`
+    : untrusted ? `<p class="hint">Есть и данные продавца ${esc(srcName(untrusted.src))} (DR ${untrusted.dr}, трафик ${fmtNum(untrusted.traffic)} на ${untrusted.d}) — не показываем: есть доверенные замеры.</p>` : '';
+  return `<div class="charts2"><div><h4>DR</h4>${chartHtml(chartSeries(site, 'dr'), 340)}</div><div><h4>Органический трафик</h4>${chartHtml(chartSeries(site, 'traffic'), 340)}</div></div>
+    <p class="hint">Источники: ${esc(trustedNames())}.</p>${note}`;
+}
+function priceChartBlock(site) {
+  const s = chartSeries(site, 'price');
+  return s && s.pts.length > 1 ? `<h4 style="margin:14px 0 4px;font-size:13px">${esc(s.title)}</h4>${chartHtml(s, 360)}` : '';
+}
+function drawerHtml(site) {
+  const wk = workingOf(site), cur = currentOffers(site);
+  const hist = site.offers.filter(o => !cur.includes(o)).sort((a, b) => dnum(b.d) - dnum(a.d));
+  const offerRows = cur.map(o => {
+    const isWk = wk && o.id === wk.id;
+    const d = isWk ? '<span class="chip dn">рабочая</span>' : wk && o.t === wk.t ? deltaHtml(delta(o, wk)) : wk ? '<span class="flat">другая услуга</span>' : '';
+    return `<tr class="${isWk ? 'wk' : ''}"><td>${esc(sellerName(o.s))}${site.pending.has(o.id) ? ' <span class="chip info">новое</span>' : ''}</td><td>${TYPE[o.t]}</td><td>${priceHtml(o)}</td><td>${d}</td><td>${writingHtml(o) || '<span class="muted">—</span>'}</td><td>${o.t === 'GP' ? announceText(o) : '—'}</td><td>${o.g != null ? money(o.g, o.cur) : '—'}</td><td class="sub num">${o.d}</td>
+      <td>${isWk ? '' : `<button type="button" class="btn small" data-act="fix" data-domain="${esc(site.domain)}" data-offer="${o.id}">Сделать рабочей</button>`}</td></tr>`;
+  }).join('');
+  const histRows = hist.map(o => `<tr><td>${esc(sellerName(o.s))}</td><td>${TYPE[o.t]}</td><td>${priceHtml(o)}</td><td class="sub num">${o.d}</td></tr>`).join('');
+  const extras = site.offers.filter(o => o.extra).map(o => `<div><div class="sub">${esc(sellerName(o.s))} · ${o.d}</div><div class="kv">${Object.entries(o.extra).map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('')}</div></div>`).join('');
+  const notes = site.notes.map(n => `<li>${esc(n.text)}<span class="sub">${n.date} · ${esc(n.author)}${n.product ? ' · ' + esc(n.product) : ''}</span></li>`).join('');
+  return `<div class="dr-head"><div><h2>${esc(site.domain)}</h2>
+      <div class="sub">DR ${drOf(site) ?? '—'}${metricMark(site)} · трафик ${fmtNum(trOf(site))} · Convertio: ${statusHtml(site.status)}${site.reason ? ` — ${esc(site.reason)}` : ''}</div></div>
+      <button type="button" class="btn" data-act="close-drawer" aria-label="Закрыть карточку">✕</button></div>
+    <section><h3>Метрики</h3>${metricsBlock(site)}</section>
+    <section><h3>Рабочая цена</h3>${wk ? `<div class="wkline">${priceHtml(wk)} · ${TYPE[wk.t]} · ${esc(sellerName(wk.s))} <span class="sub">цена от ${wk.d}</span></div>
+      <div class="sub">Написание: ${wk.w == null ? 'не предлагает — пишем сами' : '📝 ' + (wk.w === 0 ? 'бесплатно' : money(wk.w, wk.cur))} · анонс: ${announceText(wk)} · плановые расходы: €${fmtNum(planned(wk))}</div>` : '<div class="muted">Нет — выберите предложение ниже.</div>'}</section>
+    <section><h3>Предложения продавцов</h3><div class="tablewrap"><table><thead><tr><th>Продавец</th><th>Услуга</th><th>Цена</th><th>К рабочей</th><th>Написание</th><th>Анонс</th><th>Серая</th><th>Дата</th><th></th></tr></thead><tbody>${offerRows || '<tr><td colspan="9" class="muted">Цен нет</td></tr>'}</tbody></table></div>
+      <p class="hint">Последнее предложение каждого продавца по каждой услуге, по цене в евро. Сравниваем только цену размещения одной услуги; написание и анонс — справочно.</p>${priceChartBlock(site)}</section>
+    <section><details><summary>История цен (${hist.length})</summary>${hist.length ? `<div class="tablewrap" style="margin-top:8px"><table><tbody>${histRows}</tbody></table></div>` : '<p class="muted">Старых цен нет.</p>'}</details></section>
+    <section><h3>Прочие данные из файлов</h3>${extras || '<p class="muted">Нет.</p>'}</section>
+    <section><h3>Заметки</h3>
+      <div class="form"><textarea id="note-text" rows="2" placeholder="Новая заметка" aria-label="Текст заметки"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><select id="note-product" aria-label="Продукт"><option value="">Без продукта</option><option>Convertio</option><option>Clideo</option></select><button type="button" class="btn primary" data-act="add-note" data-domain="${esc(site.domain)}">Добавить заметку</button></div></div>
+      <ul class="notes" style="margin-top:12px">${notes || '<li class="muted">Заметок нет</li>'}</ul>
+      <p class="hint">Заметки не правятся и не удаляются: это история. Смена рабочей цены и отказ попадают сюда сами.</p></section>`;
+}
+
+// ---------- Общая отрисовка ----------
+function render() {
+  $('nav').innerHTML = navHtml();
+  $('crumbs').innerHTML = crumbsHtml();
+  const views = {imports: importsHtml, wizard: wizardHtml, review: reviewHtml, sites: sitesHtml, sellers: sellersHtml};
+  $('main').innerHTML = views[state.route]();
+  renderDrawer();
+}
+function renderDrawer() {
+  const open = !!state.drawer;
+  $('drawer').hidden = !open; $('back').hidden = !open;
+  if (open) $('drawer').innerHTML = drawerHtml(sites.get(state.drawer));
+}
+let toastTimer = null;
+function toast(text, snap) {
+  const t = $('toast');
+  t.innerHTML = `<span>${esc(text)}</span>${snap ? '<button type="button" data-act="undo">Отменить</button>' : ''}`;
+  t.hidden = false;
+  state.toast = snap || null;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; state.toast = null; }, 7000);
+}
+function go(route) { closePop(); state.route = route; state.drawer = null; window.scrollTo(0, 0); render(); }
+
+// ---------- Решения в разборе ----------
+function rowById(id) { return state.review.rows.find(r => r.id === Number(id)); }
+function decideRows(rows, how) {
+  rows = rows.filter(r => !r.decided && DECIDE.has(r.cat));
+  if (!rows.length) return;
+  const snap = snapshot([...new Set(rows.map(r => r.domain))]);
+  for (const r of rows) {
+    const s = sites.get(r.domain);
+    if (how === 'fix') fixOffer(s, r.offerId);
+    else { s.pending.delete(r.offerId); r.decided = 'kept'; }
+    syncRows(s);
+    state.review.sel.delete(r.id);
+  }
+  const one = rows.length === 1 ? rows[0] : null;
+  toast(how === 'fix'
+    ? (one ? `${one.domain}: рабочая — ${sellerName('lh')} ${money(one.p, 'USD')}` : `Рабочая цена изменена у ${rows.length} строк`)
+    : (one ? `${one.domain}: оставлена прежняя цена` : `Оставлено как есть: ${rows.length}`), snap);
+}
+
+// ---------- События ----------
+document.addEventListener('click', e => {
+  if (!pop.hidden && !e.target.closest('#pop') && !e.target.closest('[data-act="chart"]')) closePop();
+  const el = e.target.closest('[data-route],[data-act]');
+  if (!el) {
+    if (e.target === $('back')) { state.drawer = null; renderDrawer(); }
+    return;
+  }
+  if (el.dataset.route) { go(el.dataset.route); return; }
+  const act = el.dataset.act, rv = state.review;
+  switch (act) {
+    case 'chart': openChart(el); break;
+    case 'close-pop': closePop(); break;
+    case 'hide-tips': state.tipsHidden = true; render(); break;
+    case 'start-import': state.w = newWizard(); go('wizard'); break;
+    case 'w-sample': state.w.file = FILE.name; state.w.error = null; render(); break;
+    case 'w-clear': state.w.file = null; render(); break;
+    case 'w-back': state.w.step -= 1; state.w.error = null; render(); break;
+    case 'w-next': {
+      const w = state.w;
+      if (w.step === 1) {
+        if (!w.file) { w.error = 'Выберите файл или возьмите пример.'; render(); break; }
+        w.error = null; w.step = 2;
+      } else if (w.step === 2) {
+        const vals = Object.values(w.mapping);
+        if (!vals.includes('domain')) { w.error = 'Укажите, в какой колонке площадка.'; render(); break; }
+        if (!vals.includes('gp') && !vals.includes('li')) { w.error = 'Укажите хотя бы одну цену: публикации или вставки ссылки.'; render(); break; }
+        w.error = null; w.plan = planImport(w.mapping); w.step = 3;
+      }
+      window.scrollTo(0, 0); render(); break;
+    }
+    case 'w-write': {
+      const w = state.w;
+      w.busy = 'Задача в очереди…'; render();
+      setTimeout(() => { w.busy = `Записываю: ${w.plan.sites} площадок, ${w.plan.rows.length} цен…`; render(); }, 600);
+      setTimeout(() => { applyImport(w.plan); state.w = null; go('review'); toast('Загрузка записана. Можно разбирать.'); }, 1400);
+      break;
+    }
+    case 'tab': rv.tab = el.dataset.tab; rv.focus = 0; render(); break;
+    case 'fix-row': decideRows([rowById(el.dataset.row)], 'fix'); render(); break;
+    case 'keep-row': decideRows([rowById(el.dataset.row)], 'keep'); render(); break;
+    case 'toggle-row': { const id = Number(el.dataset.row); rv.open.has(id) ? rv.open.delete(id) : rv.open.add(id); render(); break; }
+    case 'bulk-fix': decideRows(rv.rows.filter(r => rv.sel.has(r.id)), 'fix'); render(); break;
+    case 'bulk-keep': decideRows(rv.rows.filter(r => rv.sel.has(r.id)), 'keep'); render(); break;
+    case 'bulk-clear': rv.sel.clear(); render(); break;
+    case 'open-site': state.drawer = el.dataset.domain; renderDrawer(); $('drawer').focus(); break;
+    case 'close-drawer': state.drawer = null; renderDrawer(); break;
+    case 'fix': {
+      const s = sites.get(el.dataset.domain), snap = snapshot([s.domain]);
+      if (fixOffer(s, Number(el.dataset.offer))) { syncRows(s); toast(`${s.domain}: рабочая цена — ${offerLabel(workingOf(s))}`, snap); }
+      render(); break;
+    }
+    case 'add-note': {
+      const text = $('note-text').value.trim();
+      if (!text) { $('note-text').focus(); break; }
+      sites.get(el.dataset.domain).notes.unshift(N(USER, TODAY, text, $('note-product').value));
+      render(); toast('Заметка добавлена'); break;
+    }
+    case 'apply-action': applyListAction(); render(); break;
+    case 'undo': if (state.toast) { restore(state.toast); $('toast').hidden = true; state.toast = null; render(); } break;
+  }
+});
+document.addEventListener('change', e => {
+  const t = e.target, w = state.w, rv = state.review, f = state.list;
+  if (t.id === 'w-seller' && w) { w.seller = t.value === 'add' ? 'lh' : t.value; render(); }
+  else if (t.id === 'w-date' && w) w.date = t.value;
+  else if (t.id === 'w-file' && w && t.files && t.files[0]) { w.file = t.files[0].name; w.error = null; render(); }
+  else if (t.dataset.map && w) { w.mapping[t.dataset.map] = t.value; w.touched.add(t.dataset.map); render(); }
+  else if (t.dataset.selRow && rv) { const id = Number(t.dataset.selRow); t.checked ? rv.sel.add(id) : rv.sel.delete(id); render(); }
+  else if (t.id === 'sel-all' && rv) { visibleRows().filter(r => !r.decided).forEach(r => t.checked ? rv.sel.add(r.id) : rv.sel.delete(r.id)); render(); }
+  else if (t.id === 'rv-sort' && rv) { rv.sort = t.value; render(); }
+  else if (t.id === 'rv-hide' && rv) { rv.hideDone = t.checked; render(); }
+  else if (t.dataset.selSite) { t.checked ? f.sel.add(t.dataset.selSite) : f.sel.delete(t.dataset.selSite); render(); }
+  else if (t.id === 'sel-all-sites') { filteredSites().forEach(s => t.checked ? f.sel.add(s.domain) : f.sel.delete(s.domain)); render(); }
+  else if (t.id === 'act') { f.action = t.value; render(); }
+  else if (t.dataset.trust) { SELLERS[t.dataset.trust].trusted = t.checked; render(); toast(`${sellerName(t.dataset.trust)}: метрикам ${t.checked ? 'доверяем' : 'не доверяем'}`); }
+  else if (t.id === 'act-seller') f.actSeller = t.value;
+  else if (['f-list', 'f-offers', 'f-seller', 'f-notes'].includes(t.id)) { f[t.id.slice(2)] = t.value; f.sel.clear(); f.msg = null; render(); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'q') {
+    state.list.q = e.target.value;
+    const pos = e.target.selectionStart; render();
+    const q = $('q'); q.focus(); q.setSelectionRange(pos, pos);
+  }
+});
+document.addEventListener('keydown', e => {
+  if (!pop.hidden && e.key === 'Escape') { closePop(); return; }
+  if (state.drawer) { if (e.key === 'Escape') { state.drawer = null; renderDrawer(); } return; }
+  if (state.route !== 'review' || e.target.closest('input,textarea,select') || e.ctrlKey || e.metaKey || e.altKey) return;
+  const rv = state.review, rows = visibleRows();
+  if (!rows.length) return;
+  const r = rows[rv.focus];
+  const k = e.key.toLowerCase();
+  if (k === 'j' || k === 'arrowdown' || k === 'о') rv.focus = Math.min(rows.length - 1, rv.focus + 1);
+  else if (k === 'k' || k === 'arrowup' || k === 'л') rv.focus = Math.max(0, rv.focus - 1);
+  else if ((k === 'a' || k === 'ф') && DECIDE.has(r.cat)) decideRows([r], 'fix');
+  else if ((k === 's' || k === 'ы') && DECIDE.has(r.cat)) decideRows([r], 'keep');
+  else if ((k === 'x' || k === 'ч') && DECIDE.has(r.cat) && !r.decided) { rv.sel.has(r.id) ? rv.sel.delete(r.id) : rv.sel.add(r.id); }
+  else if (k === 'o' || k === 'щ' || k === 'enter') { rv.open.has(r.id) ? rv.open.delete(r.id) : rv.open.add(r.id); }
+  else return;
+  e.preventDefault();
+  render();
+  const tr = document.querySelector(`tr[data-ri="${rv.focus}"]`);
+  if (tr) tr.scrollIntoView({block: 'nearest'});
+});
+
+// График во всплывающем окне у значка.
+const pop = $('pop');
+function openChart(btn) {
+  const site = sites.get(btn.dataset.domain), series = chartSeries(site, btn.dataset.kind);
+  pop.innerHTML = `<div class="pop-head"><div><b>${esc(series.title)}</b><div class="sub">${esc(site.domain)}</div></div><button type="button" class="btn small" data-act="close-pop" aria-label="Закрыть">✕</button></div>${chartHtml(series, 372)}<p class="hint">${esc(series.note)}</p>`;
+  pop.hidden = false;
+  const r = btn.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let x = Math.min(window.innerWidth - pw - 8, Math.max(8, r.left - 20)), y = r.bottom + 8;
+  if (y + ph > window.innerHeight - 8) y = Math.max(8, r.top - ph - 8);
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+}
+function closePop() { pop.hidden = true; }
+document.addEventListener('pointermove', e => {
+  const box = e.target.closest && e.target.closest('.chart');
+  document.querySelectorAll('.chart.on').forEach(c => { if (c !== box) hideCross(c); });
+  if (!box) return;
+  const data = charts.get(box.dataset.chart), svg = box.querySelector('svg');
+  if (!data || !svg) return;
+  const rect = svg.getBoundingClientRect(), k = data.w / rect.width, mx = (e.clientX - rect.left) * k;
+  let i = 0;
+  data.xs.forEach((x, j) => { if (Math.abs(x - mx) < Math.abs(data.xs[i] - mx)) i = j; });
+  const xh = svg.querySelector('.xh'), hd = svg.querySelector('.hd'), tipEl = box.querySelector('.ctip');
+  xh.setAttribute('x1', data.xs[i]); xh.setAttribute('x2', data.xs[i]); xh.setAttribute('visibility', 'visible');
+  hd.setAttribute('cx', data.xs[i]); hd.setAttribute('cy', data.ys[i]); hd.setAttribute('visibility', 'visible');
+  const p = data.pts[i];
+  tipEl.textContent = '';
+  const b = document.createElement('b'); b.textContent = data.fmt(p.v);
+  tipEl.append(b, document.createTextNode(` · ${p.d}${p.src ? ' · ' + srcName(p.src) : ''}`));
+  tipEl.hidden = false;
+  const left = Math.min(rect.width - tipEl.offsetWidth / 2, Math.max(tipEl.offsetWidth / 2, data.xs[i] / k));
+  tipEl.style.left = left + 'px'; tipEl.style.top = '-26px';
+  box.classList.add('on');
+});
+function hideCross(box) {
+  box.classList.remove('on');
+  const svg = box.querySelector('svg');
+  if (svg) { svg.querySelector('.xh').setAttribute('visibility', 'hidden'); svg.querySelector('.hd').setAttribute('visibility', 'hidden'); }
+  const t = box.querySelector('.ctip'); if (t) t.hidden = true;
+}
+
+// Подсказки при наведении: одна плашка на страницу, не обрезается таблицей.
+const tip = $('tip');
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-tipt]');
+  if (!el) { tip.hidden = true; return; }
+  tip.textContent = el.dataset.tipt;
+  tip.hidden = false;
+  const r = el.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  let x = Math.min(window.innerWidth - tw - 8, Math.max(8, r.left));
+  let y = r.bottom + 6;
+  if (y + th > window.innerHeight - 8) y = r.top - th - 6;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+});
+document.addEventListener('scroll', () => { tip.hidden = true; }, true);
+
+render();
+})();
+</script>

@@ -85,6 +85,10 @@ DATABASES = {
         "NAME": env_str("POSTGRES_DB"),
         "USER": env_str("POSTGRES_USER"),
         "PASSWORD": env_str("POSTGRES_PASSWORD"),
+        # JIT Postgres компилирует «дорогой» запрос в машинный код. Для
+        # запросов админки компиляция дольше самого запроса: «Площадки» на
+        # 40 000 площадок — 3,5 с с JIT и 1,8 с без него (E1-07).
+        "OPTIONS": {"options": "-c jit=off"},
     }
 }
 
@@ -172,6 +176,13 @@ CELERY_BEAT_SCHEDULE = {
     "indexation_alerts": {
         "task": "indexation_alerts",
         "schedule": crontab(hour=6, minute=30),
+        "options": {"expires": 12 * 60 * 60},
+    },
+    # Курсы ЕЦБ (E1-07, ADR-043): ЕЦБ публикует их в рабочие дни около 16:00 по
+    # CET, в 18:00 по Москве они уже есть. Пропущенный день догоняет следующий запуск.
+    "exchange_rates": {
+        "task": "exchange_rates_update",
+        "schedule": crontab(hour=18, minute=0),
         "options": {"expires": 12 * 60 * 60},
     },
 }

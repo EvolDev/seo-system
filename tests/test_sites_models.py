@@ -135,11 +135,15 @@ class TestDatabaseDefaults:
         with connection.cursor() as cursor:
             cursor.execute("INSERT INTO sites (domain) VALUES ('raw.com') RETURNING id")
             (site_id,) = cursor.fetchone()
-            cursor.execute("INSERT INTO site_prices (site_id) VALUES (%s)", [site_id])
+            cursor.execute(
+                "INSERT INTO site_prices (site_id, seller_id)"
+                " SELECT %s, id FROM sellers WHERE is_collaborator",
+                [site_id],
+            )
             cursor.execute("SELECT is_deleted, created_at IS NOT NULL FROM sites")
             assert cursor.fetchone() == (False, True)
-            cursor.execute("SELECT currency, source FROM site_prices")
-            assert cursor.fetchone() == ("EUR", "manual")
+            cursor.execute("SELECT currency, source, placement_type FROM site_prices")
+            assert cursor.fetchone() == ("EUR", "manual", "guest_post")
 
     def test_one_transaction_one_timestamp(self) -> None:
         # now(), как в schema.sql: у строк одной транзакции время одинаковое.

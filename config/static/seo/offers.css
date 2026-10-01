@@ -1,0 +1,145 @@
+/* Цены, предложения и карточка площадки (E1-07, ADR-043).
+   Цвета — переменные расцветок (admin-palettes.css), а для стрелок свои:
+   ▼ зелёная — дешевле, ▲ красная — дороже, как на бирже. У тёмных
+   расцветок зелёный светлее, чтобы читался на тёмном фоне. */
+
+body.admin-interface {
+  --seo-down: #17803a;
+  --seo-down-bg: #e3f3e8;
+  --seo-up: var(--error-fg, #c4302b);
+  --seo-up-bg: var(--message-error-bg, #fbe9e8);
+  --seo-info: var(--link-fg, #2a65a8);
+  --seo-info-bg: var(--selected-row, #e7eff9);
+  --seo-mark: #8a5a00;
+  --seo-mark-bg: var(--message-warning-bg, #fff3d1);
+}
+html[data-palette="google-dark"] body.admin-interface,
+html[data-palette="ahrefs"] body.admin-interface {
+  --seo-down: #6dd58c;
+  --seo-down-bg: #1e3a2a;
+  --seo-mark: #e8b54a;
+}
+
+.seo-sub { color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-flat { color: var(--body-quiet-color, #666); white-space: nowrap; }
+.seo-approx { color: var(--body-quiet-color, #666); font-size: 0.75rem; white-space: nowrap; }
+.seo-writing { white-space: nowrap; }
+
+.seo-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--darkened-bg, #f0f0f0);
+  color: var(--body-quiet-color, #666);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.seo-chip.seo-down { background: var(--seo-down-bg); color: var(--seo-down); }
+.seo-chip.seo-up { background: var(--seo-up-bg); color: var(--seo-up); }
+.seo-chip.seo-info { background: var(--seo-info-bg); color: var(--seo-info); }
+.seo-offers { display: inline-flex; flex-wrap: wrap; gap: 4px; cursor: help; }
+
+.seo-delta { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.seo-delta small { font-size: 0.6875rem; opacity: 0.85; }
+.seo-delta.seo-down { color: var(--seo-down); }
+.seo-delta.seo-up { color: var(--seo-up); }
+.seo-delta.seo-muted { color: var(--body-quiet-color, #666); }
+
+.seo-seller-mark {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--seo-mark-bg);
+  color: var(--seo-mark);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+.seo-notes {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 999px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.seo-notes:hover { border-color: var(--link-fg, #2a65a8); }
+
+/* Окно карточки справа. */
+.seo-card-back {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(20, 26, 34, 0.35);
+}
+.seo-card {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9991;
+  width: min(820px, 100%);
+  overflow-y: auto;
+  padding: 18px 22px 28px;
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+.seo-card:focus { outline: none; }
+html.seo-card-open { overflow: hidden; }
+.seo-card-message { color: var(--body-quiet-color, #666); }
+
+/* Содержимое — одинаковое в окне и на странице. */
+.seo-card-content { display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
+.seo-card-content h3 {
+  margin: 0 0 8px;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  background: none;
+  padding: 0;
+}
+.seo-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.seo-card-title { margin: 0 0 4px; font-size: 1.25rem; font-weight: 500; }
+.seo-card-tools { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.seo-card-close {
+  padding: 2px 9px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.seo-card-page .seo-card-close { display: none; }
+.seo-card-working { font-size: 0.9375rem; }
+.seo-table-wrap { overflow-x: auto; }
+.seo-card-table { width: 100%; }
+.seo-card-table td, .seo-card-table th { vertical-align: middle; }
+.seo-card-table tr.seo-working td { background: var(--seo-down-bg); }
+.seo-card-table form { margin: 0; }
+.seo-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 4px;
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seo-btn:hover { background: var(--darkened-bg, #f0f0f0); }
+.seo-btn:disabled { opacity: 0.6; cursor: progress; }
+.seo-btn-primary { background: var(--button-bg, #2a65a8); border-color: var(--button-bg, #2a65a8); color: var(--button-fg, #fff); }
+.seo-btn-primary:hover { background: var(--button-hover-bg, #245a96); }
+.seo-inline-form { margin-top: 8px; }
+.seo-kv { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.8125rem; }
+.seo-extra + .seo-extra { margin-top: 8px; }
+.seo-note-form { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+.seo-note-form textarea { width: 100%; box-sizing: border-box; }
+.seo-notes-list { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.seo-notes-list li { list-style: none; padding: 0; }
+.seo-notes-list .seo-sub { display: block; }

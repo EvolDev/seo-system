@@ -1,0 +1,26 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Карточка площадки отдельной страницей — если окно не открылось (нет
+скрипта) или ссылку открыли в новой вкладке. Содержимое — card_body.html.
+{% endcomment %}
+{% load static %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% static 'seo/offers.css' %}">
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<script src="{% static 'seo/site-card.js' %}" defer></script>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Начало</a>
+  › <a href="{% url 'admin:sites_productsitelatest_changelist' %}">Площадки</a>
+  › {{ site.domain }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="seo-card-page">{% include "admin/sites/site/card_body.html" %}</div>
+{% endblock %}

@@ -4,10 +4,14 @@
 - факты каталога — карточка Collaborator, объёмы ключей — перезаписываются
   непустыми значениями из таблицы; пустая ячейка значение в базе не стирает;
 - замеры — метрики, цены, позиции — снапшот на дату файла: та же дата
-  обновляется, новая — новая строка;
-- решения и работа — статус по продукту, причина отказа, заметки,
-  размещения, ссылки — только дополняются: недостающее создаётся, пустое
+  обновляется, новая — новая строка. Цены — предложения Collaborator
+  (ADR-043): первая цена площадки становится рабочей сама, зафиксированную
+  рабочую цену импорт не меняет — другая цена ждёт решения человека;
+- решения и работа — статус по продукту, причина отказа, размещения,
+  ссылки — только дополняются: недостающее создаётся, пустое
   заполняется, статусы двигаются вперёд. Расхождение — в отчёт.
+- комментарий к площадке — в историю заметок с источником «таблица
+  линкбилдинга»; тот же текст второй раз не пишется.
 
 Всё это выполняется внутри одной транзакции, её открывает `run.py`.
 """
@@ -29,16 +33,21 @@ from apps.sites.importing.rows import CopyRow, KeywordData, Link, PlacementData,
 from apps.sites.importing.workbook import ImportAbort
 from apps.sites.models import (
     MetricSource,
+    PlacementType,
     Product,
     ProductSite,
+    Seller,
     Site,
     SiteList,
     SiteListItem,
     SiteMetric,
+    SiteNote,
+    SiteOffer,
     SitePrice,
     SiteStatus,
     ensure_product_sites,
 )
+from apps.sites.offers import TABLE_SOURCE
 
 CONVERTIO_DOMAIN = "convertio.co"
 CLIDEO_DOMAIN = "clideo.com"
@@ -106,6 +115,8 @@ class Importer:
         # Продукты — до любой записи: нет продукта, нет и импорта.
         self.convertio = find_product(CONVERTIO_DOMAIN)
         self.clideo = find_product(CLIDEO_DOMAIN)
+        # Цены таблицы — предложения каталога Collaborator (ADR-043); его заводит миграция.
+        self.collaborator = Seller.collaborator()
         self.as_of = as_of
         self.checked_at = start_of_day(as_of)
         self.report = report
@@ -204,12 +215,30 @@ class Importer:
                 site_id__in=site_ids, source=MetricSource.CSV_IMPORT, checked_at=self.checked_at
             )
         }
-        prices = {
+        # Снимок цены этой даты — у каждой площадки последний: если рабочая цена
+        # зафиксирована, другая цена той же даты встаёт рядом новой строкой.
+        prices: dict[int, SitePrice] = {}
+        for row in SitePrice.objects.filter(
+            site_id__in=site_ids,
+            seller=self.collaborator,
+            placement_type=PlacementType.GUEST_POST,
+            source=MetricSource.CSV_IMPORT,
+            checked_at=self.checked_at,
+        ).order_by("pk"):
+            prices[row.site_id] = row
+        current_offers = {
             row.site_id: row
-            for row in SitePrice.objects.filter(
-                site_id__in=site_ids, source=MetricSource.CSV_IMPORT, checked_at=self.checked_at
+            for row in SiteOffer.objects.filter(
+                site_id__in=site_ids,
+                seller=self.collaborator,
+                placement_type=PlacementType.GUEST_POST,
             )
         }
+        known_notes: set[tuple[int, int | None, str]] = set(
+            SiteNote.objects.filter(site_id__in=site_ids, source=TABLE_SOURCE).values_list(
+                "site_id", "product_id", "body"
+            )
+        )
         placements: dict[tuple[int, int], list[Placement]] = defaultdict(list)
         # prefetch_related загружает ссылки всех размещений одним запросом,
         # а не запросом на каждое размещение.
@@ -223,6 +252,8 @@ class Importer:
 
         new_snapshots: list[models.Model] = []
         new_items: list[SiteListItem] = []
+        new_notes: list[SiteNote] = []
+        priced: list[tuple[Site, SitePrice]] = []
         undecided: list[int] = []
         for data in rows:
             site = sites.get(data.domain)
@@ -239,14 +270,15 @@ class Importer:
                 "site_metrics",
                 new_snapshots,
             )
-            self._snapshot(
-                SitePrice,
-                prices.get(site.pk),
+            self._price(
                 site,
+                prices.get(site.pk),
+                current_offers.get(site.pk),
                 data.prices.as_fields(),
-                "site_prices",
                 new_snapshots,
+                priced,
             )
+            self._note(site, data, known_notes, new_notes)
             self._import_placement(site, data, placements[(site.pk, self.convertio.pk)], keywords)
             convertio_row = product_sites[(site.pk, self.convertio.pk)]
             status, reason = self._convertio_decision(data)
@@ -272,6 +304,12 @@ class Importer:
         # Новые строки — пачками: один INSERT на таблицу вместо двух тысяч.
         SiteMetric.objects.bulk_create(s for s in new_snapshots if isinstance(s, SiteMetric))
         SitePrice.objects.bulk_create(s for s in new_snapshots if isinstance(s, SitePrice))
+        # Первая цена площадки — рабочая сама: выбирать пока не из чего (ADR-043).
+        for site, offer in priced:
+            site.price = offer
+        Site.all_objects.bulk_update([site for site, _ in priced], ["price"], batch_size=500)
+        SiteNote.objects.bulk_create(new_notes)
+        self.report.count("site_notes", Outcome.CREATED, len(new_notes))
         SiteListItem.objects.bulk_create(new_items)
         if undecided:
             ProductSite.objects.filter(pk__in=undecided).update(imported_undecided=True)
@@ -291,8 +329,7 @@ class Importer:
                 )
                 del known[data.domain]
             elif site is None:
-                note, _ = self._note_or_rejection(data)
-                new_sites.append(Site(domain=data.domain, notes=note, **data.card.as_fields()))
+                new_sites.append(Site(domain=data.domain, **data.card.as_fields()))
         # bulk_create не вызывает save(): домен уже нормализован при разборе,
         # строки площадки под продукты создаём ниже одним вызовом.
         created = Site.all_objects.bulk_create(new_sites)
@@ -305,8 +342,6 @@ class Importer:
         changed: list[str] = []
         for field, value in data.card.as_fields().items():
             self._overwrite(site, field, value, data.where, changed)
-        note, _ = self._note_or_rejection(data)
-        self._fill(site, "notes", note, data.where, Section.DECISION_CONFLICTS, changed)
         self._save(site, changed, "sites")
 
     def _report_new_categories(self, rows: Sequence[SiteData]) -> None:
@@ -326,10 +361,75 @@ class Importer:
         for (kind, category), amount in sorted(found.items()):
             self.report.issue(Section.NEW_CATEGORIES, f"{kind} «{category}» — {amount}")
 
+    def _price(
+        self,
+        site: Site,
+        existing: SitePrice | None,
+        current: SiteOffer | None,
+        fields: dict[str, object],
+        pending: list[models.Model],
+        priced: list[tuple[Site, SitePrice]],
+    ) -> None:
+        """Цена из таблицы — предложение Collaborator на дату файла (ADR-043).
+
+        Без рабочей цены — становится рабочей. С рабочей — ждёт решения
+        человека, если отличается от прежней цены Collaborator. Снимок той же
+        даты обновляется, но рабочую цену импорт не переписывает: другая
+        цена той же даты — новая строка.
+        """
+        if all(value is None for value in fields.values()):
+            self.report.count("site_prices", Outcome.SKIPPED)
+            return
+        if existing is not None:
+            changed = [f for f, value in fields.items() if getattr(existing, f) != value]
+            if not changed:
+                self.report.count("site_prices", Outcome.UNCHANGED)
+                return
+            if existing.pk != site.price_id:
+                for field in changed:
+                    setattr(existing, field, fields[field])
+                existing.reviewed_at = None
+                self._save(existing, [*changed, "reviewed_at"], "site_prices")
+                return
+        offer = SitePrice(
+            site=site,
+            seller=self.collaborator,
+            placement_type=PlacementType.GUEST_POST,
+            source=MetricSource.CSV_IMPORT,
+            checked_at=self.checked_at,
+            **fields,
+        )
+        same = current is not None and all(getattr(current, f) == v for f, v in fields.items())
+        if site.price_id is None:
+            priced.append((site, offer))
+        if site.price_id is None or same:
+            offer.reviewed_at = timezone.now()
+        pending.append(offer)
+        self.report.count("site_prices", Outcome.CREATED)
+
+    def _note(
+        self,
+        site: Site,
+        data: SiteData,
+        known: set[tuple[int, int | None, str]],
+        pending: list[SiteNote],
+    ) -> None:
+        """«Комментарий к площадке» — в историю: заметка или отказ под Convertio."""
+        note, reason = self._note_or_rejection(data)
+        body, product = (note, None) if note else (reason, self.convertio if reason else None)
+        if not body:
+            return
+        key = (site.pk, product.pk if product else None, body)
+        if key in known:
+            self.report.count("site_notes", Outcome.UNCHANGED)
+            return
+        known.add(key)
+        pending.append(SiteNote(site=site, product=product, body=body, source=TABLE_SOURCE))
+
     def _snapshot(
         self,
-        model: type[SiteMetric] | type[SitePrice],
-        existing: SiteMetric | SitePrice | None,
+        model: type[SiteMetric],
+        existing: SiteMetric | None,
         site: Site,
         fields: dict[str, object],
         table: str,

@@ -25,8 +25,8 @@ from django.db.models import TextChoices
 
 from apps.keywords.models import AnchorType
 from apps.observability.models import CheckStatus, LlmStatus, Performer, TaskStatus
-from apps.placements.models import PlacementStatus, PlacementType
-from apps.sites.models import AuditAuthor, AuditVerdict, MetricSource, SiteStatus
+from apps.placements.models import PlacementStatus
+from apps.sites.models import AuditAuthor, AuditVerdict, MetricSource, PlacementType, SiteStatus
 
 TABLES = [
     # E1-01
@@ -54,6 +54,10 @@ TABLES = [
     "site_list_items",
     # E1-05
     "domain_settings",
+    # E1-07
+    "sellers",
+    "site_notes",
+    "exchange_rates",
 ]
 
 VIEWS = [
@@ -66,7 +70,12 @@ VIEWS = [
     "v_link_health",
     "v_site_latest",
     "v_product_site_latest",
+    # E1-07
+    "v_site_offers",
 ]
+
+# Функции схемы: E1-07 — пересчёт в евро для представлений.
+FUNCTIONS = ["eur_rate"]
 
 ENUMS: dict[str, type[TextChoices]] = {
     "site_status": SiteStatus,
@@ -218,6 +227,22 @@ def _views(schema: str) -> dict[str, str | None]:
     return {name: _normalize_view(_unqualify(definition)) for name, definition in rows}
 
 
+def _functions(schema: str) -> dict[str, str | None]:
+    rows = _rows(
+        """
+        SELECT p.proname, pg_get_functiondef(p.oid)
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = %s AND p.proname = ANY(%s)
+        """,
+        schema,
+        FUNCTIONS,
+    )
+    # Тело функции Postgres хранит как написано — с отступами миграции.
+    # Сравниваем смысл: пробелы и переносы сводим к одному пробелу.
+    return {name: " ".join(str(_unqualify(definition)).split()) for name, definition in rows}
+
+
 def _enum_labels(schema: str) -> dict[str, list[str]]:
     rows = _rows(
         """
@@ -259,6 +284,12 @@ class TestSchemaParity:
 
     def test_views(self) -> None:
         assert _views(OURS) == _views(REF)
+
+    def test_reference_has_all_functions(self) -> None:
+        assert set(_functions(REF)) == set(FUNCTIONS)
+
+    def test_functions(self) -> None:
+        assert _functions(OURS) == _functions(REF)
 
     def test_enum_types(self) -> None:
         assert _enum_labels(OURS) == _enum_labels(REF)

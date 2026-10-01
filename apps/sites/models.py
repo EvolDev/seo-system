@@ -1,17 +1,20 @@
 """Блок 1 модели данных: продукты, площадки, решения по ним, снапшоты.
 
-Схема — `schema.sql` 1.4, как модели её повторяют — ADR-029: имена
+Схема — `schema.sql` 1.7, как модели её повторяют — ADR-029: имена
 таблиц, индексов и ограничений из схемы, значения по умолчанию в базе
 (`db_default`), `on_delete=PROTECT`. Несколько продуктов — ADR-030:
 площадка хранит только факты о себе, решение по ней — в `ProductSite`.
+Продавцы, предложения, рабочая цена площадки, заметки, курсы — ADR-043.
 """
 
 from collections.abc import Iterable
 from typing import Any, ClassVar
 
+from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models.functions import Lower
 
 from apps.sites.domains import normalize_domain
 from config.db import PgEnumField, PgNow
@@ -32,6 +35,17 @@ class MetricSource(models.TextChoices):
     MANUAL = "manual", "Вручную"
     CSV_IMPORT = "csv_import", "Импорт из файла"
     COLLABORATOR_API = "collaborator_api", "Collaborator API"
+
+
+class PlacementType(models.TextChoices):
+    """Услуга: формат размещения у предложения продавца и у размещения.
+
+    Не dofollow/nofollow. Живёт здесь, а не в `placements`: её берут и
+    цены площадки (ADR-043), а `placements` сам зависит от этого модуля.
+    """
+
+    GUEST_POST = "guest_post", "публикация"
+    LINK_INSERTION = "link_insertion", "вставка ссылки"
 
 
 class AuditVerdict(models.TextChoices):
@@ -97,6 +111,7 @@ class Product(models.Model):
                 self.placements.all(),
                 self.keywords.all(),
                 self.prompt_templates.all(),
+                self.site_notes.all(),
             )
         )
 
@@ -113,6 +128,59 @@ class Product(models.Model):
             self.delete()
 
 
+class Seller(models.Model):
+    """Продавец площадок: перекупщик со своим прайсом или каталог (ADR-041, ADR-043).
+
+    Collaborator — тоже продавец, ровно один с `is_collaborator`: по нему
+    загрузки находят каталог. Имя уникально без учёта регистра. Метрики
+    продавца с `metrics_trusted` показываются как наши замеры.
+    """
+
+    name = models.TextField("имя")
+    contacts = models.TextField("контакты", null=True, blank=True)
+    notes = models.TextField("заметки", null=True, blank=True)
+    currency = models.CharField("валюта прайсов", max_length=3, default="EUR", db_default="EUR")
+    is_collaborator = models.BooleanField("каталог Collaborator", default=False, db_default=False)
+    metrics_trusted = models.BooleanField(
+        "метрикам доверяем",
+        default=False,
+        db_default=False,
+        help_text="DR и трафик этого продавца показываются как наши замеры и идут в графики.",
+    )
+    created_at = models.DateTimeField("заведён", db_default=PgNow())
+
+    class Meta:
+        db_table = "sellers"
+        verbose_name = "продавец"
+        verbose_name_plural = "продавцы"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                Lower("name"),
+                name="sellers_name_key",
+                violation_error_message="Продавец с таким именем уже есть (регистр не важен).",
+            ),
+            models.UniqueConstraint(
+                fields=["is_collaborator"],
+                condition=models.Q(is_collaborator=True),
+                name="sellers_collaborator_key",
+                violation_error_message="Каталог Collaborator уже заведён.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.name = " ".join(self.name.split())
+        self.currency = self.currency.upper()
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def collaborator(cls) -> "Seller":
+        """Каталог Collaborator — его заводит миграция `0007`."""
+        return cls.objects.get(is_collaborator=True)
+
+
 class ActiveSiteManager(models.Manager["Site"]):
     """Площадки без пометки «удалена» — менеджер по умолчанию."""
 
@@ -125,7 +193,8 @@ class Site(models.Model):
 
     Удалённая (`is_deleted`) площадка не видна через `Site.objects`;
     через `Site.all_objects` — видна. Домен уникален и среди удалённых:
-    импорт и поиск дублей ищут через `all_objects`.
+    импорт и поиск дублей ищут через `all_objects`. Заметки — история в
+    `SiteNote` (`site.notes`), рабочая цена — `price`.
     """
 
     domain = models.TextField("домен")
@@ -141,8 +210,18 @@ class Site(models.Model):
     links_allowed = models.SmallIntegerField("ссылок разрешено", null=True, blank=True)
     link_type = models.TextField("тип ссылки", null=True, blank=True)
     marks_as_ad = models.BooleanField("пометка «реклама»", null=True, blank=True)
-    notes = models.TextField("заметки", null=True, blank=True)
     content_selector = models.TextField("CSS-селектор статьи", null=True, blank=True)
+    # Рабочая цена — решение человека о площадке, общее для всех продуктов
+    # (ADR-043). Меняется только через apps.sites.offers.set_working_price.
+    price = models.ForeignKey(
+        "SitePrice",
+        models.PROTECT,
+        verbose_name="рабочая цена",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
     is_deleted = models.BooleanField("удалена", default=False, db_default=False)
     created_at = models.DateTimeField("создана", db_default=PgNow())
     updated_at = models.DateTimeField("изменена", auto_now=True, db_default=PgNow())
@@ -263,6 +342,16 @@ class SiteMetric(models.Model):
         default=MetricSource.MANUAL,
         db_default=MetricSource.MANUAL,
     )
+    # Замер со слов продавца (ADR-043); пусто — наш: Ahrefs, вручную, таблица.
+    seller = models.ForeignKey(
+        Seller,
+        models.PROTECT,
+        verbose_name="со слов продавца",
+        related_name="metrics",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
     # Сырой ответ источника целиком: понадобится поле, которого нет в колонках.
     raw = models.JSONField("сырой ответ", null=True, blank=True)
     checked_at = models.DateTimeField("дата замера", db_default=PgNow())
@@ -280,15 +369,34 @@ class SiteMetric(models.Model):
 
 
 class SitePrice(models.Model):
-    """Снапшот цен площадки в центах (ADR-009). Итог не хранится."""
+    """Предложение продавца на дату: одна услуга — одна цена, в центах (ADR-043).
+
+    Снимок: новая цена — новая строка. Сравнивается только цена услуги
+    (`placement_cents`); написание, анонс и серая цена — справочно.
+    `reviewed_at` пусто — по предложению ещё не решили (разбор). Итог не
+    хранится: его считают представления от рабочей цены площадки.
+    """
 
     site = models.ForeignKey(
         Site, models.PROTECT, verbose_name="площадка", related_name="prices", db_index=False
     )
-    placement_cents = models.IntegerField("размещение, центы", null=True, blank=True)
+    seller = models.ForeignKey(
+        Seller, models.PROTECT, verbose_name="продавец", related_name="prices", db_index=False
+    )
+    placement_type = PgEnumField(
+        "услуга",
+        enum_type="placement_type",
+        choices=PlacementType.choices,
+        default=PlacementType.GUEST_POST,
+        db_default=PlacementType.GUEST_POST,
+    )
+    placement_cents = models.IntegerField("цена услуги, центы", null=True, blank=True)
     announce_cents = models.IntegerField("анонс, центы", null=True, blank=True)
     writing_cents = models.IntegerField("написание, центы", null=True, blank=True)
+    gray_cents = models.IntegerField("серая цена, центы", null=True, blank=True)
     currency = models.CharField("валюта", max_length=3, default="EUR", db_default="EUR")
+    # «Прочие данные» строки файла: колонки без своего поля, заголовок → значение.
+    extra = models.JSONField("прочие данные", null=True, blank=True)
     source = PgEnumField(
         "источник",
         enum_type="metric_source",
@@ -296,18 +404,26 @@ class SitePrice(models.Model):
         default=MetricSource.MANUAL,
         db_default=MetricSource.MANUAL,
     )
-    checked_at = models.DateTimeField("дата замера", db_default=PgNow())
+    reviewed_at = models.DateTimeField("разобрано", null=True, blank=True)
+    checked_at = models.DateTimeField("дата цены", db_default=PgNow())
 
     class Meta:
         db_table = "site_prices"
-        verbose_name = "цены"
-        verbose_name_plural = "цены"
+        verbose_name = "предложение продавца"
+        verbose_name_plural = "предложения продавцов"
         indexes: ClassVar[list[models.Index]] = [
-            models.Index(fields=["site", "-checked_at"], name="idx_prices_site"),
+            models.Index(
+                fields=["site", "seller", "placement_type", "-checked_at"], name="idx_prices_site"
+            ),
+            models.Index(
+                fields=["site"],
+                name="idx_prices_pending",
+                condition=models.Q(reviewed_at__isnull=True),
+            ),
         ]
 
     def __str__(self) -> str:
-        return f"{self.site} · {self.checked_at:%d.%m.%Y}"
+        return f"{self.site} · {self.seller} · {self.checked_at:%d.%m.%Y}"
 
 
 class GrayScan(models.Model):
@@ -447,6 +563,76 @@ class SiteListItem(models.Model):
         return f"{self.site_list} · {self.site}"
 
 
+class SiteNote(models.Model):
+    """Заметка о площадке — история: не правится и не удаляется (ADR-043).
+
+    Автор — пользователь, или источник — файл («таблица линкбилдинга»).
+    Продукт — если заметка про решение под него (причина отказа).
+    """
+
+    site = models.ForeignKey(
+        Site, models.PROTECT, verbose_name="площадка", related_name="notes", db_index=False
+    )
+    product = models.ForeignKey(
+        Product,
+        models.PROTECT,
+        verbose_name="продукт",
+        related_name="site_notes",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    body = models.TextField("заметка")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="автор",
+        related_name="site_notes",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    source = models.TextField("источник", null=True, blank=True)
+    created_at = models.DateTimeField("дата", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_notes"
+        verbose_name = "заметка"
+        verbose_name_plural = "заметки"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["site", "-created_at"], name="idx_site_notes_site"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site} · {self.body[:40]}"
+
+
+class ExchangeRate(models.Model):
+    """Курс ЕЦБ на дату: сколько единиц валюты за 1 евро (ADR-043).
+
+    Только для сравнения цен в разных валютах — деньги в разных валютах
+    не складываются. Нет курса на сегодня — берётся последний.
+    """
+
+    currency = models.CharField("валюта", max_length=3)
+    rate_date = models.DateField("дата курса")
+    rate = models.DecimalField("за 1 евро", max_digits=14, decimal_places=6)
+    created_at = models.DateTimeField("получен", db_default=PgNow())
+
+    class Meta:
+        db_table = "exchange_rates"
+        verbose_name = "курс валюты"
+        verbose_name_plural = "курсы валют"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["currency", "rate_date"], name="exchange_rates_currency_rate_date_key"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.currency} {self.rate} · {self.rate_date:%d.%m.%Y}"
+
+
 def ensure_product_sites(
     *, product_ids: Iterable[int] | None = None, site_ids: Iterable[int] | None = None
 ) -> None:
@@ -514,14 +700,40 @@ class ProductSiteLatest(models.Model):
     total_keywords = models.IntegerField("ключей в органике", null=True)
     top_geo = models.TextField("основное гео", null=True)
     metrics_at = models.DateTimeField("дата метрик", null=True)
-    placement_cents = models.IntegerField("размещение, центы", null=True)
+    metrics_trusted = models.BooleanField("метрики доверенного источника", null=True)
+    metrics_seller = models.TextField("метрики со слов продавца", null=True)
+    # Рабочая цена (ADR-043): исходная сумма и валюта, в евро — по курсу ЕЦБ.
+    price_id = models.BigIntegerField("рабочая цена, id", null=True)
+    price_seller = models.TextField("продавец рабочей цены", null=True)
+    price_type = PgEnumField(
+        "услуга", enum_type="placement_type", choices=PlacementType.choices, null=True
+    )
+    placement_cents = models.IntegerField("цена услуги, центы", null=True)
     announce_cents = models.IntegerField("анонс, центы", null=True)
     writing_cents = models.IntegerField("написание, центы", null=True)
-    prices_at = models.DateTimeField("дата цен", null=True)
-    reference_total_cents = models.IntegerField("к ориентиру, центы")
+    price_currency = models.TextField("валюта", null=True)
+    prices_at = models.DateTimeField("дата цены", null=True)
+    placement_eur_cents = models.IntegerField("цена услуги, евроценты", null=True)
+    writing_eur_cents = models.IntegerField("написание, евроценты", null=True)
+    reference_total_cents = models.IntegerField("к ориентиру, евроценты", null=True)
     we_write = models.BooleanField("пишем мы", null=True)
-    expected_spend_cents = models.IntegerField("плановые расходы, центы", null=True)
+    expected_spend_cents = models.IntegerField("плановые расходы, евроценты", null=True)
+    # Пометки разбора: новая цена того же продавца и предложение дешевле рабочей.
+    new_price_id = models.BigIntegerField("новая цена, id", null=True)
+    new_price_cents = models.IntegerField("новая цена, центы", null=True)
+    new_price_currency = models.TextField("валюта новой цены", null=True)
+    new_price_pending = models.BooleanField("новая цена не разобрана", null=True)
+    cheaper_id = models.BigIntegerField("дешевле, id", null=True)
+    cheaper_seller = models.TextField("дешевле у продавца", null=True)
+    cheaper_cents = models.IntegerField("дешевле, центы", null=True)
+    cheaper_currency = models.TextField("валюта дешёвого", null=True)
+    cheaper_eur_cents = models.IntegerField("дешевле, евроценты", null=True)
+    cheaper_pending = models.BooleanField("дешёвое не разобрано", null=True)
+    offers_pending = models.BooleanField("есть неразобранные предложения")
     gray_ratio = models.DecimalField("доля серых, %", max_digits=5, decimal_places=2, null=True)
+    notes_count = models.BigIntegerField("заметок")
+    last_note = models.TextField("последняя заметка", null=True)
+    last_note_at = models.DateTimeField("дата последней заметки", null=True)
     last_verdict = PgEnumField(
         "вердикт", enum_type="audit_verdict", choices=AuditVerdict.choices, null=True
     )
@@ -541,3 +753,42 @@ class ProductSiteLatest(models.Model):
 
     def __str__(self) -> str:
         return f"{self.domain} · {self.product_id}"
+
+
+class SiteOffer(models.Model):
+    """Текущее предложение площадки — строка `v_site_offers` (ADR-043).
+
+    Последнее предложение каждого продавца за каждую услугу, цена услуги —
+    ещё и в евро по последнему курсу ЕЦБ. Только чтение: это представление,
+    `id` — строки `site_prices`. Отсюда список предложений в «Площадках» и
+    в карточке площадки.
+    """
+
+    site = models.ForeignKey(
+        Site, models.DO_NOTHING, verbose_name="площадка", related_name="+", db_constraint=False
+    )
+    seller = models.ForeignKey(
+        Seller, models.DO_NOTHING, verbose_name="продавец", related_name="+", db_constraint=False
+    )
+    seller_name = models.TextField("продавец", db_column="seller")
+    placement_type = PgEnumField(
+        "услуга", enum_type="placement_type", choices=PlacementType.choices
+    )
+    placement_cents = models.IntegerField("цена услуги, центы", null=True)
+    currency = models.CharField("валюта", max_length=3)
+    placement_eur_cents = models.IntegerField("цена услуги, евроценты", null=True)
+    announce_cents = models.IntegerField("анонс, центы", null=True)
+    writing_cents = models.IntegerField("написание, центы", null=True)
+    gray_cents = models.IntegerField("серая цена, центы", null=True)
+    extra = models.JSONField("прочие данные", null=True)
+    reviewed_at = models.DateTimeField("разобрано", null=True)
+    checked_at = models.DateTimeField("дата цены")
+
+    class Meta:
+        managed = False
+        db_table = "v_site_offers"
+        verbose_name = "текущее предложение"
+        verbose_name_plural = "текущие предложения"
+
+    def __str__(self) -> str:
+        return f"{self.site_id} · {self.seller_name} · {self.get_placement_type_display()}"
