@@ -23,7 +23,7 @@ from django.utils import timezone
 from apps.content.domain_settings import offer_recheck
 from apps.sites.models import Seller, Upload, UploadKind, UploadStatus
 from apps.sites.rates import latest_rates
-from apps.sites.uploads import catalog, filters
+from apps.sites.uploads import ahrefs, catalog, filters
 from apps.sites.uploads.apply import ALL_PARTS, Part, Writer
 from apps.sites.uploads.columns import (
     Confidence,
@@ -34,7 +34,7 @@ from apps.sites.uploads.columns import (
     validate_mapping,
 )
 from apps.sites.uploads.files import Column, FileError, Table, read_table
-from apps.sites.uploads.plan import Plan, build_plan
+from apps.sites.uploads.plan import Plan, build_plan, start_of_day
 from apps.sites.uploads.records import Parsed, parse_price_list
 
 logger = logging.getLogger(__name__)
@@ -58,11 +58,15 @@ def create_upload(
     file: UploadedFile,
     *,
     kind: UploadKind,
-    seller: Seller,
+    seller: Seller | None,
     prices_date: dt.date,
+    country: str | None = None,
     author: Any = None,
 ) -> Created:
-    """Сохраняет файл и читает его колонки. Тот же файл с той же датой — прежняя загрузка."""
+    """Сохраняет файл и читает его колонки. Тот же файл с той же датой — прежняя загрузка.
+
+    У выгрузки Ahrefs продавца нет, `country` — страна выгрузки, пусто — все.
+    """
     name = Path(file.name or "file").name
     relative = Path(f"{prices_date:%Y/%m}") / f"{uuid4().hex}_{name}"
     target = Path(settings.UPLOADS_DIR) / relative
@@ -74,7 +78,12 @@ def create_upload(
             out.write(chunk)
     sha = digest.hexdigest()
     done = Upload.objects.filter(
-        kind=kind, seller=seller, prices_date=prices_date, file_sha256=sha, status=UploadStatus.DONE
+        kind=kind,
+        seller=seller,
+        country=country or None,
+        prices_date=prices_date,
+        file_sha256=sha,
+        status=UploadStatus.DONE,
     ).first()
     if done is not None:
         target.unlink()
@@ -82,6 +91,7 @@ def create_upload(
     upload = Upload.objects.create(
         kind=kind,
         seller=seller,
+        country=country or None,
         prices_date=prices_date,
         file_name=name,
         file_path=str(relative),
@@ -106,7 +116,24 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
     upload.header_row = table.header_row
     upload.error = None
     upload.status = UploadStatus.NEW
-    if upload.kind == UploadKind.COLLABORATOR_CATALOG:
+    if upload.kind == UploadKind.AHREFS_BATCH:
+        upload.columns = [_column_json(c) for c in table.columns]
+        upload.mapping = None
+        upload.currency = None
+        missing = ahrefs.missing_columns(table)
+        if missing:
+            _fail(
+                upload,
+                "Не похоже на выгрузку Ahrefs Batch Analysis: нет колонок "
+                + ", ".join(f"«{name}»" for name in missing)
+                + ". Нужен файл кнопки Export на странице Batch Analysis, как он скачался.",
+            )
+            return
+        mismatch = ahrefs.country_error(table, upload.country)
+        if mismatch:
+            _fail(upload, mismatch)
+            return
+    elif upload.kind == UploadKind.COLLABORATOR_CATALOG:
         missing = catalog.missing_columns(table)
         upload.columns = [_column_json(c) for c in table.columns]
         upload.mapping = None
@@ -120,7 +147,8 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
             )
             return
     else:
-        guesses, questions = build_mapping(table.columns, upload.seller.column_map)
+        seller = upload.get_seller()
+        guesses, questions = build_mapping(table.columns, seller.column_map)
         mapping = {key: guess.field for key, guess in guesses.items()}
         upload.columns = [
             _column_json(c, guesses[c.key].field, guesses[c.key].confidence, guesses[c.key].hint)
@@ -128,14 +156,14 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
             for c in table.columns
         ]
         upload.mapping = {key: field.value for key, field in mapping.items()}
-        upload.currency, _ = detect_currency(table.columns, mapping, upload.seller.currency)
+        upload.currency, _ = detect_currency(table.columns, mapping, seller.currency)
     upload.summary = None
     upload.save()
 
 
 def needs_questions(upload: Upload) -> bool:
     """Есть колонки, про которые надо спросить, или разметка с ошибкой."""
-    if upload.kind == UploadKind.COLLABORATOR_CATALOG:
+    if upload.kind in (UploadKind.COLLABORATOR_CATALOG, UploadKind.AHREFS_BATCH):
         return False
     if any(column.get("ask") for column in upload.columns or []):
         return True
@@ -170,7 +198,7 @@ def confirm_mapping(upload: Upload, mapping: Mapping[str, str], currency: str) -
     ]
     upload.save(update_fields=["mapping", "currency", "columns"])
     # Разметка запоминается у продавца: следующий файл с этими колонками — без вопросов.
-    seller = upload.seller
+    seller = upload.get_seller()
     seller.column_map = {**(seller.column_map or {}), **upload.mapping}
     seller.save(update_fields=["column_map"])
     return []
@@ -186,6 +214,8 @@ def parse(upload: Upload) -> tuple[Table, Parsed, list[str]]:
 
 
 def plan_for(upload: Upload, parsed: Parsed) -> Plan:
+    if upload.seller_id is None:
+        raise ValueError("план цен — только у загрузки с продавцом")
     return build_plan(
         parsed,
         seller_id=upload.seller_id,
@@ -200,6 +230,9 @@ def check(upload_id: int) -> None:
     """Сводка до записи: план без записи. Тело задачи очереди `upload_check`."""
     upload = Upload.objects.select_related("seller").get(pk=upload_id)
     if upload.status != UploadStatus.CHECKING:
+        return
+    if upload.kind == UploadKind.AHREFS_BATCH:
+        _check_ahrefs(upload)
         return
     try:
         table, parsed, unknown = parse(upload)
@@ -253,9 +286,18 @@ def write(
     """
     with transaction.atomic():
         # select_for_update — строка загрузки заблокирована до конца транзакции:
-        # вторая копия задачи дождётся первой и увидит «Записан».
-        upload = Upload.objects.select_for_update().select_related("seller").get(pk=upload_id)
+        # вторая копия задачи дождётся первой и увидит «Записан». Только она
+        # (of=self): продавца у выгрузки Ahrefs нет, а строку внешнего
+        # соединения Postgres заблокировать не даёт.
+        upload = (
+            Upload.objects.select_for_update(of=("self",))
+            .select_related("seller")
+            .get(pk=upload_id)
+        )
         if upload.status != UploadStatus.WRITING:
+            return
+        if upload.kind == UploadKind.AHREFS_BATCH:
+            _write_ahrefs(upload)
             return
         try:
             table, parsed, unknown = parse(upload)
@@ -307,6 +349,57 @@ def write(
     )
 
 
+def ahrefs_plan(upload: Upload) -> tuple[Table, ahrefs.Plan]:
+    """Выгрузка Ahrefs → план по свежему состоянию базы: сводка и запись строят его одинаково."""
+    table = _table(upload, header_row=upload.header_row)
+    mismatch = ahrefs.country_error(table, upload.country)
+    if mismatch:
+        raise FileError(mismatch)
+    parsed = ahrefs.parse(table)
+    plan = ahrefs.build_plan(
+        parsed, country=upload.country, checked_at=start_of_day(upload.prices_date)
+    )
+    return table, plan
+
+
+def _check_ahrefs(upload: Upload) -> None:
+    try:
+        table, plan = ahrefs_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    upload.summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows)
+    written = bool((upload.result or {}).get("runs"))
+    upload.status = UploadStatus.DONE if written else UploadStatus.CHECKED
+    upload.error = None
+    upload.save(update_fields=["summary", "status", "error"])
+    logger.info(
+        "выгрузка Ahrefs проверена",
+        extra={"upload_id": upload.pk, "country": upload.country, "known": len(plan.known)},
+    )
+
+
+def _write_ahrefs(upload: Upload) -> None:
+    """Запись выгрузки Ahrefs — внутри транзакции и блокировки `write`."""
+    try:
+        table, plan = ahrefs_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    written = ahrefs.write(plan)
+    run = {"action": Action.ALL.value, "at": timezone.now().isoformat(), **written}
+    upload.summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows)
+    upload.result = {**written, "runs": [*(upload.result or {}).get("runs", []), run]}
+    upload.status = UploadStatus.DONE
+    upload.error = None
+    upload.written_at = timezone.now()
+    upload.save()
+    logger.info(
+        "выгрузка Ahrefs записана",
+        extra={"upload_id": upload.pk, "country": upload.country, "counts": written["counts"]},
+    )
+
+
 def issues(upload: Upload) -> dict[str, Any]:
     """Отклоняли, дубли, ошибки, адреса — из сводки; что перезаписано в карточке — из записей."""
     data = dict(upload.summary or {})
@@ -343,11 +436,10 @@ def _fail(upload: Upload, message: str) -> None:
 
 
 def _table(upload: Upload, *, header_row: int | None) -> Table:
-    is_header = (
-        catalog.looks_like_catalog
-        if upload.kind == UploadKind.COLLABORATOR_CATALOG
-        else looks_like_header
-    )
+    is_header = {
+        UploadKind.COLLABORATOR_CATALOG: catalog.looks_like_catalog,
+        UploadKind.AHREFS_BATCH: ahrefs.looks_like_batch,
+    }.get(UploadKind(upload.kind), looks_like_header)
     return read_table(file_path(upload), header_row=header_row, is_header=is_header)
 
 

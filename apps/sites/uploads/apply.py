@@ -101,7 +101,7 @@ class Writer:
         self.upload = upload
         self.plan = plan
         self.parts = parts
-        self.seller = upload.seller
+        self.seller = upload.get_seller()
         self.checked_at = start_of_day(upload.prices_date)
         self.now = timezone.now()
         self.counts: Counter[str] = Counter()

@@ -38,6 +38,9 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     # Фильтр диапазона в списках админки: поля «С» и «До» (DR, трафик).
     "rangefilter",
+    # Названия стран по-русски — выбор страны выгрузки Ahrefs и региона (ADR-045).
+    # Моделей нет; в INSTALLED_APPS — чтобы Django нашёл переводы названий.
+    "django_countries",
     # Свои приложения — по доменам, не по слоям (ADR-024).
     "apps.sites",
     "apps.placements",
@@ -71,6 +74,8 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
+            # {% asset %} — адрес нашей статики с версией (config/assets.py).
+            "libraries": {"seo_assets": "config.assets"},
         },
     },
 ]

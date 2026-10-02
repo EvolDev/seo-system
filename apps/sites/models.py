@@ -1,11 +1,12 @@
 """Блок 1 модели данных: продукты, площадки, решения по ним, снапшоты.
 
-Схема — `schema.sql` 1.8, как модели её повторяют — ADR-029: имена
+Схема — `schema.sql` 1.9, как модели её повторяют — ADR-029: имена
 таблиц, индексов и ограничений из схемы, значения по умолчанию в базе
 (`db_default`), `on_delete=PROTECT`. Несколько продуктов — ADR-030:
 площадка хранит только факты о себе, решение по ней — в `ProductSite`.
 Продавцы, предложения, рабочая цена площадки, заметки, курсы — ADR-043.
 Загрузки файлов продавцов и каталога, строки их разбора — ADR-044.
+Выгрузки Ahrefs Batch Analysis и трафик по странам — ADR-045.
 """
 
 from collections.abc import Iterable
@@ -36,6 +37,7 @@ class MetricSource(models.TextChoices):
     MANUAL = "manual", "Вручную"
     CSV_IMPORT = "csv_import", "Импорт из файла"
     COLLABORATOR_API = "collaborator_api", "Collaborator API"
+    AHREFS_BATCH = "ahrefs_batch", "Ahrefs Batch Analysis"
 
 
 class PlacementType(models.TextChoices):
@@ -52,6 +54,7 @@ class PlacementType(models.TextChoices):
 class UploadKind(models.TextChoices):
     PRICE_LIST = "price_list", "Прайс продавца"
     COLLABORATOR_CATALOG = "collaborator_catalog", "Каталог Collaborator"
+    AHREFS_BATCH = "ahrefs_batch", "Ahrefs Batch Analysis"
 
 
 class UploadStatus(models.TextChoices):
@@ -360,7 +363,6 @@ class SiteMetric(models.Model):
     )
     dr = models.SmallIntegerField("DR", null=True, blank=True)
     organic_traffic = models.IntegerField("органический трафик", null=True, blank=True)
-    us_traffic = models.IntegerField("трафик США", null=True, blank=True)
     top_geo = models.TextField("основное гео", null=True, blank=True)
     top_geo_traffic = models.IntegerField("трафик основного гео", null=True, blank=True)
     total_keywords = models.IntegerField("ключей в органике", null=True, blank=True)
@@ -395,6 +397,50 @@ class SiteMetric(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site} · {self.checked_at:%d.%m.%Y}"
+
+
+class SiteCountryMetric(models.Model):
+    """Трафик и ключи площадки в одной стране — снимок (ADR-045).
+
+    Пишет выгрузка Ahrefs Batch Analysis под страну, позже — Ahrefs API
+    (E2-07). Топ-регион выгрузки «все страны» сюда не попадает: он в
+    `SiteMetric`, по нему трафик других стран не узнать. Замер всегда наш —
+    продавцы трафик по странам не присылают.
+    """
+
+    site = models.ForeignKey(
+        Site,
+        models.PROTECT,
+        verbose_name="площадка",
+        related_name="country_metrics",
+        db_index=False,
+    )
+    # Код страны строчными, как его пишет Ahrefs: us, gb, in.
+    country = models.CharField("страна", max_length=2)
+    organic_traffic = models.IntegerField("органический трафик", null=True, blank=True)
+    total_keywords = models.IntegerField("ключей в органике", null=True, blank=True)
+    source = PgEnumField(
+        "источник",
+        enum_type="metric_source",
+        choices=MetricSource.choices,
+        default=MetricSource.MANUAL,
+        db_default=MetricSource.MANUAL,
+    )
+    raw = models.JSONField("сырой ответ", null=True, blank=True)
+    checked_at = models.DateTimeField("дата замера", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_country_metrics"
+        verbose_name = "метрики по стране"
+        verbose_name_plural = "метрики по странам"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(
+                fields=["site", "country", "-checked_at"], name="idx_country_metrics_site"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site} · {self.country} · {self.checked_at:%d.%m.%Y}"
 
 
 class SitePrice(models.Model):
@@ -663,19 +709,28 @@ class ExchangeRate(models.Model):
 
 
 class Upload(models.Model):
-    """Загрузка файла продавца или каталога Collaborator (ADR-044).
+    """Загрузка файла продавца, каталога Collaborator или выгрузки Ahrefs (ADR-044, ADR-045).
 
     Путь: файл и разметка колонок (`new`) → проверка в фоне (`checking`) →
     сводка до записи (`checked`) → запись в фоне (`writing`) → разбор
     (`done`). Результат — рабочий список. Файл лежит в папке загрузок
-    (`UPLOADS_DIR`), путь в `file_path` — от неё.
+    (`UPLOADS_DIR`), путь в `file_path` — от неё. У выгрузки Ahrefs нет
+    продавца и рабочего списка, `prices_date` — дата замера, `country` —
+    страна выгрузки (пусто — все страны).
     """
 
     kind = PgEnumField("что загружаем", enum_type="upload_kind", choices=UploadKind.choices)
     seller = models.ForeignKey(
-        Seller, models.PROTECT, verbose_name="продавец", related_name="uploads", db_index=False
+        Seller,
+        models.PROTECT,
+        verbose_name="продавец",
+        related_name="uploads",
+        null=True,
+        blank=True,
+        db_index=False,
     )
     prices_date = models.DateField("дата цен")
+    country = models.CharField("страна выгрузки", max_length=2, null=True, blank=True)
     file_name = models.TextField("файл")
     file_path = models.TextField("путь к файлу")
     file_sha256 = models.CharField("отпечаток файла", max_length=64)
@@ -719,9 +774,30 @@ class Upload(models.Model):
         db_table = "uploads"
         verbose_name = "загрузка"
         verbose_name_plural = "загрузки"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            # Продавца нет только у выгрузки Ahrefs: это наш замер (ADR-045).
+            models.CheckConstraint(
+                condition=models.Q(seller__isnull=False) | models.Q(kind="ahrefs_batch"),
+                name="uploads_seller_check",
+                violation_error_message="У прайса и каталога должен быть продавец.",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"{self.seller} · {self.prices_date:%d.%m.%Y} · {self.file_name}"
+        return f"{self.source_name} · {self.prices_date:%d.%m.%Y} · {self.file_name}"
+
+    @property
+    def source_name(self) -> str:
+        """Чей файл — для экранов: продавец или «Ahrefs · страна»."""
+        if self.seller is not None:
+            return self.seller.name
+        return f"Ahrefs · {self.country.upper()}" if self.country else "Ahrefs · все страны"
+
+    def get_seller(self) -> Seller:
+        """Продавец прайса или каталога. У выгрузки Ahrefs его нет — значит, ошибка в коде."""
+        if self.seller is None:
+            raise ValueError(f"У загрузки {self.pk} нет продавца: это выгрузка Ahrefs")
+        return self.seller
 
 
 class UploadItem(models.Model):
@@ -838,7 +914,10 @@ class ProductSiteLatest(models.Model):
     dr = models.SmallIntegerField("DR", null=True)
     organic_traffic = models.IntegerField("трафик", null=True)
     total_keywords = models.IntegerField("ключей в органике", null=True)
+    # Топ-регион — из последнего замера, где он есть (ADR-045): каталог без гео не стирает.
     top_geo = models.TextField("основное гео", null=True)
+    top_geo_traffic = models.IntegerField("трафик основного гео", null=True)
+    top_geo_at = models.DateTimeField("дата замера гео", null=True)
     metrics_at = models.DateTimeField("дата метрик", null=True)
     metrics_trusted = models.BooleanField("метрики доверенного источника", null=True)
     metrics_seller = models.TextField("метрики со слов продавца", null=True)
@@ -932,3 +1011,30 @@ class SiteOffer(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site_id} · {self.seller_name} · {self.get_placement_type_display()}"
+
+
+class SiteCountryLatest(models.Model):
+    """Последний замер площадки по стране — строка `v_site_country_latest` (ADR-045).
+
+    Отсюда колонки «трафик» и «ключи» выбранного региона в «Площадках» и
+    список регионов: страна в нём есть, только если под неё грузили
+    выгрузку страны. Только чтение, `id` — строки `site_country_metrics`.
+    """
+
+    site = models.ForeignKey(
+        Site, models.DO_NOTHING, verbose_name="площадка", related_name="+", db_constraint=False
+    )
+    country = models.CharField("страна", max_length=2)
+    organic_traffic = models.IntegerField("органический трафик", null=True)
+    total_keywords = models.IntegerField("ключей в органике", null=True)
+    source = PgEnumField("источник", enum_type="metric_source", choices=MetricSource.choices)
+    checked_at = models.DateTimeField("дата замера")
+
+    class Meta:
+        managed = False
+        db_table = "v_site_country_latest"
+        verbose_name = "последний замер по стране"
+        verbose_name_plural = "последние замеры по странам"
+
+    def __str__(self) -> str:
+        return f"{self.site_id} · {self.country}"

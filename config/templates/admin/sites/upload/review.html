@@ -17,7 +17,7 @@ price-review.html. Вкладки — ссылки; решения в строк
     <h1>{{ title }}</h1>
     <div class="seo-sub">
       {{ upload.file_name }} · {{ upload.get_kind_display }}
-      {% if upload.site_list %} · рабочий список <a href="{{ sites_url }}">«{{ upload.site_list.name }}»</a>{% endif %}
+      {% if upload.site_list %} · рабочий список <a href="{{ sites_url }}">«{{ upload.site_list.name }}»</a> · <a href="{% url 'admin:sites_sitelist_ahrefs' upload.site_list_id %}">домены для Ahrefs</a>{% endif %}
       · записано {{ upload.written_at|date:"d.m.Y H:i" }}
     </div>
   </div>

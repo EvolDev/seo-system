@@ -1,0 +1,99 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Выгрузка Ahrefs Batch Analysis (E1-10, ADR-045): сводка до записи и итог. Разбора
+нет — решать нечего: замеры пишутся к площадкам базы, остальное — в список «Нет в
+базе». Пока идёт проверка или запись, страница опрашивает состояние (seo/uploads.js).
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<p class="seo-lead">
+  {% if country %}Выгрузка по стране {{ country_flag }}<b>{{ country.name }}</b> ({{ country.code|upper }}) — трафик и ключи этой страны{% else %}Выгрузка по <b>всем странам</b> — DR, общий трафик, ключи и топ-регион{% endif %},
+  замер на {{ upload.prices_date|date:"d.m.Y" }}.
+</p>
+{% if busy %}
+  <div class="seo-busy" data-state-url="{% url 'admin:sites_upload_state' upload.pk %}">
+    <div class="seo-spin" aria-hidden="true"></div>
+    <div>
+      <b data-state-label>{{ upload.get_status_display }}…</b>
+      <div class="seo-sub">Задача очереди «{% if upload.status == 'writing' %}upload_write{% else %}upload_check{% endif %}» — видна в «Запусках задач». Обычно несколько секунд.</div>
+    </div>
+  </div>
+{% elif upload.status == 'failed' %}
+  <div class="errornote">{{ upload.error }}</div>
+  <div class="submit-row">
+    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить файл снова</a>
+  </div>
+{% else %}
+  {% if done %}
+    <div class="seo-stats">
+      <div class="seo-stat seo-good"><b>{{ result.counts.measures_created }}</b><span>новых замеров</span></div>
+      <div class="seo-stat"><b>{{ result.counts.measures_updated }}</b><span>замеров этого дня обновлено</span></div>
+      <div class="seo-stat"><b>{{ result.counts.measures_unchanged }}</b><span>без изменений</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.missing_total }}</b><span>нет в базе — не записаны</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.duplicates_total|add:summary.errors_total }}</b><span>дубли и ошибки</span></div>
+    </div>
+    <p class="seo-hint">
+      {% if country %}В «Площадках» выберите регион «{{ country.label }}» — появятся колонки «трафик {{ country.code|upper }}» и «ключи {{ country.code|upper }}».{% else %}В «Площадках» DR, трафик и ключи — из этого замера, пока не придёт свежее; колонка «Топ регион» — отсюда.{% endif %}
+    </p>
+    <div class="submit-row">
+      <a class="seo-btn" href="{{ sites_url }}">Открыть «Площадки»</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить ещё файл</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+    </div>
+  {% else %}
+    <p class="seo-lead">В базу ещё ничего не записано. Проверьте цифры и нажмите «Записать в базу».</p>
+    <div class="seo-stats">
+      <div class="seo-stat"><b>{{ summary.rows }}</b><span>строк в файле</span></div>
+      <div class="seo-stat"><b>{{ summary.sites }}</b><span>площадок</span></div>
+      <div class="seo-stat seo-good"><b>{{ summary.known }}</b><span>в базе — запишутся</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.missing_total }}</b><span>нет в базе — пропустятся</span></div>
+      {% if not country %}<div class="seo-stat"><b>{{ summary.with_top_geo }}</b><span>с топ-регионом</span></div>{% endif %}
+      <div class="seo-stat"><b>{{ summary.today }}</b><span>уже есть замер за эту дату — обновится</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.duplicates_total|add:summary.errors_total }}</b><span>дубли и ошибки</span></div>
+    </div>
+    <p class="seo-hint">
+      {% if country %}Трафик и ключи {{ country.name }} станут замером площадок на {{ upload.prices_date|date:"d.m.Y" }}; общий DR и трафик не меняются.{% else %}DR, общий трафик, ключи и топ-регион станут замером площадок на {{ upload.prices_date|date:"d.m.Y" }} — без продавца, как наш замер.{% endif %}
+      Остальные колонки файла сохранятся в замере целиком. Площадки не создаются: домены не из базы — в списке ниже.
+    </p>
+    <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="submit-row" data-run-form="all" data-done-url="{% url 'admin:sites_upload_summary' upload.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="default seo-run-btn">Записать в базу</button>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      <div class="seo-inline-loader" data-loader hidden></div>
+    </form>
+  {% endif %}
+  <div class="seo-boxes">
+    <div class="seo-box">
+      <h3>Нет в базе</h3>
+      <ul>
+        {% for row in summary.missing %}<li>Строка {{ row.line }}: {{ row.domain }}</li>{% empty %}<li class="seo-flat">нет — все площадки файла есть в базе</li>{% endfor %}
+        {% if summary.missing_total > summary.missing|length %}<li class="seo-flat">всего {{ summary.missing_total }}</li>{% endif %}
+      </ul>
+      {% if summary.missing %}<p class="seo-hint">Добавьте площадки загрузкой каталога или прайса и загрузите выгрузку снова — уже записанное не задвоится.</p>{% endif %}
+    </div>
+    <div class="seo-box">
+      <h3>Дубли в файле</h3>
+      <ul>
+        {% for row in summary.duplicates %}<li><b>{{ row.domain }}</b>: строки {{ row.lines|join:" и " }}; взята первая</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="seo-box">
+      <h3>Ошибки</h3>
+      <ul>
+        {% for row in summary.errors %}<li>Строка {{ row.line }}: {{ row.message }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% if summary.errors_total > summary.errors|length %}<li class="seo-flat">всего {{ summary.errors_total }}</li>{% endif %}
+      </ul>
+    </div>
+    {% if summary.urls %}
+      <div class="seo-box">
+        <h3>Адреса вместо доменов</h3>
+        <ul>{% for row in summary.urls %}<li>Строка {{ row.line }}: «{{ row.value }}» → {{ row.domain }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

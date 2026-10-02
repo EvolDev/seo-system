@@ -166,10 +166,10 @@
 .seo-btn-busy { position: relative; color: transparent !important; pointer-events: none; }
 .seo-btn-busy::after {
   content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid currentColor; border-color: var(--button-fg, #fff) var(--button-fg, #fff) transparent transparent;
+  border: 2px solid currentColor; border-color: var(--seo-on-accent, #fff) var(--seo-on-accent, #fff) transparent transparent;
   animation: seo-spin 0.7s linear infinite;
 }
-.seo-btn.seo-btn-busy::after { border-color: var(--body-fg, #333) var(--body-fg, #333) transparent transparent; }
+.seo-btn.seo-btn-busy::after { border-color: var(--seo-accent-text, #333) var(--seo-accent-text, #333) transparent transparent; }
 
 .seo-inline-loader {
   display: flex; gap: 12px; align-items: center; margin-top: 10px; padding: 12px 14px; border-radius: 8px;
@@ -197,6 +197,7 @@
 }
 .seo-icon-btn:hover { opacity: 1; border-color: var(--hairline-color, #ddd); background: var(--darkened-bg, #f4f4f4); }
 .seo-dropdown li.seo-active { background: var(--seo-info-bg); }
+.submit-row + .seo-boxes { margin-top: 16px; }
 .seo-toast-error { border-color: var(--seo-up); }
 
 @media (prefers-reduced-motion: reduce) {

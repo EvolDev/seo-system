@@ -3,14 +3,14 @@
 Карточка площадки отдельной страницей — если окно не открылось (нет
 скрипта) или ссылку открыли в новой вкладке. Содержимое — card_body.html.
 {% endcomment %}
-{% load static %}
+{% load static seo_assets %}
 
 {% block extrastyle %}{{ block.super }}
-<link rel="stylesheet" href="{% static 'seo/offers.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}
-<script src="{% static 'seo/site-card.js' %}" defer></script>
+<script src="{% asset 'seo/site-card.js' %}" defer></script>
 {% endblock %}
 
 {% block breadcrumbs %}

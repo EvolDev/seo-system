@@ -26,6 +26,7 @@ from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE
 from apps.placements.models import Placement, PlacementLink
 from apps.placements.tasks import check_indexation
 from config.admin import NoDeleteAdmin, StackedInline
+from config.assets import Css, Js
 from config.queue import MAX_ATTEMPTS
 from config.run_id import bind_run_id, new_run_id
 
@@ -139,8 +140,8 @@ class PlacementAdmin(NoDeleteAdmin):
     actions = ("check_indexation_action", "skip_checks_action", "resume_checks_action")
 
     class Media:
-        js = ("seo/indexation.js",)
-        css: ClassVar[dict[str, tuple[str, ...]]] = {"all": ("seo/indexation.css",)}
+        js = (Js("seo/indexation.js"),)
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {"all": (Css("seo/indexation.css"),)}
 
     def get_urls(self) -> list[URLPattern]:
         own = [

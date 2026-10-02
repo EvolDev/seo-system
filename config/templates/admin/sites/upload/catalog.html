@@ -97,7 +97,7 @@
       </tbody>
     </table>
   </div>
-  <p><a href="{% url 'admin:sites_upload_review' upload.pk %}">Открыть разбор</a> · рабочий список «{{ list_name }}»</p>
+  <p><a href="{% url 'admin:sites_upload_review' upload.pk %}">Открыть разбор</a> · рабочий список «{{ list_name }}»{% if upload.site_list_id %} · <a href="{% url 'admin:sites_sitelist_ahrefs' upload.site_list_id %}">домены для Ahrefs</a>{% endif %}</p>
 </section>
 
 <form method="post" action="{% url 'admin:sites_upload_recheck' upload.pk %}" class="seo-inline-form" data-run-form="recheck">

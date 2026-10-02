@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.9 от 02.10.2026 — выгрузки Ahrefs Batch Analysis, трафик по странам (ADR-045)
 -- Версия 1.8 от 01.10.2026 — загрузка файлов продавцов и каталога Collaborator (ADR-044)
 -- Версия 1.7 от 01.10.2026 — продавцы, рабочая цена площадки, заметки, курсы валют (ADR-043)
 -- Версия 1.6 от 01.10.2026 — размещение можно убрать из плановых проверок (E2-03)
@@ -7,7 +8,7 @@
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 36 таблиц и заглушка auth_user, 9 представлений, 1 функция)
+-- (проверена применением на PostgreSQL 16: 37 таблиц и заглушка auth_user, 10 представлений, 1 функция)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -33,7 +34,7 @@ CREATE TABLE auth_user (
 CREATE TYPE site_status AS ENUM
     ('new','auditing','approved','rejected','placed','blacklisted');
 CREATE TYPE metric_source AS ENUM
-    ('ahrefs_api','serp_api','manual','csv_import','collaborator_api');
+    ('ahrefs_api','serp_api','manual','csv_import','collaborator_api','ahrefs_batch');
 CREATE TYPE audit_verdict AS ENUM ('yes','no','borderline');
 CREATE TYPE audit_author AS ENUM ('human','llm','system');
 CREATE TYPE placement_status AS ENUM
@@ -58,7 +59,7 @@ CREATE TYPE task_status AS ENUM ('running','success','failed');
 CREATE TYPE placement_type AS ENUM ('guest_post','link_insertion');
 CREATE TYPE review_verdict AS ENUM ('accepted','needs_revision','rejected');
 -- Загрузка файла (ADR-044): что за файл, где он в работе, вкладка разбора.
-CREATE TYPE upload_kind AS ENUM ('price_list','collaborator_catalog');
+CREATE TYPE upload_kind AS ENUM ('price_list','collaborator_catalog','ahrefs_batch');
 CREATE TYPE upload_status AS ENUM ('new','checking','checked','writing','done','failed');
 CREATE TYPE review_group AS ENUM
     ('cheaper','changed','new','rejected','pricier','other_service','same');
@@ -134,7 +135,6 @@ CREATE TABLE site_metrics (
     site_id         bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
     dr              smallint,
     organic_traffic integer,
-    us_traffic      integer,
     top_geo         text,
     top_geo_traffic integer,
     total_keywords  integer,
@@ -144,6 +144,21 @@ CREATE TABLE site_metrics (
     checked_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_metrics_site ON site_metrics(site_id, checked_at DESC);
+
+-- Трафик и ключи площадки в одной стране — снимок (ADR-045). Пишет выгрузка Ahrefs
+-- Batch Analysis под страну, позже — Ahrefs API (E2-07). Топ-регион выгрузки «все
+-- страны» — в site_metrics: по нему трафик других стран не узнать. Замер всегда наш.
+CREATE TABLE site_country_metrics (
+    id              bigserial PRIMARY KEY,
+    site_id         bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    country         char(2) NOT NULL,                  -- код страны строчными, как у Ahrefs: us, gb
+    organic_traffic integer,
+    total_keywords  integer,
+    source          metric_source NOT NULL DEFAULT 'manual',
+    raw             jsonb,
+    checked_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_country_metrics_site ON site_country_metrics(site_id, country, checked_at DESC);
 
 -- Предложение продавца на дату: одна услуга — одна цена (ADR-043). Снимок: новая
 -- цена — новая строка. Сравнивается только цена услуги; написание, анонс и серая
@@ -246,12 +261,14 @@ CREATE TABLE exchange_rates (
 );
 
 -- Загрузка файла продавца или каталога Collaborator (ADR-044): файл, разметка
--- колонок, сводка до записи, итог записи. Результат — рабочий список.
+-- колонок, сводка до записи, итог записи. Результат — рабочий список. Выгрузка
+-- Ahrefs Batch Analysis (ADR-045) — без продавца и рабочего списка, со страной.
 CREATE TABLE uploads (
     id            bigserial PRIMARY KEY,
     kind          upload_kind NOT NULL,
-    seller_id     bigint NOT NULL REFERENCES sellers(id),
-    prices_date   date NOT NULL,                -- дата цен: на неё пишутся снимки
+    seller_id     bigint REFERENCES sellers(id),  -- пусто только у выгрузки Ahrefs: замер наш
+    prices_date   date NOT NULL,                -- дата цен (у Ahrefs — замера): на неё пишутся снимки
+    country       char(2),                      -- страна выгрузки Ahrefs; пусто — все страны
     file_name     text NOT NULL,                -- имя файла у пользователя
     file_path     text NOT NULL,                -- путь от папки загрузок, её видит воркер
     file_sha256   char(64) NOT NULL,            -- тот же файл повторно — та же загрузка
@@ -267,7 +284,8 @@ CREATE TABLE uploads (
     run_id        uuid,
     author_id     integer REFERENCES auth_user(id),   -- кто загрузил
     created_at    timestamptz NOT NULL DEFAULT now(),
-    written_at    timestamptz
+    written_at    timestamptz,
+    CONSTRAINT uploads_seller_check CHECK (seller_id IS NOT NULL OR kind = 'ahrefs_batch')
 );
 
 -- Строка разбора загрузки: предложение из файла и с чем его сравнили. Вкладка —
@@ -749,6 +767,8 @@ JOIN sellers sl ON sl.id = o.seller_id;
 -- Только то, что не зависит от продукта; статус и вердикт — в v_product_site_latest.
 -- Метрики — последний доверенный замер (наш или от продавца с metrics_trusted), нет
 -- такого — последний со слов продавца, metrics_trusted = false (ADR-043).
+-- Топ-регион и его трафик — из последнего замера, где они есть, в том же порядке
+-- доверия: замер каталога без гео их не стирает (ADR-045).
 -- Цена — рабочая (sites.price_id). Евро — eur_rate(), только для сравнения и
 -- показа. reference_total — то, что сравнивается с ценовым ориентиром продукта:
 -- размещение + анонс, в евро; написание в него не входит никогда (промпт
@@ -763,7 +783,8 @@ JOIN sellers sl ON sl.id = o.seller_id;
 CREATE VIEW v_site_latest AS
 SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        s.links_allowed, s.link_type, s.marks_as_ad,
-       m.dr, m.organic_traffic, m.total_keywords, m.top_geo, m.checked_at AS metrics_at,
+       m.dr, m.organic_traffic, m.total_keywords,
+       tg.top_geo, tg.top_geo_traffic, tg.checked_at AS top_geo_at, m.checked_at AS metrics_at,
        m.trusted AS metrics_trusted, ms.name AS metrics_seller,
        pr.id AS price_id, pr.seller_id AS price_seller_id, ps.name AS price_seller,
        pr.placement_type AS price_type,
@@ -783,13 +804,18 @@ SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        g.ratio AS gray_ratio,
        coalesce(ln.notes, 0) AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at
 FROM sites s
-LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.top_geo, x.checked_at,
+LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.checked_at,
                           x.seller_id, x.seller_id IS NULL OR xs.metrics_trusted AS trusted
                    FROM site_metrics x LEFT JOIN sellers xs ON xs.id = x.seller_id
                    WHERE x.site_id = s.id
                    ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC
                    LIMIT 1) m ON true
 LEFT JOIN sellers ms ON ms.id = m.seller_id
+LEFT JOIN LATERAL (SELECT x.top_geo, x.top_geo_traffic, x.checked_at
+                   FROM site_metrics x LEFT JOIN sellers xs ON xs.id = x.seller_id
+                   WHERE x.site_id = s.id AND x.top_geo IS NOT NULL
+                   ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC
+                   LIMIT 1) tg ON true
 LEFT JOIN site_prices pr ON pr.id = s.price_id
 LEFT JOIN sellers ps ON ps.id = pr.seller_id
 LEFT JOIN LATERAL (SELECT o.id, o.placement_cents, o.currency, o.reviewed_at
@@ -825,7 +851,8 @@ CREATE VIEW v_product_site_latest AS
 SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.reject_reason, ps.imported_undecided,
        l.domain, l.language, l.topics, l.declared_topics,
        l.links_allowed, l.link_type, l.marks_as_ad,
-       l.dr, l.organic_traffic, l.total_keywords, l.top_geo, l.metrics_at,
+       l.dr, l.organic_traffic, l.total_keywords, l.top_geo, l.top_geo_traffic, l.top_geo_at,
+       l.metrics_at,
        l.metrics_trusted, l.metrics_seller,
        l.price_id, l.price_seller_id, l.price_seller, l.price_type,
        l.placement_cents, l.announce_cents, l.writing_cents, l.price_currency, l.prices_at,
@@ -861,3 +888,12 @@ LEFT JOIN LATERAL (SELECT array_agg(DISTINCT pr.name ORDER BY pr.name) AS names
                    FROM placements x JOIN products pr ON pr.id = x.product_id
                    WHERE x.site_id = ps.site_id AND x.product_id <> ps.product_id
                      AND x.status = 'published') op ON true;
+
+-- Последний замер площадки по каждой стране (ADR-045): колонки «трафик» и «ключи»
+-- выбранного региона в «Площадках». Страна здесь есть, только если под неё грузили
+-- выгрузку страны.
+CREATE VIEW v_site_country_latest AS
+SELECT DISTINCT ON (x.site_id, x.country)
+       x.id, x.site_id, x.country, x.organic_traffic, x.total_keywords, x.source, x.checked_at
+FROM site_country_metrics x
+ORDER BY x.site_id, x.country, x.checked_at DESC, x.id DESC;

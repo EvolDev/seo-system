@@ -27,6 +27,7 @@ from django.template.response import TemplateResponse
 from django.urls import URLPattern, path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.http import content_disposition_header
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_POST
 from rangefilter.filters import NumericRangeFilter
@@ -37,7 +38,7 @@ from apps.content.admin import (
     ProductSettingsForm,
 )
 from apps.placements.models import Placement
-from apps.sites import offers
+from apps.sites import ahrefs_domains, countries, offers
 from apps.sites.display import (
     Amount,
     announce_text,
@@ -60,6 +61,8 @@ from apps.sites.models import (
     Seller,
     Site,
     SiteAudit,
+    SiteCountryLatest,
+    SiteCountryMetric,
     SiteList,
     SiteListItem,
     SiteMetric,
@@ -68,6 +71,7 @@ from apps.sites.models import (
     SiteStatus,
 )
 from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline
+from config.assets import Css, Js
 
 # Окно карточки просит у сервера только её содержимое, без страницы вокруг.
 PARTIAL_HEADER = "X-Seo-Partial"
@@ -191,8 +195,8 @@ class SiteAdmin(NoDeleteAdmin):
     inlines = (ProductSiteInline,)
 
     class Media:
-        js = ("seo/site-card.js",)
-        css: ClassVar[dict[str, tuple[str, ...]]] = {"all": ("seo/offers.css",)}
+        js = (Js("seo/site-card.js"),)
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {"all": (Css("seo/offers.css"),)}
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Site]:
         # Менеджер по умолчанию прячет удалённые; здесь их скрывает
@@ -549,9 +553,54 @@ class SiteAuditAdmin(SiteSnapshotAdmin):
 class SiteListAdmin(NoDeleteAdmin):
     """Рабочие списки (ADR-033). Создаёт их импорт; здесь — обзор и имя."""
 
-    list_display = ("name", "sites_count", "first_seen_count", "source", "created_at")
+    list_display = (
+        "name",
+        "sites_count",
+        "first_seen_count",
+        "ahrefs_link",
+        "source",
+        "created_at",
+    )
     search_fields = ("name",)
     readonly_fields = ("created_at", "sites_count", "first_seen_count")
+
+    def get_urls(self) -> list[URLPattern]:
+        view = self.admin_site.admin_view
+        own = [
+            path(
+                "<int:list_id>/ahrefs/",
+                view(require_GET(self.ahrefs_view)),
+                name="sites_sitelist_ahrefs",
+            ),
+        ]
+        return own + super().get_urls()
+
+    def ahrefs_view(self, request: HttpRequest, list_id: int) -> HttpResponse:
+        """«Домены для Ahrefs»: части по 500, файл части (?part=N) или все архивом (?zip=1)."""
+        site_list = get_object_or_404(SiteList, pk=list_id)
+        all_parts = ahrefs_domains.parts(site_list)
+        part = request.GET.get("part")
+        if part:
+            chosen = next((p for p in all_parts if str(p.number) == part), None)
+            if chosen is None:
+                return HttpResponseRedirect(request.path)
+            return _attachment(chosen.text().encode(), chosen.file_name(site_list), "text/plain")
+        if request.GET.get("zip") and all_parts:
+            name, content = ahrefs_domains.archive(site_list, all_parts)
+            return _attachment(content, name, "application/zip")
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Домены для Ahrefs: {site_list.name}",
+            "opts": self.model._meta,
+            "site_list": site_list,
+            "parts": all_parts,
+            "total": sum(len(p.domains) for p in all_parts),
+            "part_size": ahrefs_domains.PART_SIZE,
+            "sites_url": reverse("admin:sites_productsitelatest_changelist")
+            + f"?list={site_list.pk}",
+            "upload_url": reverse("admin:sites_upload_add"),
+        }
+        return TemplateResponse(request, "admin/sites/sitelist/ahrefs.html", context)
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[SiteList]:
         # Счётчики одним запросом на весь список, а не запросом на строку.
@@ -571,6 +620,18 @@ class SiteListAdmin(NoDeleteAdmin):
     @admin.display(description="впервые в базе", ordering="first_seen_total")
     def first_seen_count(self, obj: Any) -> int:
         return int(obj.first_seen_total)
+
+    @admin.display(description="Ahrefs")
+    def ahrefs_link(self, obj: Any) -> SafeString:
+        url = reverse("admin:sites_sitelist_ahrefs", args=[obj.pk])
+        return format_html('<a href="{}">{}</a>', url, "Домены для Ahrefs")
+
+
+def _attachment(content: bytes, file_name: str, content_type: str) -> HttpResponse:
+    response = HttpResponse(content, content_type=content_type)
+    # Имя файла бывает с кириллицей — заголовок по RFC 6266 собирает Django.
+    response["Content-Disposition"] = content_disposition_header(True, file_name)
+    return response
 
 
 @admin.register(SiteListItem)
@@ -788,6 +849,107 @@ class PublishedFilter(admin.SimpleListFilter):
         return queryset
 
 
+# Колонки региона (ADR-045): их нет в представлении, их добавляет get_queryset.
+REGION_TRAFFIC = "region_traffic"
+REGION_KEYWORDS = "region_keywords"
+REGION_PARAMS = [
+    f"{field}__range__{edge}"
+    for field in (REGION_TRAFFIC, REGION_KEYWORDS)
+    for edge in ("gte", "lte")
+]
+
+
+def _region(request: HttpRequest) -> str | None:
+    """Выбранный регион — код страны строчными, или None — «Все»."""
+    value = (request.GET.get(RegionFilter.parameter_name) or "").strip().lower()
+    return value if len(value) == 2 and value.isalpha() else None
+
+
+class RegionFilter(admin.SimpleListFilter):
+    """Регион (ADR-045): колонки «трафик» и «ключи» страны и фильтры «от/до» по ним.
+
+    Строки не отбирает. В списке — только страны, под которые загружали
+    выгрузку Ahrefs по стране, с числом площадок: по топ-региону выгрузки
+    «все страны» трафик других стран не узнать. «Все» — колонок региона нет.
+    """
+
+    title = "регион"
+    parameter_name = "region"
+    # Страны с флагами и поиском поверх выпадающего списка (seo/country-picker.js).
+    template = "admin/sites/region_filter.html"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        rows = (
+            SiteCountryMetric.objects.values("country")
+            .annotate(sites=Count("site_id", distinct=True))
+            .order_by("-sites", "country")
+        )
+        return [
+            (
+                row["country"],
+                f"{countries.name(row['country'])} · {row['country'].upper()} ({row['sites']})",
+            )
+            for row in rows
+        ]
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        return queryset
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        # Другой регион — другие колонки: его «от/до» и сортировка сбрасываются.
+        reset = ["o", *REGION_PARAMS]
+        yield {
+            "selected": self.value() is None,
+            "query_string": changelist.get_query_string(remove=[self.parameter_name, *reset]),
+            "display": "Все",
+            "flag": countries.GLOBE,
+            "search": "все all",
+        }
+        for lookup, title in self.lookup_choices:
+            country = countries.get(lookup)
+            yield {
+                "selected": self.value() == lookup,
+                "query_string": changelist.get_query_string(
+                    {self.parameter_name: lookup}, remove=reset
+                ),
+                "display": title,
+                "flag": countries.flag_code(lookup),
+                "search": country.search if country else lookup,
+            }
+
+
+def _region_range(field_path: str, title: str) -> type:
+    """«от — до» по колонке региона. Поля такого в модели нет — даём фильтру поле-заглушку."""
+
+    class RegionRangeFilter(NumericRangeFilter):  # type: ignore[misc]
+        def __init__(self, request: HttpRequest, params: Any, model: Any, model_admin: Any) -> None:
+            field = models.IntegerField(verbose_name=title)
+            super().__init__(field, request, params, model, model_admin, field_path)
+
+    return RegionRangeFilter
+
+
+def _region_columns(code: str) -> list[Any]:
+    """Колонки «трафик US» и «ключи US» — подписи свои на каждый запрос."""
+    label = code.upper()
+
+    def cell(value: int | None, at: dt.datetime | None) -> SafeString | str:
+        if value is None:
+            return ""
+        when = f"{timezone.localtime(at):%d.%m.%Y}" if at else ""
+        return format_html('<span title="Ahrefs, замер {}">{}</span>', when, value)
+
+    @admin.display(description=f"трафик {label}", ordering=REGION_TRAFFIC)
+    def region_traffic(obj: ProductSiteLatest) -> SafeString | str:
+        return cell(getattr(obj, REGION_TRAFFIC, None), getattr(obj, "region_at", None))
+
+    @admin.display(description=f"ключи {label}", ordering=REGION_KEYWORDS)
+    def region_keywords(obj: ProductSiteLatest) -> SafeString | str:
+        return cell(getattr(obj, REGION_KEYWORDS, None), getattr(obj, "region_at", None))
+
+    return [region_traffic, region_keywords]
+
+
 class LanguageFilter(admin.SimpleListFilter):
     """Основной язык площадки. Языков десятки — выпадающий список."""
 
@@ -831,6 +993,12 @@ class OffersChangeList(ChangeList):
         by_site = offers.current_offers(row.site_id for row in self.result_list)
         for row in self.result_list:
             row.page_offers = by_site.get(row.site_id, [])
+        # «Домены для Ahrefs» выбранного списка — ссылка над таблицей, без лишнего запроса.
+        self.ahrefs_url = None
+        for spec in self.filter_specs:
+            value = spec.value() if isinstance(spec, SiteListFilter) else None
+            if value and value.isdigit():
+                self.ahrefs_url = reverse("admin:sites_sitelist_ahrefs", args=[int(value)])
 
 
 @admin.register(ProductSiteLatest)
@@ -849,6 +1017,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         "status_link",
         "dr_cell",
         "traffic_cell",
+        "top_geo_cell",
         "language",
         "price_cell",
         "offers_cell",
@@ -867,6 +1036,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         "status",
         OffersFilter,
         SellerFilter,
+        RegionFilter,
         # Диапазон — поля «С» и «До» (django-admin-rangefilter, ADR-038).
         ("dr", NumericRangeFilter),
         ("organic_traffic", NumericRangeFilter),
@@ -884,8 +1054,10 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     actions = ("accept_new_prices_action", "fix_seller_action", "keep_current_action")
 
     class Media:
-        js = ("seo/site-card.js",)
-        css: ClassVar[dict[str, tuple[str, ...]]] = {"all": ("seo/offers.css",)}
+        js = (Js("seo/site-card.js"), Js("seo/country-picker.js"))
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {
+            "all": (Css("seo/offers.css"), Css("flags/sprite-hq.css"))
+        }
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -899,6 +1071,40 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
 
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
         return OffersChangeList
+
+    def get_queryset(self, request: HttpRequest) -> models.QuerySet[Any]:
+        queryset: models.QuerySet[Any] = super().get_queryset(request)
+        region = _region(request)
+        if region is None:
+            return queryset
+        # Последний замер страны — из v_site_country_latest; по одному значению на строку.
+        latest = SiteCountryLatest.objects.filter(site_id=OuterRef("site_id"), country=region)
+        annotated: models.QuerySet[Any] = queryset.annotate(
+            region_traffic=Subquery(latest.values("organic_traffic")[:1]),
+            region_keywords=Subquery(latest.values("total_keywords")[:1]),
+            region_at=Subquery(latest.values("checked_at")[:1]),
+        )
+        return annotated
+
+    def get_list_display(self, request: HttpRequest) -> Any:
+        columns = list(self.list_display)
+        region = _region(request)
+        if region is not None:
+            at = columns.index("top_geo_cell") + 1
+            columns[at:at] = _region_columns(region)
+        return columns
+
+    def get_list_filter(self, request: HttpRequest) -> Any:
+        filters = list(self.list_filter)
+        region = _region(request)
+        if region is not None:
+            label = region.upper()
+            at = filters.index(("organic_traffic", NumericRangeFilter)) + 1
+            filters[at:at] = [
+                _region_range(REGION_TRAFFIC, f"трафик {label}"),
+                _region_range(REGION_KEYWORDS, f"ключи {label}"),
+            ]
+        return filters
 
     def get_search_results(
         self, request: HttpRequest, queryset: models.QuerySet[Any], search_term: str
@@ -933,6 +1139,21 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     @admin.display(description="трафик", ordering="organic_traffic")
     def traffic_cell(self, obj: ProductSiteLatest) -> str:
         return "" if obj.organic_traffic is None else f"{obj.organic_traffic}"
+
+    @admin.display(description="топ регион", ordering="top_geo_traffic")
+    def top_geo_cell(self, obj: ProductSiteLatest) -> SafeString | str:
+        # Как Top Geo и Top Geo Traff в таблице: страна с наибольшим трафиком и её трафик.
+        if not obj.top_geo:
+            return ""
+        when = f"{timezone.localtime(obj.top_geo_at):%d.%m.%Y}" if obj.top_geo_at else ""
+        return format_html(
+            '<span class="seo-geo" title="{}: больше всего трафика; замер {}">{}{} {}</span>',
+            countries.name(obj.top_geo),
+            when,
+            countries.flag_html(obj.top_geo),
+            obj.top_geo.upper(),
+            "" if obj.top_geo_traffic is None else obj.top_geo_traffic,
+        )
 
     @admin.display(description="цена", ordering="placement_eur_cents")
     def price_cell(self, obj: ProductSiteLatest) -> SafeString:

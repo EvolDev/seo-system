@@ -1,0 +1,48 @@
+{% extends "admin/base_site.html" %}
+{% load static seo_assets %}
+{% comment %}
+«Домены для Ahrefs» (E1-10, ADR-045): домены рабочего списка частями по 500 —
+столько Batch Analysis берёт за раз. Порядок — по DR от большего.
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}<link rel="stylesheet" href="{% asset 'seo/offers.css' %}"><link rel="stylesheet" href="{% asset 'seo/uploads.css' %}">{% endblock %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Начало</a>
+  › <a href="{% url 'admin:sites_sitelist_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  › Домены для Ahrefs
+</div>
+{% endblock %}
+
+{% block content %}
+<p class="seo-lead">
+  Список <a href="{{ sites_url }}">«{{ site_list.name }}»</a> — {{ total }} доменов{% if parts %}, {{ parts|length }} {% if parts|length == 1 %}файл{% elif parts|length < 5 %}файла{% else %}файлов{% endif %} по {{ part_size }}{% endif %}.
+  Batch Analysis берёт до {{ part_size }} доменов за раз. Первыми — площадки с большим DR.
+</p>
+{% if parts %}
+  <ol class="seo-hint">
+    <li>Скачайте часть, откройте файл, скопируйте все строки.</li>
+    <li>В Ahrefs откройте Batch Analysis, вставьте домены, режим — Subdomains, страна — All locations или нужная страна.</li>
+    <li>Выгрузите результат кнопкой Export и загрузите его в <a href="{{ upload_url }}">«Загрузки»</a> как «Ahrefs Batch Analysis» с той же страной.</li>
+  </ol>
+  <div class="seo-table-wrap">
+    <table class="seo-upload-table">
+      <thead><tr><th>Часть</th><th>Домены</th><th class="seo-r">Сколько</th><th>Первый в части</th><th></th></tr></thead>
+      <tbody>
+        {% for part in parts %}
+          <tr>
+            <td>{{ part.number }} из {{ part.total }}</td>
+            <td>{{ part.start }}–{{ part.end }}</td>
+            <td class="seo-r">{{ part.domains|length }}</td>
+            <td>{{ part.domains.0 }}{% if part.top_dr is not None %} <span class="seo-sub">DR {{ part.top_dr }}</span>{% endif %}</td>
+            <td><a class="seo-btn" href="?part={{ part.number }}" download>Скачать</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if parts|length > 1 %}<div class="submit-row"><a class="seo-btn" href="?zip=1" download>Скачать все части архивом</a></div>{% endif %}
+{% else %}
+  <p class="seo-flat">В списке нет площадок.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,16 @@
+{% comment %}
+Фильтр «Регион» в «Площадках» (E1-10, ADR-045): как выпадающие фильтры темы
+(admin_interface/dropdown_filter.html), но со странами с флагами и поиском —
+seo/country-picker.js поверх <select>. Без скрипта выбор открывает адрес
+скриптом темы, как у остальных фильтров.
+{% endcomment %}
+<div class="list-filter-dropdown seo-region-filter">
+    <h3 {% if spec.value %}class="active"{% endif %}>{{ title|capfirst }}</h3>
+    <div class="seo-country" data-country-picker data-navigate data-auto data-label="Регион" data-placeholder="США, Germany, gb…">
+        <select>
+        {% for choice in choices %}
+            <option {% if choice.selected %}selected{% endif %} value="{{ choice.query_string|iriencode }}"{% if choice.flag %} data-flag="{{ choice.flag }}"{% endif %} data-search="{{ choice.search }}">{{ choice.display }}</option>
+        {% endfor %}
+        </select>
+    </div>
+</div>

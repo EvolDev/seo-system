@@ -1,21 +1,13 @@
 {% load i18n rangefilter_compat %}
 {% comment %}
-Фильтр диапазона django-admin-rangefilter с одной правкой (E9-08): заголовок —
-просто название поля («DR»), а не «По DR». Остальное — как в пакете 0.15.
+Фильтр диапазона django-admin-rangefilter с правками: заголовок — просто
+название поля («DR»), а не «По DR» (E9-08); кнопки — наши, от расцветки
+(seo/admin-palettes.css, E1-10). Остальное — как в пакете 0.15.
 {% endcomment %}
 <details data-filter-title="{{ title }}" open>
 <summary>{{ title|capfirst }}</summary>
 <style nonce="{{ spec.request.csp_nonce }}">
     {% default_css_vars_if_needed %}
-    .numericrangefilter .button, .numericrangefilter input[type=submit], .numericrangefilter input[type=button], .numericrangefilter .submit-row input, .numericrangefilter a.button,
-    .numericrangefilter .button, .numericrangefilter input[type=reset] {
-        background: var(--button-bg);
-        padding: 4px 5px;
-        border: none;
-        border-radius: 4px;
-        color: var(--button-fg);
-        cursor: pointer;
-    }
     .numericrangefilter {
         margin: 5px 0;
         padding: 0 15px 15px;
@@ -65,8 +57,8 @@ https://github.com/django/django/blob/stable/1.10.x/django/contrib/admin/templat
             <input type="hidden" id="{{ choice.system_name }}-query-string" value="{{ choice.query_string }}">
         {% endfor %}
         <div class="controls">
-            <input type="submit" class="button" value="{% trans "Search" %}">
-            <input type="reset" class="button" value="{% trans "Reset" %}">
+            <input type="submit" class="seo-btn seo-btn-primary" value="{% trans "Search" %}">
+            <input type="reset" class="seo-btn" value="{% trans "Reset" %}">
         </div>
     </form>
 </div>

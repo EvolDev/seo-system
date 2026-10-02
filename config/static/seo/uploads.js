@@ -256,11 +256,28 @@
 
   function initForm(form) {
     var rows = form.querySelectorAll("[data-seller-row]");
+    var countryRow = form.querySelector("[data-country-row]");
+    // Подписи даты: у выгрузки Ahrefs это дата замера, а не цен.
+    var swaps = Array.prototype.map.call(form.querySelectorAll("[data-ahrefs]"), function (node) {
+      return { node: node, plain: node.textContent, ahrefs: node.getAttribute("data-ahrefs") };
+    });
     function sync() {
       var checked = form.querySelector("input[name=kind]:checked");
-      var catalog = checked && checked.value === "collaborator_catalog";
-      rows.forEach(function (row) { row.hidden = catalog; });
+      var kind = checked ? checked.value : "price_list";
+      rows.forEach(function (row) { row.hidden = kind !== "price_list"; });
+      if (countryRow) countryRow.hidden = kind !== "ahrefs_batch";
+      swaps.forEach(function (swap) { swap.node.textContent = kind === "ahrefs_batch" ? swap.ahrefs : swap.plain; });
+      // У выгрузки Ahrefs шагов три: колонок и разбора нет.
+      var plainSteps = document.querySelector("[data-steps-plain]");
+      var ahrefsSteps = document.querySelector("[data-steps-ahrefs]");
+      if (plainSteps && ahrefsSteps) {
+        plainSteps.hidden = kind === "ahrefs_batch";
+        ahrefsSteps.hidden = kind !== "ahrefs_batch";
+      }
     }
+    // Страна выгрузки — общий выбор с флагами и поиском (seo/country-picker.js).
+    var picker = form.querySelector("[data-country-picker]");
+    if (picker && window.seoCountryPicker) window.seoCountryPicker(picker);
     form.querySelectorAll("input[name=kind]").forEach(function (input) {
       input.addEventListener("change", sync);
     });
@@ -555,7 +572,20 @@
       input.addEventListener("input", show);
       input.addEventListener("focus", show);
       input.addEventListener("click", show);
-      input.addEventListener("blur", function () { setTimeout(hide, 120); });
+      // Щелчок по полосе прокрутки переводит фокус на список (tabindex=-1) —
+      // тогда список остаётся открытым; закрываем, только если фокус ушёл совсем.
+      dropdown.tabIndex = -1;
+      function leave(event) {
+        var to = event.relatedTarget;
+        if (to === input || dropdown.contains(to)) return;
+        hide();
+      }
+      input.addEventListener("blur", leave);
+      dropdown.addEventListener("blur", leave);
+      dropdown.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") { hide(); input.focus(); }
+        else if (event.key.length === 1) input.focus();
+      });
       input.addEventListener("keydown", function (event) {
         if (event.key === "ArrowDown") { event.preventDefault(); if (dropdown.hidden) show(); highlight(1); }
         else if (event.key === "ArrowUp") { event.preventDefault(); highlight(-1); }

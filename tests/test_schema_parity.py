@@ -70,6 +70,8 @@ TABLES = [
     # E1-08
     "uploads",
     "upload_items",
+    # E1-10
+    "site_country_metrics",
 ]
 
 VIEWS = [
@@ -84,6 +86,8 @@ VIEWS = [
     "v_product_site_latest",
     # E1-07
     "v_site_offers",
+    # E1-10
+    "v_site_country_latest",
 ]
 
 # Функции схемы: E1-07 — пересчёт в евро для представлений.
@@ -180,7 +184,8 @@ def _constraints(schema: str) -> dict[str, str]:
         schema,
         TABLES,
     )
-    return dict(rows)
+    # CHECK со значением перечисления печатает тип со схемой: 'x'::ref.upload_kind.
+    return {name: str(_unqualify(definition)) for name, definition in rows}
 
 
 def _foreign_keys(schema: str) -> set[tuple[str, str, str, str]]:

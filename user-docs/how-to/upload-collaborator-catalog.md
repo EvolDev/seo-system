@@ -3,8 +3,8 @@ title: Как загрузить каталог Collaborator
 description: Как загрузить выгрузку всех площадок Collaborator — обновить то, что уже есть в базе, и добавить только подходящие новые площадки по фильтрам.
 section: how-to
 status: draft
-tasks: [E1-08]
-updated: 2026-10-01
+tasks: [E1-08, E1-10]
+updated: 2026-10-02
 since:
 screens: [upload_list, upload_new, upload_review]
 tags: [загрузка, collaborator, цены, фильтры]
@@ -51,7 +51,8 @@ tags: [загрузка, collaborator, цены, фильтры]
       новую цену Collaborator, если она была от него;
     - **метрики: DR, трафик, ключи** — новый замер Collaborator. Снимите
       галочку, если у площадок ваш свежий замер Ahrefs и вы не хотите,
-      чтобы его перекрыли данные Collaborator;
+      чтобы его перекрыли данные Collaborator — [Как подтянуть данные
+      Ahrefs через Batch Analysis](ahrefs-batch-analysis.md);
     - **описание** — тематики, языки, тип сайта, dofollow, число ссылок,
       пометка «реклама».
 3. Нажмите **Обновить в базе**. В блоке появится индикатор со счётчиком

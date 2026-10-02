@@ -26,6 +26,7 @@ from apps.sites.models import (
     Seller,
     Site,
     SiteAudit,
+    SiteCountryMetric,
     SiteList,
     SiteListItem,
     SiteMetric,
@@ -252,9 +253,11 @@ def test_query_count(
     offer: OfferFactory,
     django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
-    """Критерий приёмки: страница — не больше 10 запросов при любом числе строк.
+    """Критерий приёмки: страница — не больше 11 запросов при любом числе строк.
 
     С E1-07 — ещё и с продавцами, предложениями, заметками и их фильтрами.
+    С E1-10 — с выбранным регионом и его «от/до»: список регионов — 11-й
+    запрос, колонки региона — подзапросы в основном.
     """
     site_list = SiteList.objects.create(name="Сентябрь")
     seller = Seller.objects.create(name="LinkHub Media", currency="USD")
@@ -264,6 +267,7 @@ def test_query_count(
         offer(site, 900 + number, seller=seller, currency="USD", working=False)
         SiteNote.objects.create(site=site, body=f"заметка {number}")
         SiteListItem.objects.create(site_list=site_list, site=site)
+        SiteCountryMetric.objects.create(site=site, country="us", organic_traffic=number)
         if number % 3 == 0:
             Placement.objects.create(site=site, product=clideo, status=PlacementStatus.PUBLISHED)
     ExchangeRate.objects.create(currency="USD", rate_date=datetime(2026, 9, 30).date(), rate=1.1355)
@@ -277,11 +281,14 @@ def test_query_count(
         "seller": str(seller.pk),
         "notes": "yes",
         "writing": "yes",
+        "region": "us",
+        "region_traffic__range__gte": "0",
     }
     # Тема Admin Interface при первом открытии заводит свою строку и кладёт её
     # в кеш; в работающем приложении она там уже есть, считаем без неё.
     admin_client.get(URL)
-    with django_assert_max_num_queries(10):
+    with django_assert_max_num_queries(11):
         response = admin_client.get(URL, params)
     assert response.status_code == 200
     assert len(response.context["cl"].result_list) == 100
+    assert "трафик US" in response.content.decode()

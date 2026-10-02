@@ -1,11 +1,18 @@
 {% extends "admin/base_site.html" %}
-{% comment %}Шаг 1 — файл, что это, продавец, дата цен (E1-08, ADR-044).{% endcomment %}
+{% comment %}
+Шаг 1 — файл, что это, продавец, дата цен (E1-08, ADR-044). У выгрузки Ahrefs
+вместо продавца — страна выгрузки с поиском, дата — дата замера (ADR-045).
+Без скрипта страна — обычный выпадающий список.
+{% endcomment %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
 {% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
 
 {% block content %}
-{% include "admin/sites/upload/_steps.html" %}
+<div data-steps-plain>{% include "admin/sites/upload/_steps.html" %}</div>
+<ol class="seo-steps" data-steps-ahrefs hidden>
+  <li class="seo-step-on">1. Файл</li><li>2. Сводка до записи</li><li>3. Записано</li>
+</ol>
 <form method="post" enctype="multipart/form-data" class="seo-upload-form" data-upload-form>
   {% csrf_token %}
   {% if form.non_field_errors %}<div class="errornote">{{ form.non_field_errors|join:" " }}</div>{% endif %}
@@ -13,7 +20,25 @@
     <div class="form-row">
       <label>{{ form.kind.label }}</label>
       <div class="seo-radios">{% for radio in form.kind %}<label>{{ radio.tag }} {{ radio.choice_label }}</label>{% endfor %}</div>
-      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена.</div>
+      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена. Ahrefs Batch Analysis — файл кнопки Export на странице Batch Analysis, продавец не нужен.</div>
+    </div>
+    <div class="form-row" data-country-row>
+      {{ form.country.errors }}
+      <label for="id_country">{{ form.country.label }}</label>
+      <div class="seo-country" data-country-picker data-label="Страна выгрузки">
+        <select name="country" id="id_country">
+          <option value=""{% if not chosen_country %} selected{% endif %} data-search="все страны all locations" data-flag="{{ globe }}">Все страны</option>
+          {% if used_countries %}
+            <optgroup label="Уже загружали">
+              {% for country in used_countries %}<option value="{{ country.code }}"{% if country.code == chosen_country %} selected{% endif %} data-search="{{ country.search }}"{% if country.flag %} data-flag="{{ country.flag }}"{% endif %}>{{ country.label }}</option>{% endfor %}
+            </optgroup>
+          {% endif %}
+          <optgroup label="Все страны по алфавиту">
+            {% for country in countries %}<option value="{{ country.code }}"{% if country.code == chosen_country and country not in used_countries %} selected{% endif %} data-search="{{ country.search }}"{% if country.flag %} data-flag="{{ country.flag }}"{% endif %}>{{ country.label }}</option>{% endfor %}
+          </optgroup>
+        </select>
+      </div>
+      <div class="help">Как в Ahrefs над таблицей: All locations — «Все страны», иначе страна, которая была выбрана. «Все страны» дают DR, общий трафик, ключи и топ-регион; страна — трафик и ключи этой страны, и она появится в выборе «Регион» в «Площадках». Выбор сверю с файлом.</div>
     </div>
     <div class="form-row" data-seller-row>
       {{ form.seller.errors }}
@@ -28,8 +53,8 @@
     </div>
     <div class="form-row">
       {{ form.prices_date.errors }}
-      <label for="{{ form.prices_date.id_for_label }}">{{ form.prices_date.label }}</label> {{ form.prices_date }}
-      <div class="help">{{ form.prices_date.help_text }}</div>
+      <label for="{{ form.prices_date.id_for_label }}" data-date-label data-ahrefs="Дата замера">{{ form.prices_date.label }}</label> {{ form.prices_date }}
+      <div class="help" data-date-help data-ahrefs="Метрики станут замером на эту дату. Ещё одна выгрузка с той же датой обновит замер, а не задвоит.">{{ form.prices_date.help_text }}</div>
     </div>
     <div class="form-row">
       {{ form.file.errors }}

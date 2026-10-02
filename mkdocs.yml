@@ -57,6 +57,7 @@ nav:
       - how-to/check-indexation.md
       - how-to/upload-price-list.md
       - how-to/upload-collaborator-catalog.md
+      - how-to/ahrefs-batch-analysis.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

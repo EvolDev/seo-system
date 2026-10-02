@@ -38,6 +38,7 @@ from apps.sites.models import (
     ProductSite,
     Seller,
     Site,
+    SiteCountryMetric,
     SiteList,
     SiteListItem,
     SiteMetric,
@@ -53,6 +54,8 @@ CONVERTIO_DOMAIN = "convertio.co"
 CLIDEO_DOMAIN = "clideo.com"
 # Позиции во вкладке анкоров сняты по США (маппинг §2.2).
 POSITIONS_COUNTRY = "US"
+# US Traff — страна снимка трафика по странам, код строчными, как у Ahrefs (маппинг §1.3).
+US = "us"
 
 # Статус площадки по продукту импорт меняет, только если он «Новая» или
 # вперёд по этой цепочке. Отклонённую, чёрный список, аудит не трогает.
@@ -215,6 +218,16 @@ class Importer:
                 site_id__in=site_ids, source=MetricSource.CSV_IMPORT, checked_at=self.checked_at
             )
         }
+        # US Traff — трафик США у каждой площадки, а не топ-регион: снимок по стране (ADR-045).
+        us_metrics = {
+            row.site_id: row
+            for row in SiteCountryMetric.objects.filter(
+                site_id__in=site_ids,
+                country=US,
+                source=MetricSource.CSV_IMPORT,
+                checked_at=self.checked_at,
+            )
+        }
         # Снимок цены этой даты — у каждой площадки последний: если рабочая цена
         # зафиксирована, другая цена той же даты встаёт рядом новой строкой.
         prices: dict[int, SitePrice] = {}
@@ -262,13 +275,16 @@ class Importer:
             is_new = data.domain in new_domains
             if not is_new:
                 self._update_site(site, data)
+            fields = data.metrics.as_fields()
+            us_traffic = fields.pop("us_traffic")
+            self._snapshot(SiteMetric, metrics.get(site.pk), site, fields, new_snapshots)
             self._snapshot(
-                SiteMetric,
-                metrics.get(site.pk),
+                SiteCountryMetric,
+                us_metrics.get(site.pk),
                 site,
-                data.metrics.as_fields(),
-                "site_metrics",
+                {"organic_traffic": us_traffic},
                 new_snapshots,
+                country=US,
             )
             self._price(
                 site,
@@ -303,6 +319,9 @@ class Importer:
 
         # Новые строки — пачками: один INSERT на таблицу вместо двух тысяч.
         SiteMetric.objects.bulk_create(s for s in new_snapshots if isinstance(s, SiteMetric))
+        SiteCountryMetric.objects.bulk_create(
+            s for s in new_snapshots if isinstance(s, SiteCountryMetric)
+        )
         SitePrice.objects.bulk_create(s for s in new_snapshots if isinstance(s, SitePrice))
         # Первая цена площадки — рабочая сама: выбирать пока не из чего (ADR-043).
         for site, offer in priced:
@@ -428,20 +447,26 @@ class Importer:
 
     def _snapshot(
         self,
-        model: type[SiteMetric],
-        existing: SiteMetric | None,
+        model: type[SiteMetric] | type[SiteCountryMetric],
+        existing: SiteMetric | SiteCountryMetric | None,
         site: Site,
         fields: dict[str, object],
-        table: str,
         pending: list[models.Model],
+        **key: object,
     ) -> None:
+        """Снимок на дату импорта: есть — обновляется, нет — новый. `key` — страна снимка."""
+        table = model._meta.db_table
         if all(value is None for value in fields.values()):
             self.report.count(table, Outcome.SKIPPED)
             return
         if existing is None:
             pending.append(
                 model(
-                    site=site, source=MetricSource.CSV_IMPORT, checked_at=self.checked_at, **fields
+                    site=site,
+                    source=MetricSource.CSV_IMPORT,
+                    checked_at=self.checked_at,
+                    **key,
+                    **fields,
                 )
             )
             self.report.count(table, Outcome.CREATED)

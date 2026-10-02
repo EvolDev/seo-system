@@ -1,0 +1,6 @@
+{% extends "admin/change_list.html" %}
+{% comment %}«Площадки»: над таблицей — «Домены для Ahrefs» выбранного рабочего списка (E1-10).{% endcomment %}
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if cl.ahrefs_url %}<li><a href="{{ cl.ahrefs_url }}" title="Домены списка файлами по 500 — для Ahrefs Batch Analysis">Домены для Ahrefs</a></li>{% endif %}
+{% endblock %}

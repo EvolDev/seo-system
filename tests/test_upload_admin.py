@@ -180,7 +180,7 @@ class TestSteps:
             {"kind": "collaborator_catalog", "prices_date": PRICE_DATE.isoformat(), "file": file},
         )
         upload = Upload.objects.get()
-        assert upload.seller.is_collaborator
+        assert upload.get_seller().is_collaborator
         assert response["Location"] == reverse("admin:sites_upload_summary", args=[upload.pk])
         assert upload.status == UploadStatus.CHECKED
 

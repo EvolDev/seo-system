@@ -274,6 +274,105 @@ html[data-mode="dark"] body.admin-interface .object-tools a:hover { background-c
 html[data-mode="dark"] body.admin-interface.sticky-actions #changelist .actions,
 html[data-mode="dark"] body.admin-interface.sticky-pagination.change-list #changelist .changelist-footer { border-color: var(--hairline-color) !important; }
 
+/*
+ * Кнопки — от расцветки (E1-10, просьба пользователя 02.10.2026). Главное
+ * действие («Дальше», «Записать в базу», «Найти» в фильтре диапазона) — заливка
+ * цветом кнопки сохранения расцветки; остальные («Отмена», «К загрузкам»,
+ * выбор файла, «Найти» в поиске, «Выполнить») — контурные. Форма — как у
+ * источника расцветки: у Apple и Google — «таблетки», у остальных — мягкие углы.
+ */
+body.admin-interface {
+  --seo-radius: 8px;
+  --seo-accent: var(--admin-interface-save-button-background-color, var(--button-bg));
+  --seo-accent-hover: var(--admin-interface-save-button-background-hover-color, var(--button-hover-bg));
+  --seo-on-accent: var(--admin-interface-save-button-text-color, var(--button-fg));
+  --seo-accent-text: var(--admin-interface-generic-link-color, var(--link-fg));
+}
+html[data-palette="apple-light"] body.admin-interface { --seo-radius: 980px; }
+html[data-palette="google-dark"] body.admin-interface { --seo-radius: 20px; }
+
+body.admin-interface .seo-btn,
+body.admin-interface a.seo-btn:link,
+body.admin-interface a.seo-btn:visited,
+body.admin-interface .seo-run-btn,
+body.admin-interface #changelist #toolbar form input[type="submit"],
+body.admin-interface #changelist .actions .button,
+body.admin-interface .numericrangefilter .seo-btn,
+body.admin-interface input[type="file"]::file-selector-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: auto;
+  min-height: 32px;
+  margin: 0;
+  padding: 6px 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  border-radius: var(--seo-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--seo-accent-text);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  text-transform: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+body.admin-interface input[type="file"]::file-selector-button { margin-right: 10px; }
+body.admin-interface .seo-btn:hover,
+body.admin-interface .seo-run-btn.seo-btn:hover,
+body.admin-interface #changelist #toolbar form input[type="submit"]:hover,
+body.admin-interface #changelist .actions .button:hover,
+body.admin-interface input[type="file"]::file-selector-button:hover {
+  border-color: var(--body-quiet-color);
+  background: var(--darkened-bg);
+}
+body.admin-interface .seo-btn:focus-visible,
+body.admin-interface .seo-run-btn:focus-visible {
+  outline: 2px solid var(--seo-accent);
+  outline-offset: 2px;
+}
+body.admin-interface .seo-btn:disabled,
+body.admin-interface .seo-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Главное действие — заливка. */
+body.admin-interface .seo-run-btn:not(.seo-btn),
+body.admin-interface .seo-btn.seo-btn-primary,
+body.admin-interface .numericrangefilter .seo-btn.seo-btn-primary {
+  border-color: var(--seo-accent);
+  background: var(--seo-accent);
+  color: var(--seo-on-accent);
+  font-weight: 600;
+}
+body.admin-interface .seo-run-btn:not(.seo-btn):hover,
+body.admin-interface .seo-btn.seo-btn-primary:hover {
+  border-color: var(--seo-accent-hover);
+  background: var(--seo-accent-hover);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--seo-accent) 35%, transparent);
+}
+body.admin-interface .seo-run-btn:not(.seo-btn) { min-height: 38px; padding: 8px 22px; font-size: 0.875rem; }
+
+/* Внутри таблиц, карточки и фильтров — компактнее. */
+body.admin-interface .seo-card-table .seo-btn,
+body.admin-interface .seo-decision .seo-btn,
+body.admin-interface .seo-upload-table .seo-btn,
+body.admin-interface .numericrangefilter .seo-btn,
+body.admin-interface #changelist .actions .button {
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+}
+body.admin-interface .numericrangefilter .controls { display: flex; gap: 8px; }
+body.admin-interface .submit-row .seo-btn + .seo-btn,
+body.admin-interface .submit-row .seo-run-btn + .seo-btn { margin-left: 8px; }
+
 /* Переключатель расцветки в шапке. */
 .palette-switch { display: inline-block; position: relative; margin-left: 12px; }
 .palette-switch > summary {

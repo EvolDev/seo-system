@@ -23,9 +23,11 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.sites import countries
 from apps.sites.display import delta_html, price_html, seller_mark, writing_html
 from apps.sites.models import (
     Seller,
+    SiteCountryMetric,
     Upload,
     UploadItem,
     UploadKind,
@@ -38,6 +40,7 @@ from apps.sites.uploads import filters, review, service
 from apps.sites.uploads.apply import Part
 from apps.sites.uploads.columns import FIELD_LABELS, Confidence, Field
 from config.admin import NoDeleteAdmin
+from config.assets import Css
 from config.run_id import bind_run_id, new_run_id
 
 CURRENCIES = ("USD", "EUR", "GBP", "PLN", "CZK", "UAH")
@@ -66,6 +69,15 @@ class UploadForm(forms.Form):
         initial="USD",
         required=False,
     )
+    # Только у выгрузки Ahrefs: в файле страны нет, её выбирают так же, как в Ahrefs (ADR-045).
+    country = forms.ChoiceField(
+        label="Страна выгрузки",
+        choices=lambda: [
+            ("", "Все страны"),
+            *((c.code, c.label) for c in countries.all_countries()),
+        ],
+        required=False,
+    )
     prices_date = forms.DateField(
         label="Дата цен",
         initial=lambda: timezone.localdate(),
@@ -84,6 +96,11 @@ class UploadForm(forms.Form):
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
+        if data.get("kind") == UploadKind.AHREFS_BATCH:
+            # Замер наш: продавца нет.
+            data["seller"] = None
+            return data
+        data["country"] = ""
         if data.get("kind") == UploadKind.COLLABORATOR_CATALOG:
             data["seller"] = Seller.collaborator()
             return data
@@ -105,8 +122,8 @@ class UploadAdmin(NoDeleteAdmin):
 
     list_display = (
         "file_cell",
-        "seller",
-        "prices_date",
+        "source_cell",
+        "date_cell",
         "sites_cell",
         "progress_cell",
         "status_cell",
@@ -119,7 +136,9 @@ class UploadAdmin(NoDeleteAdmin):
     list_per_page = 50
 
     class Media:
-        css: ClassVar[dict[str, tuple[str, ...]]] = {"all": ("seo/offers.css", "seo/uploads.css")}
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {
+            "all": (Css("seo/offers.css"), Css("seo/uploads.css"))
+        }
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Upload]:
         need = Count("items", filter=Q(items__needs_decision=True))
@@ -144,6 +163,20 @@ class UploadAdmin(NoDeleteAdmin):
             obj.get_kind_display(),
         )
 
+    @admin.display(description="продавец")
+    def source_cell(self, obj: Upload) -> SafeString:
+        if obj.seller is not None:
+            return format_html("{}", obj.seller.name)
+        where = countries.name(obj.country) if obj.country else "все страны"
+        flag = countries.flag_html(obj.country or countries.GLOBE)
+        return format_html('Ahrefs<div class="seo-sub">{}{}</div>', flag, where)
+
+    @admin.display(description="дата", ordering="prices_date")
+    def date_cell(self, obj: Upload) -> SafeString:
+        # У прайса и каталога — дата цен, у выгрузки Ahrefs — дата замера.
+        what = "замер" if obj.kind == UploadKind.AHREFS_BATCH else "цены"
+        return format_html('{}<div class="seo-sub">{}</div>', f"{obj.prices_date:%d.%m.%Y}", what)
+
     @admin.display(description="площадок")
     def sites_cell(self, obj: Upload) -> str:
         data = obj.result or obj.summary or {}
@@ -153,7 +186,7 @@ class UploadAdmin(NoDeleteAdmin):
     @admin.display(description="разобрано")
     def progress_cell(self, obj: Upload) -> SafeString:
         need = getattr(obj, "need", 0)
-        if obj.status != UploadStatus.DONE:
+        if obj.status != UploadStatus.DONE or obj.kind == UploadKind.AHREFS_BATCH:
             return format_html('<span class="seo-flat">{}</span>', "—")
         if not need:
             return format_html('<span class="seo-chip seo-down">{}</span>', "решать нечего")
@@ -250,29 +283,40 @@ class UploadAdmin(NoDeleteAdmin):
         form = UploadForm(request.POST or None, request.FILES or None)
         if request.method == "POST" and form.is_valid():
             data = form.cleaned_data
+            kind = UploadKind(data["kind"])
             seller = data["seller"] or data.get("seller_existing")
-            if seller is None:
+            if seller is None and kind != UploadKind.AHREFS_BATCH:
                 seller = Seller.objects.create(
                     name=data["seller_name"], currency=data.get("new_seller_currency") or "USD"
                 )
             created = service.create_upload(
                 data["file"],
-                kind=UploadKind(data["kind"]),
+                kind=kind,
                 seller=seller,
                 prices_date=data["prices_date"],
+                country=data.get("country") or None,
                 author=request.user,
             )
             upload = created.upload
             if created.duplicate:
-                messages.info(request, "Этот файл с этой датой уже загружен — открыт его разбор.")
+                opened = "итог" if kind == UploadKind.AHREFS_BATCH else "разбор"
+                messages.info(
+                    request, f"Этот файл с этой датой уже загружен — открыт его {opened}."
+                )
                 return HttpResponseRedirect(_step_url(upload))
             if upload.status == UploadStatus.NEW and not service.needs_questions(upload):
                 # Каталог и знакомый прайс — без вопросов, сразу проверка.
                 _start_check(upload)
             return HttpResponseRedirect(_step_url(upload))
+        used = set(SiteCountryMetric.objects.values_list("country", flat=True).distinct())
         context = {
             **self._context(request, "Новая загрузка", step=1),
             "form": form,
+            "chosen_country": str(form["country"].value() or ""),
+            # Страны, под которые уже грузили выгрузки, — первыми: чаще всего нужны они.
+            "used_countries": [c for c in countries.all_countries() if c.code in used],
+            "countries": countries.all_countries(),
+            "globe": countries.GLOBE,
         }
         return TemplateResponse(request, "admin/sites/upload/new.html", context)
 
@@ -280,7 +324,7 @@ class UploadAdmin(NoDeleteAdmin):
         upload = get_object_or_404(Upload.objects.select_related("seller"), pk=upload_id)
         if not self.has_add_permission(request):
             return HttpResponse(status=403)
-        if upload.kind == UploadKind.COLLABORATOR_CATALOG or upload.status not in (
+        if upload.kind != UploadKind.PRICE_LIST or upload.status not in (
             UploadStatus.NEW,
             UploadStatus.CHECKED,
             UploadStatus.FAILED,
@@ -322,6 +366,8 @@ class UploadAdmin(NoDeleteAdmin):
     def summary_view(self, request: HttpRequest, upload_id: int) -> HttpResponse:
         upload = get_object_or_404(Upload.objects.select_related("seller"), pk=upload_id)
         catalog_kind = upload.kind == UploadKind.COLLABORATOR_CATALOG
+        if upload.kind == UploadKind.AHREFS_BATCH:
+            return self._ahrefs_summary(request, upload)
         if upload.status == UploadStatus.DONE and not catalog_kind:
             return HttpResponseRedirect(_url("review", upload))
         if upload.status == UploadStatus.NEW:
@@ -332,13 +378,39 @@ class UploadAdmin(NoDeleteAdmin):
             "summary": upload.summary or {},
             "issues": service.issues(upload),
             "busy": busy,
-            "list_name": f"{upload.seller.name} · {upload.prices_date:%d.%m.%Y}",
+            "list_name": f"{upload.source_name} · {upload.prices_date:%d.%m.%Y}",
         }
         if catalog_kind and not busy and upload.status != UploadStatus.FAILED:
             context.update(_catalog_context(upload))
             context["title"] = "Каталог Collaborator: что записать"
             return TemplateResponse(request, "admin/sites/upload/catalog.html", context)
         return TemplateResponse(request, "admin/sites/upload/summary.html", context)
+
+    def _ahrefs_summary(self, request: HttpRequest, upload: Upload) -> HttpResponse:
+        """Выгрузка Ahrefs: сводка до записи, а после — итог. Разбора нет: решать нечего."""
+        if upload.status == UploadStatus.NEW:
+            # Проверка не запустилась (сбой при отправке) — запускаем сейчас.
+            _start_check(upload)
+        done = upload.status == UploadStatus.DONE
+        country = countries.get(upload.country)
+        regions = reverse("admin:sites_productsitelatest_changelist")
+        context = {
+            **self._context(
+                request,
+                "Записано" if done else "Сводка до записи",
+                step=3 if done else 2,
+                upload=upload,
+            ),
+            "steps": ["Файл", "Сводка до записи", "Записано"],
+            "summary": upload.summary or {},
+            "result": upload.result or {},
+            "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
+            "done": done,
+            "country": country,
+            "country_flag": countries.flag_html(country.code) if country else "",
+            "sites_url": f"{regions}?region={country.code}" if country else regions,
+        }
+        return TemplateResponse(request, "admin/sites/upload/ahrefs.html", context)
 
     def write_view(self, request: HttpRequest, upload_id: int) -> HttpResponse:
         """Запуск записи. Из страницы — JSON (без перезагрузки), без скрипта — переход."""
@@ -425,7 +497,7 @@ class UploadAdmin(NoDeleteAdmin):
         context = {
             **self._context(
                 request,
-                f"Разбор: {upload.seller.name} · {upload.prices_date:%d.%m.%Y}",
+                f"Разбор: {upload.source_name} · {upload.prices_date:%d.%m.%Y}",
                 step=4,
                 upload=upload,
             ),

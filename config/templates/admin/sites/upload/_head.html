@@ -1,5 +1,7 @@
-{% load static %}
-<link rel="stylesheet" href="{% static 'seo/offers.css' %}">
-<link rel="stylesheet" href="{% static 'seo/uploads.css' %}">
-<script src="{% static 'seo/site-card.js' %}" defer></script>
-<script src="{% static 'seo/uploads.js' %}" defer></script>
+{% load seo_assets %}
+<link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/uploads.css' %}">
+<link rel="stylesheet" href="{% asset 'flags/sprite-hq.css' %}">
+<script src="{% asset 'seo/site-card.js' %}" defer></script>
+<script src="{% asset 'seo/country-picker.js' %}" defer></script>
+<script src="{% asset 'seo/uploads.js' %}" defer></script>

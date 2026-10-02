@@ -26,6 +26,7 @@ from apps.sites.models import (
     Seller,
     Site,
     SiteAudit,
+    SiteCountryMetric,
     SiteList,
     SiteListItem,
     SiteMetric,
@@ -413,6 +414,42 @@ class TestRepeatedImport:
         assert list(SiteMetric.objects.values_list("dr", flat=True)) == [41]
         run(make_workbook(base=[("a.com", {"DR": 42})], name="3.xlsx"), as_of=dt.date(2026, 10, 27))
         assert set(SiteMetric.objects.values_list("dr", flat=True)) == {41, 42}
+
+    def test_us_traffic_is_country_snapshot(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        # US Traff — трафик США у каждой площадки, не топ-регион (ADR-045).
+        row = {"DR": 40, "Top Geo": "in", "Top Geo Traff": 900, "US Traff": 120}
+        run(make_workbook(base=[("a.com", row)], name="1.xlsx"))
+        us = SiteCountryMetric.objects.get(site__domain="a.com")
+        assert (us.country, us.organic_traffic, us.total_keywords) == ("us", 120, None)
+        assert us.source == "csv_import"
+        metric = SiteMetric.objects.get(site__domain="a.com")
+        assert us.checked_at == metric.checked_at
+        assert (metric.top_geo, metric.top_geo_traffic) == ("in", 900)
+        run(make_workbook(base=[("a.com", {**row, "US Traff": 130})], name="2.xlsx"))
+        assert list(SiteCountryMetric.objects.values_list("organic_traffic", flat=True)) == [130]
+        run(
+            make_workbook(base=[("a.com", {**row, "US Traff": 140})], name="3.xlsx"),
+            as_of=dt.date(2026, 10, 27),
+        )
+        assert set(SiteCountryMetric.objects.values_list("organic_traffic", flat=True)) == {
+            130,
+            140,
+        }
+
+    def test_no_us_traffic_no_country_snapshot(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        report = run(make_workbook(base=[("a.com", {"DR": 40, "US Traff": None})]))
+        assert SiteCountryMetric.objects.count() == 0
+        assert report.counts["site_country_metrics"][Outcome.SKIPPED] == 1
 
     def test_position_same_date_updated(
         self,

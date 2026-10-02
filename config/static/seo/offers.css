@@ -121,20 +121,7 @@ html.seo-card-open { overflow: hidden; }
 .seo-card-table td, .seo-card-table th { vertical-align: middle; }
 .seo-card-table tr.seo-working td { background: var(--seo-down-bg); }
 .seo-card-table form { margin: 0; }
-.seo-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--border-color, #ccc);
-  border-radius: 4px;
-  background: var(--body-bg, #fff);
-  color: var(--body-fg, #333);
-  font-size: 0.75rem;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.seo-btn:hover { background: var(--darkened-bg, #f0f0f0); }
-.seo-btn:disabled { opacity: 0.6; cursor: progress; }
-.seo-btn-primary { background: var(--button-bg, #2a65a8); border-color: var(--button-bg, #2a65a8); color: var(--button-fg, #fff); }
-.seo-btn-primary:hover { background: var(--button-hover-bg, #245a96); }
+/* Кнопки (.seo-btn, .seo-btn-primary, .seo-run-btn) — в seo/admin-palettes.css: цвета и форма — от расцветки. */
 .seo-inline-form { margin-top: 8px; }
 .seo-kv { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.8125rem; }
 .seo-extra + .seo-extra { margin-top: 8px; }
@@ -143,3 +130,60 @@ html.seo-card-open { overflow: hidden; }
 .seo-notes-list { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .seo-notes-list li { list-style: none; padding: 0; }
 .seo-notes-list .seo-sub { display: block; }
+
+/* Флаг страны 16×11 — кусок общей картинки django-countries (flags/sprite-hq.css):
+   эмодзи-флаги Windows не рисует (ADR-045). */
+.seo-flag {
+  display: inline-block; flex: none; width: 16px; height: 11px; margin-right: 6px; vertical-align: -1px;
+  border-radius: 2px; box-shadow: 0 0 0 1px rgb(0 0 0 / 14%);
+}
+.seo-flag-globe { background: url("globe.svg") center / contain no-repeat; box-shadow: none; }
+.seo-geo { white-space: nowrap; }
+
+/* Выбор страны с флагами и поиском поверх <select> (seo/country-picker.js). */
+.seo-country { position: relative; display: inline-block; width: 24rem; max-width: 100%; vertical-align: top; }
+.seo-country-field {
+  display: flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 8px 0 10px; box-sizing: border-box;
+  border: 1px solid var(--border-color, #ccc); border-radius: 8px; background: var(--body-bg, #fff);
+  transition: border-color .15s, box-shadow .15s;
+}
+.seo-country-field:focus-within {
+  border-color: var(--seo-accent, var(--link-fg, #2a65a8));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--seo-accent, #2a65a8) 22%, transparent);
+}
+.seo-country-flag { display: none; line-height: 0; }
+.seo-has-flag .seo-country-flag { display: inline-block; }
+.seo-country-flag .seo-flag { margin-right: 4px; }
+input.seo-country-input,
+body.admin-interface input.seo-country-input {
+  flex: 1; min-width: 0; width: auto !important; height: 34px; padding: 0 4px !important; margin: 0;
+  border: 0 !important; outline: none; background: transparent !important; box-shadow: none !important;
+  color: var(--body-fg, #333); font: inherit; font-weight: 500;
+}
+.seo-country-arrow {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6px; cursor: pointer;
+}
+.seo-country-arrow::before {
+  content: ""; width: 6px; height: 6px; margin-top: -3px; transform: rotate(45deg);
+  border: solid var(--body-quiet-color, #888); border-width: 0 1.5px 1.5px 0;
+}
+.seo-country-arrow:hover { background-color: var(--darkened-bg, #f0f0f0); }
+.seo-country-list {
+  position: absolute; left: 0; right: 0; z-index: 30; margin: 4px 0 0; padding: 4px; max-height: 300px;
+  overflow-x: hidden; overflow-y: auto;
+  list-style: none; background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #ddd); border-radius: 10px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 22%); outline: none; text-align: left;
+}
+.seo-country-list li {
+  display: flex; align-items: center; list-style: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  color: var(--body-fg, #333); font-size: 0.8125rem; line-height: 1.3; white-space: normal;
+}
+.seo-country-list li.seo-no-flag { padding-left: 32px; }
+.seo-country-list li .seo-sub { margin-left: 4px; }
+.seo-country-list li:hover,
+.seo-country-list li.seo-active { background: var(--darkened-bg, #f0f2f5); }
+.seo-country-list li.seo-chosen { font-weight: 600; color: var(--seo-accent-text, var(--link-fg, #2a65a8)); }
+.seo-country-list li.seo-country-none { cursor: default; padding-left: 10px; }
+/* В колонке фильтров — во всю ширину, как выпадающие фильтры темы. */
+#changelist-filter .seo-region-filter .seo-country { display: block; width: auto; margin: 0 0 4px; }

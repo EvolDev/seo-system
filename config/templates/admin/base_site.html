@@ -6,12 +6,12 @@
 этим именем — сначала наш (TEMPLATES["DIRS"]), затем тему, — поэтому extends
 продолжает её шаблон, а не этот же. Расцветки — config/static/seo/admin-palettes.css.
 {% endcomment %}
-{% load static %}
+{% load static seo_assets %}
 
 {% block title %}{% if title %}{{ title }} | {% endif %}SEO-система{% endblock %}
 
 {% block extrastyle %}{{ block.super }}
-<link rel="stylesheet" href="{% static 'seo/admin-palettes.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/admin-palettes.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}
