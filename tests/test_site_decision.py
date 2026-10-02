@@ -56,15 +56,15 @@ def test_without_window_opens_full_form(admin_client: Client, row: ProductSite) 
 def test_save_status_and_reason(admin_client: Client, row: ProductSite) -> None:
     response = admin_client.post(
         _url(row),
-        {"status": SiteStatus.REJECTED, "reject_reason": "Nofollow"},
+        {"status": SiteStatus.DISCARDED, "reject_reason": "Nofollow"},
         headers=PARTIAL,
     )
     assert response.json() == {
         "saved": True,
-        "message": "coingabbar.com · Convertio — Отклонена",
+        "message": "coingabbar.com · Convertio — Отбрасываю",
     }
     row.refresh_from_db()
-    assert row.status == SiteStatus.REJECTED
+    assert row.status == SiteStatus.DISCARDED
     assert row.reject_reason == "Nofollow"
     # Решение принято — пометка «без решения» снята; причина — в истории заметок.
     assert not row.imported_undecided

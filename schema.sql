@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.10 от 02.10.2026 — статусы площадки: просмотрено, заявка отправлена, отбрасываю, отказала площадка (ADR-047)
 -- Версия 1.9 от 02.10.2026 — выгрузки Ahrefs Batch Analysis, трафик по странам (ADR-045)
 -- Версия 1.8 от 01.10.2026 — загрузка файлов продавцов и каталога Collaborator (ADR-044)
 -- Версия 1.7 от 01.10.2026 — продавцы, рабочая цена площадки, заметки, курсы валют (ADR-043)
@@ -31,8 +32,10 @@ CREATE TABLE auth_user (
 
 -- ---------- Перечисления ----------
 
+-- Порядок — как в окне статуса: путь в работу, отказы, аудит; по нему сортирует
+-- колонка «статус». Как статус движется сам — apps/sites/statuses.py (ADR-047).
 CREATE TYPE site_status AS ENUM
-    ('new','auditing','approved','rejected','placed','blacklisted');
+    ('new','viewed','approved','ordered','placed','discarded','declined','blacklisted','auditing');
 CREATE TYPE metric_source AS ENUM
     ('ahrefs_api','serp_api','manual','csv_import','collaborator_api','ahrefs_batch');
 CREATE TYPE audit_verdict AS ENUM ('yes','no','borderline');

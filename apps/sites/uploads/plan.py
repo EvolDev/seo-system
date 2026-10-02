@@ -12,8 +12,9 @@
 - другой продавец или другая услуга — ждёт решения. Не ждёт, если этот
   продавец уже присылал цену, её разобрали, и она изменилась не больше
   порога `OFFER_RECHECK`;
-- площадку отклоняли — то, что ждёт решения, попадает во вкладку
-  «Отклоняли»: сначала посмотреть причину.
+- площадку отклоняли («Отбрасываю», «Отказала площадка», чёрный список) —
+  то, что ждёт решения, попадает во вкладку «Отклоняли»: сначала посмотреть
+  причину.
 """
 
 import datetime as dt
@@ -39,11 +40,18 @@ from apps.sites.uploads.records import Parsed, Record
 
 # Заявка в работе — цена договорённая, рабочая сама не меняется.
 ORDER_IN_WORK = (PlacementStatus.ORDERED, PlacementStatus.WRITING, PlacementStatus.REVIEW)
-REJECTED_STATUSES = (SiteStatus.REJECTED, SiteStatus.BLACKLISTED)
+# Вкладка «Отклоняли»: отказались мы, отказала площадка или чёрный список (ADR-047).
+REJECTED_STATUSES = (SiteStatus.DISCARDED, SiteStatus.DECLINED, SiteStatus.BLACKLISTED)
 # Длинные списки сводки обрезаются: каталог — 45 000 строк.
 LIST_LIMIT = 300
 # Запросы с доменами и id — пачками, чтобы не собирать один запрос на 45 000 значений.
 CHUNK = 5000
+
+
+def refusal_text(row: ProductSite) -> str:
+    """Отказ по продукту одной строкой: «Convertio: Отбрасываю — Nofollow»."""
+    text = f"{row.product.name}: {row.get_status_display()}"
+    return f"{text} — {row.reject_reason}" if row.reject_reason else text
 
 
 @dataclass(frozen=True)
@@ -62,7 +70,7 @@ class SiteState:
     id: int
     domain: str
     working: OfferState | None = None
-    rejected: list[str] = field(default_factory=list)  # «Convertio: Nofollow, отбрасываем»
+    rejected: list[str] = field(default_factory=list)  # «Convertio: Отбрасываю — Nofollow»
     frozen: bool = False
     prev: dict[str, OfferState] = field(default_factory=dict)  # этого продавца, до даты цен
 
@@ -327,8 +335,7 @@ def load_state(
             .order_by("product__name")
         )
         for row in rejected:
-            reason = row.reject_reason or SiteStatus(row.status).label
-            by_id[row.site_id].rejected.append(f"{row.product.name}: {reason}")
+            by_id[row.site_id].rejected.append(refusal_text(row))
         frozen = Placement.objects.filter(site_id__in=chunk, status__in=ORDER_IN_WORK)
         for site_id in frozen.values_list("site_id", flat=True).distinct():
             by_id[site_id].frozen = True

@@ -53,7 +53,7 @@ from apps.sites.models import (
     UploadItem,
 )
 from apps.sites.rates import latest_rates, to_eur_cents
-from apps.sites.uploads.plan import REJECTED_STATUSES
+from apps.sites.uploads.plan import REJECTED_STATUSES, refusal_text
 from apps.sites.uploads.plan import blocked_ids as plan_blocked_ids
 
 PAGE_SIZE = 100
@@ -82,8 +82,8 @@ TAB_NOTES: dict[str, str] = {
         "если она есть. Площадки добавлены в рабочий список загрузки."
     ),
     ReviewGroup.REJECTED: (
-        "Площадки, которые мы уже отклоняли. Цена записана, рабочую можно сменить, но сначала "
-        "посмотрите причину."
+        "Площадки, от которых мы отказывались, которые отказали нам или в чёрном списке. Цена "
+        "записана, рабочую можно сменить, но сначала посмотрите причину."
     ),
     ReviewGroup.PRICIER: "Другой продавец предлагает дороже рабочей цены. Обычно — «Оставить».",
     ReviewGroup.OTHER_SERVICE: (
@@ -486,8 +486,7 @@ def _rejected(site_ids: Sequence[int]) -> dict[int, list[str]]:
     )
     result: dict[int, list[str]] = {}
     for row in rows:
-        reason = row.reject_reason or row.get_status_display()
-        result.setdefault(row.site_id, []).append(f"{row.product.name}: {reason}")
+        result.setdefault(row.site_id, []).append(refusal_text(row))
     return result
 
 

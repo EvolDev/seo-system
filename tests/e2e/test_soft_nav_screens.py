@@ -199,12 +199,15 @@ def test_status_window_on_sites_list(
     expect(window).not_to_be_visible()
 
     # Выбрали статус, сохранили — окно закрылось, строка показывает новый статус.
+    # Статусы в окне — в согласованном порядке (E1-12).
     status.click()
-    window.locator("select[name=status]").select_option(label="Одобрена")
+    options = window.locator("select[name=status] option")
+    expect(options).to_have_text([choice.label for choice in SiteStatus])
+    window.locator("select[name=status]").select_option(label="Отбрасываю")
     with soft_load(page):
         window.locator("button[type=submit]").click()
     expect(window).not_to_be_visible()
-    expect(page.locator("#result_list a[data-decision]")).to_have_text("Одобрена")
-    expect(page.locator(".seo-toast-success")).to_contain_text("known.com · Convertio — Одобрена")
-    assert ProductSite.objects.get(site=known).status == SiteStatus.APPROVED
+    expect(page.locator("#result_list a[data-decision]")).to_have_text("Отбрасываю")
+    expect(page.locator(".seo-toast-success")).to_contain_text("known.com · Convertio — Отбрасываю")
+    assert ProductSite.objects.get(site=known).status == SiteStatus.DISCARDED
     assert same_document(page)

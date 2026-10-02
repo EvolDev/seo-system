@@ -229,7 +229,6 @@ class TestProductSiteLatest:
     def test_status_audit_and_placements_of_this_product(
         self, site: Site, convertio: Product, clideo: Product
     ) -> None:
-        ProductSite.objects.filter(site=site, product=convertio).update(status=SiteStatus.APPROVED)
         SiteAudit.objects.create(
             site=site,
             product=convertio,
@@ -255,6 +254,9 @@ class TestProductSiteLatest:
         _placement(site, convertio, PlacementStatus.PUBLISHED)
         _placement(site, convertio, PlacementStatus.ORDERED)
         _placement(site, clideo, PlacementStatus.PUBLISHED)
+        # Статус — тот, что в решении по продукту, даже если человек поставил его
+        # руками после публикации (сама публикация ставит «Размещались»).
+        ProductSite.objects.filter(site=site, product=convertio).update(status=SiteStatus.APPROVED)
 
         row = self._row(site, convertio)
         assert row["status"] == SiteStatus.APPROVED

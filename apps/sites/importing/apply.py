@@ -26,7 +26,13 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.keywords.models import Keyword, KeywordPosition
-from apps.placements.models import Placement, PlacementLink, PlacementStatus
+from apps.placements.models import (
+    SITE_STATUS_BY_PLACEMENT,
+    Placement,
+    PlacementLink,
+    PlacementStatus,
+)
+from apps.sites import statuses
 from apps.sites.importing import values
 from apps.sites.importing.report import Outcome, Report, Section
 from apps.sites.importing.rows import CopyRow, KeywordData, Link, PlacementData, SiteData
@@ -57,9 +63,6 @@ POSITIONS_COUNTRY = "US"
 # US Traff — страна снимка трафика по странам, код строчными, как у Ahrefs (маппинг §1.3).
 US = "us"
 
-# Статус площадки по продукту импорт меняет, только если он «Новая» или
-# вперёд по этой цепочке. Отклонённую, чёрный список, аудит не трогает.
-SITE_LADDER = (SiteStatus.NEW, SiteStatus.APPROVED, SiteStatus.PLACED)
 # Статус размещения — только вперёд. Отклонённое и отменённое не трогает.
 PLACEMENT_LADDER = (
     PlacementStatus.PLANNED,
@@ -295,14 +298,16 @@ class Importer:
                 priced,
             )
             self._note(site, data, known_notes, new_notes)
-            self._import_placement(site, data, placements[(site.pk, self.convertio.pk)], keywords)
+            fact = self._import_placement(
+                site, data, placements[(site.pk, self.convertio.pk)], keywords
+            )
             convertio_row = product_sites[(site.pk, self.convertio.pk)]
             status, reason = self._convertio_decision(data)
             if status is None:
                 if is_new:
                     undecided.append(convertio_row.pk)
             else:
-                self._decide(convertio_row, status, reason, f"{data.where}, Convertio")
+                self._decide(convertio_row, status, reason, f"{data.where}, Convertio", fact=fact)
             self._import_clideo(
                 site,
                 data,
@@ -494,26 +499,42 @@ class Importer:
                     f"{data.where}: в таблице и размещение, и отказ «{reason}» — "
                     "применено размещение",
                 )
-            if data.placement.status == PlacementStatus.PUBLISHED:
-                return SiteStatus.PLACED, None
-            return SiteStatus.APPROVED, None
+            # Заявка — «Заявка отправлена», публикация — «Размещались», как у
+            # размещения в админке; запланированное — «Одобрена».
+            return SITE_STATUS_BY_PLACEMENT.get(data.placement.status, SiteStatus.APPROVED), None
         if reason:
-            return SiteStatus.REJECTED, reason
+            return SiteStatus.DISCARDED, reason
         return None, None
 
-    def _decide(self, row: ProductSite, status: SiteStatus, reason: str | None, where: str) -> None:
+    def _decide(
+        self,
+        row: ProductSite,
+        status: SiteStatus,
+        reason: str | None,
+        where: str,
+        *,
+        fact: bool = False,
+    ) -> None:
+        """Решение из таблицы — по тем же правилам, что у системы (`statuses`).
+
+        `fact` — размещение, из которого взято решение, этот импорт создал или
+        продвинул: `Placement.save()` уже подвинул статус в базе, здесь то же
+        правило даёт тот же статус строке в памяти и отчёту. Та же заявка при
+        повторном импорте — не новый факт: отказ, поставленный человеком после
+        неё, остаётся, расхождение — в отчёт.
+        """
         changed: list[str] = []
         current = row.status
         if current == status:
             if reason:
                 self._fill(row, "reject_reason", reason, where, Section.DECISION_CONFLICTS, changed)
-        elif current == SiteStatus.NEW or _ahead(current, status, SITE_LADDER):
+        elif current in statuses.replaceable(status, fact=fact):
             row.status = status
             changed.append("status")
             if reason:
                 row.reject_reason = reason
                 changed.append("reject_reason")
-        elif not _ahead(status, current, SITE_LADDER):
+        elif not _ahead(status, current, statuses.LADDER):
             # База не просто впереди по цепочке, а решила иначе: не трогаем.
             self.report.issue(
                 Section.DECISION_CONFLICTS,
@@ -530,10 +551,12 @@ class Importer:
         data: SiteData,
         candidates: list[Placement],
         keywords: dict[str, Keyword],
-    ) -> None:
+    ) -> bool:
+        """Размещение из строки таблицы. True — новый факт: размещение создано
+        или его статус продвинут."""
         wanted = data.placement
         if wanted is None:
-            return
+            return False
         placement, ambiguous = _match_placement(candidates, wanted.article_url)
         if ambiguous:
             self.report.issue(
@@ -541,8 +564,9 @@ class Importer:
                 f"{data.where}: у площадки несколько размещений Convertio без адреса "
                 "статьи — какое обновлять, неясно, не тронуто",
             )
-            return
+            return False
         existing_links: dict[int | None, PlacementLink] = {}
+        moved = True
         if placement is None:
             placement = Placement.objects.create(
                 site=site,
@@ -557,12 +581,14 @@ class Importer:
             candidates.append(placement)
             self.report.count("placements", Outcome.CREATED)
         else:
-            self._update_placement(placement, wanted, data.where)
+            moved = self._update_placement(placement, wanted, data.where)
             existing_links = {link.link_index: link for link in placement.links.all()}
         for link in wanted.links:
             self._import_link(placement, link, existing_links.get(link.index), keywords, data.where)
+        return moved
 
-    def _update_placement(self, placement: Placement, wanted: PlacementData, where: str) -> None:
+    def _update_placement(self, placement: Placement, wanted: PlacementData, where: str) -> bool:
+        """Дополнить размещение из таблицы. True — статус продвинут."""
         changed: list[str] = []
         current = placement.status
         if _ahead(current, wanted.status, PLACEMENT_LADDER):
@@ -603,6 +629,7 @@ class Importer:
                 changed,
             )
         self._save(placement, changed, "placements")
+        return "status" in changed
 
     def _import_link(
         self,
@@ -663,9 +690,8 @@ class Importer:
         if not values.is_url_on_domain(url, site.domain):
             self.report.issue(Section.CLIDEO_BAD, f"{data.where}: {url}")
             return
-        if any(placement.article_url == url for placement in candidates):
-            self.report.count("placements", Outcome.UNCHANGED)
-        else:
+        fact = not any(placement.article_url == url for placement in candidates)
+        if fact:
             candidates.append(
                 Placement.objects.create(
                     site=site,
@@ -675,7 +701,9 @@ class Importer:
                 )
             )
             self.report.count("placements", Outcome.CREATED)
-        self._decide(product_site, SiteStatus.PLACED, None, f"{data.where}, Clideo")
+        else:
+            self.report.count("placements", Outcome.UNCHANGED)
+        self._decide(product_site, SiteStatus.PLACED, None, f"{data.where}, Clideo", fact=fact)
 
     # --- Сверки после записи ---
 

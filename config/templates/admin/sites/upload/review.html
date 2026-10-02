@@ -77,7 +77,7 @@ price-review.html. Вкладки — ссылки; решения в строк
               <a href="{{ r.card_url }}" data-site-card data-open>{{ r.domain }}</a>
               {% if r.item.site_created %}<span class="seo-chip seo-info">новая в базе</span>{% endif %}
               {% if r.item.source_value %}<span class="seo-chip" title="В файле: {{ r.item.source_value }}">из адреса</span>{% endif %}
-              {% for reason in r.row.rejected %}<div class="seo-warnline">Отклонена — {{ reason }}</div>{% endfor %}
+              {% for reason in r.row.rejected %}<div class="seo-warnline">{{ reason }}</div>{% endfor %}
             </td>
             <td class="seo-r">{{ r.row.dr|default_if_none:"" }}{{ r.metrics_mark }}<div class="seo-sub">{{ r.row.traffic|default_if_none:"" }}</div></td>
             <td>{{ r.service }}</td>

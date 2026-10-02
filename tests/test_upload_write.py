@@ -100,7 +100,7 @@ def base(convertio: Product, collaborator: Seller, linkhub: Seller) -> dict[str,
     known = _site_with_price("known.com", collaborator, 20000)
     rejected = _site_with_price("rejected.com", collaborator, 15000)
     ProductSite.objects.filter(site=rejected, product=convertio).update(
-        status=SiteStatus.REJECTED, reject_reason="Nofollow, отбрасываем"
+        status=SiteStatus.DISCARDED, reject_reason="Nofollow, отбрасываем"
     )
     ordered = _site_with_price("ordered.com", linkhub, 30000, "USD")
     Placement.objects.create(site=ordered, product=convertio, status=PlacementStatus.ORDERED)
@@ -160,7 +160,7 @@ class TestFlow:
         assert summary["changed_up"] == 1
         assert summary["needs_decision"] == 3
         assert summary["rejected"] == [
-            {"domain": "rejected.com", "reasons": ["Convertio: Nofollow, отбрасываем"]}
+            {"domain": "rejected.com", "reasons": ["Convertio: Отбрасываю — Nofollow, отбрасываем"]}
         ]
         assert summary["duplicates"] == [
             {"domain": "dup.com", "lines": [7, 8], "prices": ["публикация 180", "публикация 150"]}

@@ -23,12 +23,22 @@ from config.db import PgEnumField, PgNow
 
 
 class SiteStatus(models.TextChoices):
+    """Статус площадки у продукта (ADR-047).
+
+    Порядок — как в окне статуса и в фильтре: путь площадки в работу, потом
+    отказы, последним — аудит. В типе Postgres значения в том же порядке,
+    по нему сортирует колонка «статус». Как статус движется сам — `statuses`.
+    """
+
     NEW = "new", "Новая"
-    AUDITING = "auditing", "На аудите"
+    VIEWED = "viewed", "Просмотрено"
     APPROVED = "approved", "Одобрена"
-    REJECTED = "rejected", "Отклонена"
+    ORDERED = "ordered", "Заявка отправлена"
     PLACED = "placed", "Размещались"
+    DISCARDED = "discarded", "Отбрасываю"
+    DECLINED = "declined", "Отказала площадка"
     BLACKLISTED = "blacklisted", "Чёрный список"
+    AUDITING = "auditing", "На аудите"
 
 
 class MetricSource(models.TextChoices):

@@ -94,10 +94,10 @@ class TestProductAndList:
         self, admin_client: Client, convertio: Product, clideo: Product
     ) -> None:
         site = _site("a.com")
-        _status(site, clideo, SiteStatus.REJECTED)
+        _status(site, clideo, SiteStatus.DISCARDED)
         response = admin_client.get(URL, {"list": "all", "product": str(clideo.pk)})
         [row] = response.context["cl"].result_list
-        assert row.status == SiteStatus.REJECTED
+        assert row.status == SiteStatus.DISCARDED
 
     def test_default_list_is_newest(self, admin_client: Client, convertio: Product) -> None:
         old, new = SiteList.objects.create(name="Август"), SiteList.objects.create(name="Сентябрь")
@@ -126,7 +126,7 @@ class TestWorked:
     @pytest.fixture
     def sites(self, convertio: Product, clideo: Product) -> None:
         _site("fresh.com")
-        _status(_site("decided.com"), convertio, SiteStatus.REJECTED)
+        _status(_site("decided.com"), convertio, SiteStatus.DISCARDED)
         SiteAudit.objects.create(
             site=_site("audited.com"),
             product=convertio,

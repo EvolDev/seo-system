@@ -129,9 +129,9 @@ class TestFirstImport:
         run(book)
         expected = {
             "a.com": SiteStatus.PLACED,
-            "b.com": SiteStatus.APPROVED,
+            "b.com": SiteStatus.ORDERED,
             "c.com": SiteStatus.APPROVED,
-            "d.com": SiteStatus.REJECTED,
+            "d.com": SiteStatus.DISCARDED,
             "e.com": SiteStatus.NEW,
             "f.com": SiteStatus.NEW,
             "g.com": SiteStatus.NEW,
@@ -335,14 +335,51 @@ class TestRepeatedImport:
         book = make_workbook(base=[("b.com", ORDERED)], keywords=KEYWORDS)
         run(book)
         row = _status("b.com", convertio)
-        row.status = SiteStatus.REJECTED
+        row.status = SiteStatus.DECLINED
         row.reject_reason = "отказали в админке"
         row.save()
         report = run(book)
         row.refresh_from_db()
-        assert row.status == SiteStatus.REJECTED
+        assert row.status == SiteStatus.DECLINED
         assert report.issues[Section.DECISION_CONFLICTS] == [
-            "b.com (строка 2), Convertio: в таблице «Одобрена», в базе «Отклонена» — не тронуто"
+            "b.com (строка 2), Convertio: в таблице «Заявка отправлена», "
+            "в базе «Отказала площадка» — не тронуто"
+        ]
+
+    def test_new_order_overrides_earlier_refusal(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        # Отказ стоял до заявки: заявка, впервые пришедшая из таблицы, — новый
+        # факт, как и заявка, заведённая в админке (ADR-047).
+        convertio, _ = products
+        Site.objects.create(domain="b.com")
+        ProductSite.objects.filter(site__domain="b.com", product=convertio).update(
+            status=SiteStatus.DISCARDED, reject_reason="дорого, отбрасываем"
+        )
+        report = run(make_workbook(base=[("b.com", ORDERED)], keywords=KEYWORDS))
+        row = _status("b.com", convertio)
+        assert (row.status, row.reject_reason) == (SiteStatus.ORDERED, "дорого, отбрасываем")
+        assert Section.DECISION_CONFLICTS not in report.issues
+
+    def test_blacklist_is_kept_with_new_order(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        convertio, _ = products
+        Site.objects.create(domain="b.com")
+        ProductSite.objects.filter(site__domain="b.com", product=convertio).update(
+            status=SiteStatus.BLACKLISTED
+        )
+        report = run(make_workbook(base=[("b.com", ORDERED)], keywords=KEYWORDS))
+        assert _status("b.com", convertio).status == SiteStatus.BLACKLISTED
+        assert report.issues[Section.DECISION_CONFLICTS] == [
+            "b.com (строка 2), Convertio: в таблице «Заявка отправлена», в базе «Чёрный список» "
+            "— не тронуто"
         ]
 
     def test_placement_moves_forward_only(

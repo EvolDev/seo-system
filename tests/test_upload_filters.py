@@ -21,7 +21,6 @@ from apps.sites.models import (
     SiteListItem,
     SiteMetric,
     SitePrice,
-    SiteStatus,
     Upload,
     UploadKind,
     UploadStatus,
@@ -29,7 +28,7 @@ from apps.sites.models import (
 from apps.sites.tasks import upload_check, upload_write
 from apps.sites.uploads import catalog, filters, service
 from apps.sites.uploads.files import read_table
-from apps.sites.uploads.plan import start_of_day
+from apps.sites.uploads.plan import REJECTED_STATUSES, start_of_day
 
 PRICE_DATE = dt.date(2026, 10, 1)
 HEADERS = [*catalog.REQUIRED, "Country", "Monthly Traffic"]
@@ -265,7 +264,7 @@ class TestRuns:
         upload = _run(upload, "new", ["prices", "metrics", "card"], spec)
         assert set(Site.objects.values_list("domain", flat=True)) == {"known.com", "usa-strong.com"}
         # Не подошедшие не записаны и не отклонены — их просто нет.
-        assert not ProductSite.objects.filter(status=SiteStatus.REJECTED).exists()
+        assert not ProductSite.objects.filter(status__in=REJECTED_STATUSES).exists()
         assert upload.summary is not None
         assert upload.summary["new"] == len(ROWS) - 2  # сводка после записи
 

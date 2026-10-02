@@ -10,16 +10,17 @@
 """
 
 import datetime as dt
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
 from apps.keywords.models import AnchorType
+from apps.sites import statuses
 
 # Формат размещения — колонка «Тип ссылки» Excel; общий с ценами площадки (ADR-043).
-from apps.sites.models import PlacementType
+from apps.sites.models import PlacementType, SiteStatus
 from config.db import PgEnumField, PgNow
 from config.run_id import current_run_id
 
@@ -32,6 +33,18 @@ class PlacementStatus(models.TextChoices):
     PUBLISHED = "published", "Опубликовано"
     REJECTED = "rejected", "Отклонено"
     CANCELLED = "cancelled", "Отменено"
+
+
+# Какой статус площадки у продукта ставит статус размещения (ADR-047): заявка в
+# работе — «Заявка отправлена», публикация — «Размещались». Остальные не ставят.
+SITE_STATUS_BY_PLACEMENT: dict[str, SiteStatus] = {
+    PlacementStatus.ORDERED: SiteStatus.ORDERED,
+    PlacementStatus.WRITING: SiteStatus.ORDERED,
+    PlacementStatus.REVIEW: SiteStatus.ORDERED,
+    PlacementStatus.PUBLISHED: SiteStatus.PLACED,
+}
+# Поля, от которых зависит статус площадки; в update_fields — имя или колонка.
+_SITE_STATUS_FIELDS = frozenset({"status", "site", "site_id", "product", "product_id"})
 
 
 class Placement(models.Model):
@@ -139,6 +152,31 @@ class Placement(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site} · {self.product} · {self.get_status_display()}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Сохранить; сменился статус размещения — подвинуть статус площадки.
+
+        Площадка у продукта идёт за размещением только вперёд
+        (`apps.sites.statuses`). «Сменился» — против строки в базе до записи:
+        правка комментария или проверка индексации статус площадки не трогают,
+        и статус, поставленный человеком руками, остаётся.
+        """
+        update_fields = kwargs.get("update_fields")
+        watched = update_fields is None or not _SITE_STATUS_FIELDS.isdisjoint(update_fields)
+        before = None
+        if watched and not self._state.adding:
+            before = (
+                Placement.objects.filter(pk=self.pk)
+                .values_list("status", "site_id", "product_id")
+                .first()
+            )
+        # atomic — размещение и статус площадки записываются вместе или никак.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            target = SITE_STATUS_BY_PLACEMENT.get(self.status)
+            moved = before != (self.status, self.site_id, self.product_id)
+            if watched and target is not None and moved:
+                statuses.advance(self.site_id, self.product_id, target)
 
 
 class PlacementLink(models.Model):

@@ -49,7 +49,7 @@ def test_unused_product_is_deleted_with_its_rows(
 
 
 def _decision(product: Product, site: Site) -> None:
-    ProductSite.objects.filter(product=product).update(status="rejected")
+    ProductSite.objects.filter(product=product).update(status="discarded")
 
 
 def _imported(product: Product, site: Site) -> None:
