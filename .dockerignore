@@ -17,3 +17,6 @@ __pycache__/
 .vscode/
 site/
 screens/
+
+# Снимки и трассы браузерных проверок (make e2e)
+test-results/

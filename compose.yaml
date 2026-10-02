@@ -4,6 +4,7 @@
 x-app: &app
   build:
     context: .
+    target: app
     # Тот же пользователь заводится в образе (Dockerfile).
     args:
       APP_UID: "${APP_UID:-1000}"
@@ -49,6 +50,23 @@ services:
   beat:
     <<: *app
     command: celery -A config beat --schedule=/tmp/celerybeat-schedule
+
+  # Браузерные проверки экранов: make e2e (E9-09, ADR-046). Тот же код и
+  # окружение плюс Chromium; сервер — live_server pytest-django на тестовой
+  # базе в этом же контейнере. Профиль: make up этот сервис не поднимает.
+  e2e:
+    <<: *app
+    build:
+      context: .
+      target: e2e
+      args:
+        APP_UID: "${APP_UID:-1000}"
+        APP_GID: "${APP_GID:-1000}"
+    image: seo-system-e2e
+    profiles: ["e2e"]
+    # Chromium держит вкладки в /dev/shm; штатных 64 МБ Docker ему мало.
+    shm_size: "1gb"
+    command: pytest -m e2e tests/e2e
 
   postgres:
     image: postgres:16

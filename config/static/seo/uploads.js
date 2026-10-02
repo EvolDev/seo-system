@@ -6,8 +6,11 @@
  * лоадер в блоке со счётчиком секунд, опрос состояния загрузки; по
  * готовности обновляются только цифры и история, введённое остаётся.
  *
- * Лоадеры: полоска вверху экрана — любая подгрузка; прогресс отправки
- * большого файла; крутилка в нажатой кнопке; мерцание обновляемых блоков.
+ * Подгрузка страниц, история и полоска вверху экрана — общие для всей
+ * админки, seo/soft-nav.js (E9-09, ADR-046): экраны загрузки зовут
+ * window.seoNav и навешивают обработчики по событию seo:load, снимают —
+ * по seo:unload. Здесь — свои лоадеры: прогресс отправки большого файла,
+ * крутилка в нажатой кнопке, мерцание обновляемых блоков.
  *
  * Фильтры каталога: поле «любое из» с поиском по значениям файла и
  * облачками, «от — до», облачка из прошлых загрузок, живой счётчик.
@@ -25,9 +28,8 @@
   var COUNT_DELAY_MS = 400;
   var DROPDOWN_LIMIT = 12;
   var AJAX = { "X-Seo-Ajax": "1" };
-  // Страницы шагов загрузки — их подгружаем без перезагрузки.
-  var SOFT_PATH = /^\/admin\/sites\/upload\/(add\/|\d+\/(columns|summary|review)\/)/;
 
+  // Что снять при уходе с экрана (seo:unload): опрос, клавиши разбора.
   var cleanups = [];
 
   // ---------- Общее ----------
@@ -71,38 +73,11 @@
 
   // ---------- Лоадеры ----------
 
-  var topbar = (function () {
-    var bar = null, active = 0, timer = null;
-    function node() {
-      if (!bar) {
-        bar = document.createElement("div");
-        bar.className = "seo-topbar";
-        bar.setAttribute("aria-hidden", "true");
-        document.body.appendChild(bar);
-      }
-      return bar;
-    }
-    return {
-      start: function () {
-        active += 1;
-        var el = node();
-        clearTimeout(timer);
-        el.classList.remove("seo-topbar-done");
-        el.style.width = "0";
-        void el.offsetWidth; // перезапуск перехода
-        el.classList.add("seo-topbar-on");
-        el.style.width = "85%";
-      },
-      done: function () {
-        active = Math.max(0, active - 1);
-        if (active) return;
-        var el = node();
-        el.style.width = "100%";
-        el.classList.add("seo-topbar-done");
-        timer = setTimeout(function () { el.classList.remove("seo-topbar-on"); el.style.width = "0"; }, 400);
-      },
-    };
-  })();
+  // Полоска вверху экрана — общая (seo/soft-nav.js).
+  var topbar = {
+    start: function () { if (window.seoNav) window.seoNav.progress.start(); },
+    done: function () { if (window.seoNav) window.seoNav.progress.done(); },
+  };
 
   function busyButton(button, on) {
     if (!button) return;
@@ -169,88 +144,22 @@
     setTimeout(function () { item.remove(); }, kind === "error" ? TOAST_MS * 2 : TOAST_MS);
   }
 
-  // ---------- Подгрузка страниц без перезагрузки ----------
+  // ---------- Переходы — общие (seo/soft-nav.js) ----------
 
-  function sameSoftPage(url) {
-    var target = new URL(url, window.location.href);
-    return target.origin === window.location.origin && SOFT_PATH.test(target.pathname);
+  function go(url) {
+    if (window.seoNav) window.seoNav.visit(new URL(url, window.location.href).href);
+    else window.location.href = url;
   }
 
-  function swap(html, url, push) {
-    var doc = new DOMParser().parseFromString(html, "text/html");
-    var main = doc.querySelector("main#content-start");
-    if (!main) { window.location.href = url; return; }
-    cleanups.splice(0).forEach(function (fn) { fn(); });
-    var update = function () {
-      document.querySelector("main#content-start").innerHTML = main.innerHTML;
-      var crumbs = doc.querySelector(".breadcrumbs");
-      var current = document.querySelector(".breadcrumbs");
-      if (crumbs && current) current.innerHTML = crumbs.innerHTML;
-      document.title = doc.title;
-    };
-    if (push) window.history.pushState({ seoSoft: true }, "", url);
-    // Плавная смена содержимого, как у переходов между страницами (ADR-038).
-    // Браузер меняет содержимое не сразу, а когда снимет картинку старого:
-    // обработчики навешиваем только после этого, иначе они достанутся старому.
-    var after = function () { window.scrollTo({ top: 0 }); initPage(); };
-    if (document.startViewTransition) {
-      var transition = document.startViewTransition(update);
-      transition.updateCallbackDone.then(after, after);
-    } else {
-      update();
-      after();
-    }
-  }
-
-  async function go(url, push) {
-    topbar.start();
-    try {
-      var result = await request(url, { headers: { "X-Seo-Soft": "1" } });
-      swap(await result.response.text(), result.response.url, push !== false);
-    } catch (error) {
-      toast("Не удалось открыть: " + error.message, null, null, "error");
-    } finally {
-      topbar.done();
-    }
+  // Ответ на отправку файла получен здесь (ради хода отправки) — показать его.
+  function show(html, url) {
+    if (window.seoNav) window.seoNav.render(html, url);
+    else window.location.href = url;
   }
 
   // Адрес отправки — атрибутом: у формы с полем name="action" свойство
   // form.action — это поле, а не адрес.
   function actionOf(form) { return form.getAttribute("action") || window.location.href; }
-
-  async function submitSoft(form, button) {
-    busyButton(button, true);
-    topbar.start();
-    try {
-      var result = await request(actionOf(form), {
-        method: "POST",
-        headers: { "X-CSRFToken": csrfToken() },
-        body: new FormData(form),
-      });
-      swap(await result.response.text(), result.response.url, true);
-    } catch (error) {
-      busyButton(button, false);
-      toast("Не получилось: " + error.message, null, null, "error");
-    } finally {
-      topbar.done();
-    }
-  }
-
-  document.addEventListener("click", function (event) {
-    if (event.defaultPrevented || event.button !== 0) return;
-    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    var link = event.target.closest("a[href]");
-    if (!link || link.hasAttribute("data-site-card") || link.target || link.hasAttribute("download")) return;
-    if (!link.closest("main#content-start, .breadcrumbs")) return;
-    if (!document.querySelector("[data-soft-root]")) return;
-    if (!sameSoftPage(link.href)) return;
-    event.preventDefault();
-    go(link.href, true);
-  });
-
-  window.addEventListener("popstate", function () {
-    if (sameSoftPage(window.location.href)) go(window.location.href, false);
-  });
 
   // ---------- Шаг «Файл»: отправка с прогрессом ----------
 
@@ -311,7 +220,7 @@
           toast("Не получилось: сервер ответил " + xhr.status, null, null, "error");
           return;
         }
-        swap(xhr.responseText, xhr.responseURL || window.location.href, true);
+        show(xhr.responseText, xhr.responseURL || window.location.href);
       });
       xhr.addEventListener("error", function () {
         topbar.done();
@@ -346,7 +255,7 @@
     waitState(box.getAttribute("data-state-url"), {
       set: function (value) { if (label) label.textContent = value; },
     }).then(function (state) {
-      if (alive && state.next) go(state.next, true);
+      if (alive && state.next) go(state.next);
     });
   }
 
@@ -383,12 +292,12 @@
           });
           var state = await waitState(result.body.state_url, loader);
           if (state.status === "failed") throw new Error(state.error || "запись не удалась");
-          if (kind === "all") { finished = true; go(form.getAttribute("data-done-url") || state.next, true); return; }
+          if (kind === "all") { finished = true; go(form.getAttribute("data-done-url") || state.next); return; }
           await refreshCatalog();
           finished = true;
           var done = { known: "Площадки в базе обновлены", new: "Новые площадки добавлены", recheck: "Сводка пересчитана" }[kind];
           if (kind === "recheck") toast(done);
-          else toast(done, "Открыть разбор", function () { go(window.location.pathname.replace("summary/", "review/"), true); });
+          else toast(done, "Открыть разбор", function () { go(window.location.pathname.replace("summary/", "review/")); });
         } catch (error) {
           toast("Не получилось: " + error.message, null, null, "error");
         } finally {
@@ -413,7 +322,7 @@
     var blocks = document.querySelectorAll("[data-swap]");
     blocks.forEach(function (block) { block.classList.add("seo-refreshing"); });
     try {
-      var result = await request(window.location.href, { headers: { "X-Seo-Soft": "1" } });
+      var result = await request(window.location.href);
       var doc = new DOMParser().parseFromString(await result.response.text(), "text/html");
       blocks.forEach(function (block) {
         var fresh = doc.querySelector('[data-swap="' + block.getAttribute("data-swap") + '"]');
@@ -873,12 +782,10 @@
       event.preventDefault();
     }
     document.addEventListener("keydown", onKey);
-    // Цену поменяли в карточке площадки — подгрузить разбор, а не перезагрузить страницу.
-    function onCard(event) { event.preventDefault(); go(window.location.href, false); }
-    document.addEventListener("seo:card-changed", onCard);
+    // Цену поменяли в карточке площадки — разбор перечитает общая подгрузка
+    // (seo/site-card.js → seoNav.reload()), с прокруткой на месте.
     cleanups.push(function () {
       document.removeEventListener("keydown", onKey);
-      document.removeEventListener("seo:card-changed", onCard);
     });
     setFocus(0);
   }
@@ -889,12 +796,6 @@
     var root = document.querySelector("main#content-start") || document;
     var form = root.querySelector("[data-upload-form]");
     if (form) initForm(form);
-    root.querySelectorAll("form[data-soft-form]").forEach(function (soft) {
-      soft.addEventListener("submit", function (event) {
-        event.preventDefault();
-        submitSoft(soft, soft.querySelector("button[type=submit]"));
-      });
-    });
     var box = root.querySelector("[data-state-url]");
     if (box) initPolling(box);
     initRunForms(root);
@@ -904,10 +805,10 @@
     if (table) initReview(table);
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
-    if (document.querySelector("[data-soft-root]")) {
-      window.history.replaceState({ seoSoft: true }, "", window.location.href);
-    }
-    initPage();
+  // Экран показан (и первый раз, и после подгрузки) — навесить обработчики;
+  // уходим с экрана — снять (seo/soft-nav.js).
+  document.addEventListener("seo:load", initPage);
+  document.addEventListener("seo:unload", function () {
+    cleanups.splice(0).forEach(function (fn) { fn(); });
   });
 })();

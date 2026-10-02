@@ -1,0 +1,66 @@
+/* Админка без перезагрузки страниц (E9-09, ADR-046) — seo/soft-nav.js.
+   Общие лоадеры для всех экранов: полоска сверху при любой подгрузке,
+   крутилка в нажатой кнопке, всплывающие сообщения. Цвета — от расцветки
+   (admin-palettes.css): --seo-accent — цвет главной кнопки. */
+
+.seo-topbar {
+  position: fixed; top: 0; left: 0; z-index: 2000; height: 3px; width: 0; opacity: 0;
+  background: linear-gradient(90deg, var(--seo-accent, #2a65a8), var(--link-fg, #2a65a8), var(--seo-accent, #2a65a8));
+  background-size: 200% 100%; box-shadow: 0 0 8px var(--seo-accent, #2a65a8);
+  transition: width 8s cubic-bezier(0.1, 0.7, 0.3, 1), opacity 0.3s;
+  animation: seo-topbar-flow 1.2s linear infinite;
+  pointer-events: none;
+  /* Полоска не участвует в плавной смене страницы — иначе мигнёт вместе с ней. */
+  view-transition-name: seo-topbar;
+}
+.seo-topbar.seo-topbar-on { opacity: 1; }
+.seo-topbar.seo-topbar-done { transition: width 0.25s ease-out, opacity 0.35s 0.2s; opacity: 0; }
+@keyframes seo-topbar-flow { to { background-position: -200% 0; } }
+
+.seo-spin {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  border: 3px solid var(--hairline-color, #ddd); border-top-color: var(--button-bg, #2a65a8);
+  animation: seo-spin 0.9s linear infinite;
+}
+@keyframes seo-spin { to { transform: rotate(360deg); } }
+
+.seo-btn-busy { position: relative; color: transparent !important; pointer-events: none; }
+.seo-btn-busy::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid currentColor; border-color: var(--seo-on-accent, #fff) var(--seo-on-accent, #fff) transparent transparent;
+  animation: seo-spin 0.7s linear infinite;
+}
+.seo-btn.seo-btn-busy::after { border-color: var(--seo-accent-text, #333) var(--seo-accent-text, #333) transparent transparent; }
+
+.seo-toast-box { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
+.seo-toast {
+  display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 8px;
+  background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #ddd);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15); font-size: 0.8125rem;
+}
+.seo-toast-error { border-color: var(--error-fg, #ba2121); }
+.seo-toast-success { border-color: var(--seo-accent, #2a65a8); }
+
+/* Окно поверх экрана (<dialog>): «Решение по площадке» в «Площадках». */
+.seo-dialog {
+  padding: 0; width: min(520px, calc(100vw - 32px)); border-radius: 10px;
+  border: 1px solid var(--hairline-color, #ddd); background: var(--body-bg, #fff); color: var(--body-fg, #333);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.seo-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.seo-dialog-body { padding: 16px 18px; }
+.seo-dialog-message { margin: 8px 0; }
+.seo-dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.seo-dialog-head h2 { margin: 0; padding: 0; font-size: 1rem; background: none; color: inherit; text-transform: none; }
+.seo-dialog-close { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 1rem; opacity: 0.6; }
+.seo-dialog-close:hover { opacity: 1; }
+.seo-dialog-foot { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+.seo-dialog-more { margin-left: auto; }
+.seo-decision-row { margin-bottom: 12px; }
+.seo-decision-row label { display: block; font-weight: 500; margin-bottom: 4px; }
+.seo-decision-row select, .seo-decision-row textarea { width: 100%; box-sizing: border-box; }
+
+@media (prefers-reduced-motion: reduce) {
+  .seo-topbar, .seo-spin, .seo-btn-busy::after { animation: none; }
+  .seo-topbar { transition: opacity 0.2s; }
+}

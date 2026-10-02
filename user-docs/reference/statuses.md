@@ -3,9 +3,9 @@ title: Статусы
 description: Что означает каждый статус площадки, размещения и статьи и как они сменяют друг друга.
 section: reference
 status: draft
-tasks: [E1-01, E1-02, E7-03, E1-04, E9-01, E1-08]
-updated: 2026-10-01
-screens: [site_list, site_card, placement_card, article_editor]
+tasks: [E1-01, E1-02, E7-03, E1-04, E9-01, E1-08, E9-09]
+updated: 2026-10-02
+screens: [site_list, site_card, site_decision, placement_card, article_editor]
 tags: [статусы]
 ---
 
@@ -19,7 +19,8 @@ tags: [статусы]
 может быть одобрена для Convertio и отклонена для продукта из другой
 ниши. Список площадок и карточка показывают статус для выбранного
 продукта — [Как найти площадку и отфильтровать
-список](../how-to/find-sites.md).
+список](../how-to/find-sites.md). Сменить статус — щелчок по нему в
+**Площадках**: откроется окно с выбором статуса и причиной отказа.
 
 | Статус | Значит |
 |---|---|

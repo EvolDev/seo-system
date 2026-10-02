@@ -7,11 +7,12 @@
 from typing import Any
 
 import pytest
+from django import forms
 from django.contrib import admin
 from django.test import Client
 from django.urls import reverse
 
-from apps.sites.models import Product, SiteList
+from apps.sites.models import Product, ProductSite, Site, SiteList, SiteStatus
 from config.admin_site import HIDDEN, SeoAdminSite
 
 pytestmark = pytest.mark.django_db
@@ -153,3 +154,29 @@ def test_short_text_fields_are_single_line(admin_client: Client) -> None:
     form = admin_client.get(reverse("admin:sites_product_add")).context["adminform"].form
     assert form.fields["name"].widget.input_type == "text"
     assert form.fields["domain"].widget.input_type == "text"
+
+
+def test_status_fields_stay_dropdowns(admin_client: Client) -> None:
+    """Статусы — перечисления Postgres (в Django это TextField) — выпадающим списком.
+
+    С E9-08 до E9-09 они стали полем ввода: статус приходилось набирать
+    кодом, и форма отвечала «New нет среди допустимых значений».
+    """
+    product = Product.objects.create(name="Convertio", domain="convertio.co")
+    site = Site.objects.create(domain="coingabbar.com")
+    row = ProductSite.objects.get(site=site, product=product)
+    response = admin_client.get(reverse("admin:sites_productsite_change", args=[row.pk]))
+    status = response.context["adminform"].form.fields["status"]
+    assert isinstance(status.widget, forms.Select)
+    assert [value for value, _ in status.choices] == [value for value, _ in SiteStatus.choices]
+
+    response = admin_client.post(
+        reverse("admin:sites_productsite_change", args=[row.pk]),
+        {"status": SiteStatus.APPROVED, "reject_reason": "", "content_profile": "null"},
+    )
+    assert response.status_code == 302
+    row.refresh_from_db()
+    assert row.status == SiteStatus.APPROVED
+
+    placement = admin_client.get(reverse("admin:placements_placement_add"))
+    assert isinstance(placement.context["adminform"].form.fields["status"].widget, forms.Select)

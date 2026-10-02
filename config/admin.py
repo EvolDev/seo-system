@@ -47,9 +47,15 @@ LONG_TEXT_FIELDS = frozenset(
 # Аннотации `models.Field[...]` — в кавычках: при запуске Field не параметризуется,
 # это видит только mypy.
 def _short_text_input(db_field: "models.Field[Any, Any]", kwargs: dict[str, Any]) -> None:
-    """Однострочное поле для короткого text; свой виджет формы не трогаем."""
+    """Однострочное поле для короткого text; свой виджет формы не трогаем.
+
+    Поле со списком значений (статусы — перечисления Postgres, в Django это
+    тоже TextField) остаётся выпадающим списком: с полем ввода статус
+    приходилось набирать кодом, и форма его не принимала (E9-09).
+    """
     if (
         isinstance(db_field, models.TextField)
+        and not db_field.choices
         and db_field.name not in LONG_TEXT_FIELDS
         and "widget" not in kwargs
     ):

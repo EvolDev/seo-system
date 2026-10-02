@@ -48,7 +48,9 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 
 - Поднять окружение: `make up` (приложение — http://localhost:8000/admin/),
   остановить: `make down`, логи: `make logs`
-- Тесты: `make test`
+- Тесты: `make test`; браузерные проверки экранов — `make e2e`
+  (Chromium в отдельном образе, ADR-046), после правки скриптов, стилей
+  и шаблонов админки
 - Линтер и типы: `make check` (ruff lint + ruff format --check + mypy strict)
 - Автоисправление стиля: `make fmt`
 - Очередь: воркер и beat поднимает `make up`; после правки кода задач или `.env` —

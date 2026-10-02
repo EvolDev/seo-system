@@ -30,18 +30,11 @@
 .seo-r { text-align: right; white-space: nowrap; }
 .seo-cb { width: 24px; }
 
-/* Ожидание задачи. */
+/* Ожидание задачи. Крутилка, полоска загрузки и сообщения — общие, seo/soft-nav.css. */
 .seo-busy {
   display: flex; gap: 14px; align-items: center; padding: 18px;
   border: 1px solid var(--hairline-color, #e5e5e5); border-radius: 8px;
 }
-.seo-spin {
-  width: 22px; height: 22px; border-radius: 50%; flex: none;
-  border: 3px solid var(--hairline-color, #ddd); border-top-color: var(--button-bg, #2a65a8);
-  animation: seo-spin 0.9s linear infinite;
-}
-@keyframes seo-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .seo-spin { animation: none; } }
 
 /* Сводка до записи. */
 .seo-lead { font-size: 0.9375rem; margin: 0 0 12px; }
@@ -104,14 +97,6 @@
 }
 .seo-bulk[hidden] { display: none; }
 
-/* Всплывающие сообщения разбора. */
-.seo-toast-box { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
-.seo-toast {
-  display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 8px;
-  background: var(--body-bg, #fff); border: 1px solid var(--hairline-color, #ddd);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15); font-size: 0.8125rem;
-}
-
 /* Каталог: две кнопки записи, фильтры с облачками, счётчик. */
 .seo-panel {
   padding: 14px 16px; margin: 0 0 16px; border-radius: 10px;
@@ -150,27 +135,7 @@
 .seo-counter b { font-size: 1.25rem; font-variant-numeric: tabular-nums; color: var(--seo-down); }
 .seo-counting .seo-counter { opacity: 0.6; }
 
-/* Лоадеры: полоска сверху при любой подгрузке, крутилка в кнопке, лоадер в
-   блоке со счётчиком секунд, мерцание обновляемых цифр. */
-.seo-topbar {
-  position: fixed; top: 0; left: 0; z-index: 2000; height: 3px; width: 0; opacity: 0;
-  background: linear-gradient(90deg, var(--seo-info), var(--seo-down), var(--seo-info));
-  background-size: 200% 100%; box-shadow: 0 0 8px var(--seo-info);
-  transition: width 8s cubic-bezier(0.1, 0.7, 0.3, 1), opacity 0.3s;
-  animation: seo-topbar-flow 1.2s linear infinite;
-}
-.seo-topbar.seo-topbar-on { opacity: 1; }
-.seo-topbar.seo-topbar-done { transition: width 0.25s ease-out, opacity 0.35s 0.2s; opacity: 0; }
-@keyframes seo-topbar-flow { to { background-position: -200% 0; } }
-
-.seo-btn-busy { position: relative; color: transparent !important; pointer-events: none; }
-.seo-btn-busy::after {
-  content: ""; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid currentColor; border-color: var(--seo-on-accent, #fff) var(--seo-on-accent, #fff) transparent transparent;
-  animation: seo-spin 0.7s linear infinite;
-}
-.seo-btn.seo-btn-busy::after { border-color: var(--seo-accent-text, #333) var(--seo-accent-text, #333) transparent transparent; }
-
+/* Лоадер в блоке со счётчиком секунд, мерцание обновляемых цифр. */
 .seo-inline-loader {
   display: flex; gap: 12px; align-items: center; margin-top: 10px; padding: 12px 14px; border-radius: 8px;
   background: var(--seo-info-bg); border: 1px solid var(--hairline-color, #e5e5e5);
@@ -198,9 +163,7 @@
 .seo-icon-btn:hover { opacity: 1; border-color: var(--hairline-color, #ddd); background: var(--darkened-bg, #f4f4f4); }
 .seo-dropdown li.seo-active { background: var(--seo-info-bg); }
 .submit-row + .seo-boxes { margin-top: 16px; }
-.seo-toast-error { border-color: var(--seo-up); }
 
 @media (prefers-reduced-motion: reduce) {
-  .seo-topbar, .seo-btn-busy::after, .seo-refreshing::after { animation: none; }
-  .seo-topbar { transition: opacity 0.2s; }
+  .seo-refreshing::after { animation: none; }
 }

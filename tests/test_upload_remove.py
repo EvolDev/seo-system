@@ -216,10 +216,13 @@ class TestAjaxAnswers:
         )
         assert "state_url" in response.json()
 
-    def test_steps_have_soft_root(self, admin_client: Client) -> None:
+    def test_steps_load_shared_navigation(self, admin_client: Client) -> None:
+        """Шаги загрузки подгружаются общей подгрузкой админки (E9-09)."""
         upload = _load(["a.com"])
         page = admin_client.get(reverse("admin:sites_upload_review", args=[upload.pk]))
-        assert "data-soft-root" in page.content.decode()
+        content = page.content.decode()
+        assert "seo/soft-nav.js" in content
+        assert "seo/uploads.js" in content
 
 
 def test_recheck_after_write_keeps_review_open(admin_client: Client) -> None:

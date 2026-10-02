@@ -2,7 +2,9 @@
 {% comment %}
 Фильтр диапазона django-admin-rangefilter с правками: заголовок — просто
 название поля («DR»), а не «По DR» (E9-08); кнопки — наши, от расцветки
-(seo/admin-palettes.css, E1-10). Остальное — как в пакете 0.15.
+(seo/admin-palettes.css, E1-10); «Найти» и «Сбросить» открывают адрес без
+перезагрузки страницы — seo/soft-nav.js (E9-09), вместо скрипта пакета с
+window.location. Остальное — как в пакете 0.15.
 {% endcomment %}
 <details data-filter-title="{{ title }}" open>
 <summary>{{ title|capfirst }}</summary>
@@ -26,30 +28,6 @@
     }
 </style>
 
-{% comment %}
-Force load jsi18n, issues #5
-https://github.com/django/django/blob/stable/1.10.x/django/contrib/admin/templates/admin/change_list.html#L7
-{% endcomment %}
-
-<script type="text/javascript" src="{% url 'admin:jsi18n' %}"></script>
-<script type="text/javascript" nonce="{{ spec.request.csp_nonce }}">
-    django.jQuery('document').ready(function () {
-        django.jQuery('.numericrangefilter #{{ choices.0.system_name }}-form input[type="submit"]').click(function(event) {
-            event.preventDefault();
-            var form = django.jQuery(this).closest('div.numericrangefilter').find('form');
-            var query_string = django.jQuery('input#{{ choices.0.system_name }}-query-string').val();
-            var form_data = form.serialize();
-            var amp = query_string === "?" ? "" : "&";  // avoid leading ?& combination
-            window.location = window.location.pathname + query_string + amp + form_data;
-        });
-
-        django.jQuery('.numericrangefilter #{{ choices.0.system_name }}-form input[type="reset"]').click(function() {
-            var form = django.jQuery(this).closest('div.numericrangefilter').find('form');
-            var query_string = form.find('input#{{ choices.0.system_name }}-query-string').val();
-            window.location = window.location.pathname + query_string;
-        });
-    });
-</script>
 <div class="numericrangefilter">
     <form method="GET" action="." id="{{ choices.0.system_name }}-form">
         {{ spec.form.as_p }}

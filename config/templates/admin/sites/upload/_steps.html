@@ -1,5 +1,4 @@
 {% comment %}Шаги загрузки: файл → колонки → сводка → разбор (прототип price-review.html).{% endcomment %}
-<span data-soft-root hidden></span>
 <ol class="seo-steps">
   {% for name in steps %}
     <li class="{% if forloop.counter == step %}seo-step-on{% elif forloop.counter < step %}seo-step-done{% endif %}">

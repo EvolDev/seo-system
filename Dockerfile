@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /uvx /bin/
 
@@ -28,6 +28,17 @@ RUN (getent group "$APP_GID" || groupadd --gid "$APP_GID" app) \
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-install-project
 
+# Браузерные проверки экранов — make e2e (E9-09, ADR-046): тот же образ плюс
+# Chromium Playwright и его системные библиотеки (около 0,5 ГБ). Отдельная цель:
+# make up её не собирает, в приложении браузера нет. Chromium ставится до
+# копирования кода, иначе каждая правка кода качала бы его заново.
+FROM base AS e2e
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium
+COPY . .
+
+# Приложение — последняя цель, её собирает `docker build` без --target.
+FROM base AS app
 COPY . .
 
 EXPOSE 8000

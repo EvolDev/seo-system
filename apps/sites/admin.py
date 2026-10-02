@@ -21,7 +21,7 @@ from django.contrib.admin.views.main import ChangeList
 from django.db import models
 from django.db.models import Count, Exists, F, Max, OuterRef, Q, Subquery
 from django.forms.models import BaseInlineFormSet
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, path, reverse
@@ -392,8 +392,25 @@ def _card_context(site: Site) -> dict[str, Any]:
     }
 
 
+class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
+    """Окно «Решение по площадке» из «Площадок»: статус и причина отказа."""
+
+    class Meta:
+        model = ProductSite
+        fields = ("status", "reject_reason")
+        widgets: ClassVar[dict[str, forms.Widget]] = {
+            "reject_reason": forms.Textarea(attrs={"rows": 3})
+        }
+
+
 @admin.register(ProductSite)
 class ProductSiteAdmin(NoDeleteAdmin):
+    """Решения по площадкам: статус площадки у продукта (ADR-030).
+
+    В «Площадках» статус открывает окно с этим решением без перехода
+    (`decision_view`, seo/site-decision.js, E9-09); полная форма — здесь.
+    """
+
     list_display = ("site", "product", "status", "imported_undecided", "updated_at")
     list_filter = ("product", "status", "imported_undecided")
     search_fields = ("site__domain",)
@@ -406,6 +423,46 @@ class ProductSiteAdmin(NoDeleteAdmin):
     def save_model(self, request: HttpRequest, obj: ProductSite, form: Any, change: bool) -> None:
         super().save_model(request, obj, form, change)
         _note_rejection(request, obj, form.changed_data)
+
+    def get_urls(self) -> list[URLPattern]:
+        own = [
+            path(
+                "<int:object_id>/decision/",
+                self.admin_site.admin_view(self.decision_view),
+                name="sites_productsite_decision",
+            ),
+        ]
+        return own + super().get_urls()
+
+    def decision_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Окно решения: GET — форма, POST — сохранить.
+
+        Окно (заголовок X-Seo-Partial) получает только форму, после записи —
+        JSON с подписью для сообщения; список под окном перечитывается сам.
+        Без скрипта — полная форма решения.
+        """
+        row = get_object_or_404(ProductSite.objects.select_related("site", "product"), pk=object_id)
+        change_url = reverse("admin:sites_productsite_change", args=[row.pk])
+        if request.headers.get(PARTIAL_HEADER) != "1":
+            return HttpResponseRedirect(change_url)
+        if not self.has_change_permission(request, row):
+            return HttpResponse(status=403)
+        form = DecisionForm(request.POST or None, instance=row)
+        if request.method == "POST" and form.is_valid():
+            form.save()
+            _note_rejection(request, row, form.changed_data)
+            label = f"{row.site.domain} · {row.product.name} — {row.get_status_display()}"
+            return JsonResponse({"saved": True, "message": label})
+        context = {
+            "form": form,
+            "row": row,
+            "change_url": change_url,
+            "action_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
+        }
+        status = 400 if request.method == "POST" else 200
+        return TemplateResponse(
+            request, "admin/sites/productsite/decision_body.html", context, status=status
+        )
 
 
 @admin.register(Seller)
@@ -1054,7 +1111,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     actions = ("accept_new_prices_action", "fix_seller_action", "keep_current_action")
 
     class Media:
-        js = (Js("seo/site-card.js"), Js("seo/country-picker.js"))
+        js = (Js("seo/site-card.js"), Js("seo/site-decision.js"), Js("seo/country-picker.js"))
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             "all": (Css("seo/offers.css"), Css("flags/sprite-hq.css"))
         }
@@ -1128,8 +1185,14 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
 
     @admin.display(description="статус", ordering="status")
     def status_link(self, obj: ProductSiteLatest) -> SafeString:
-        url = reverse("admin:sites_productsite_change", args=[obj.pk])
-        return format_html('<a href="{}">{}</a>', url, obj.get_status_display())
+        # Решение открывается окном поверх списка (seo/site-decision.js, E9-09),
+        # с Ctrl и без скрипта — полной формой.
+        return format_html(
+            '<a href="{}" data-decision="{}" title="Сменить статус">{}</a>',
+            reverse("admin:sites_productsite_change", args=[obj.pk]),
+            reverse("admin:sites_productsite_decision", args=[obj.pk]),
+            obj.get_status_display(),
+        )
 
     @admin.display(description="DR", ordering="dr")
     def dr_cell(self, obj: ProductSiteLatest) -> SafeString:

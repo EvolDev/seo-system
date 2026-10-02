@@ -1,7 +1,9 @@
-{% load admin_interface_tags i18n %}
+{% load i18n %}
 {% comment %}
-Выпадающий фильтр Admin Interface с одной правкой (E9-08): заголовок — просто
-название фильтра («Продукт»), а не «По продукт». Остальное — как у темы 0.32.
+Выпадающий фильтр Admin Interface с двумя правками: заголовок — просто
+название фильтра («Продукт»), а не «По продукт» (E9-08); выбор открывает
+адрес без перезагрузки страницы — seo/soft-nav.js (E9-09), скрипт темы
+dropdown-filter.js с window.location не подключается. Остальное — как у темы 0.32.
 {% endcomment %}
 <div class="list-filter-dropdown">
     <h3 {% if spec.lookup_val or spec.value %}class="active"{% endif %}>{{ title|capfirst }}</h3>
@@ -13,5 +15,3 @@
         </select>
     </div>
 </div>
-
-<script id="admin-interface-dropdown-filter" src="{% get_admin_interface_static 'admin_interface/dropdown-filter/dropdown-filter.js' %}"></script>

@@ -10,7 +10,7 @@
 
 {% block content %}
 {% include "admin/sites/upload/_steps.html" %}
-<form method="post" class="seo-upload-form" data-soft-form>
+<form method="post" class="seo-upload-form">
   {% csrf_token %}
   {% if errors %}<div class="errornote">{% for error in errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
   <div class="seo-note">

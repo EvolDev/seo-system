@@ -6,7 +6,7 @@ export APP_GID := $(shell id -g)
 COMPOSE := docker compose
 RUN := $(COMPOSE) run --rm app
 
-.PHONY: up down logs restart-queue migrate superuser test check fmt shell docs-check docs-serve
+.PHONY: up down logs restart-queue migrate superuser test e2e check fmt shell docs-check docs-serve
 
 up:  ## Поднять окружение (с пересборкой образа, если менялись зависимости)
 	$(COMPOSE) up -d --build
@@ -29,8 +29,14 @@ migrate:  ## Применить миграции
 superuser:  ## Создать пользователя для входа в админку
 	$(RUN) python manage.py createsuperuser
 
-test:  ## Тесты
+test:  ## Тесты (без браузерных — они в make e2e)
 	$(RUN) pytest
+
+# Отдельный образ с Chromium (Dockerfile, цель e2e); --build пересобирает его,
+# если менялись зависимости. Снимки и трассы упавших — в test-results/e2e/.
+e2e:  ## Браузерные проверки экранов: Chromium без окна, тестовая база
+	$(COMPOSE) run --rm --build e2e pytest -m e2e tests/e2e \
+		--screenshot only-on-failure --tracing retain-on-failure --output test-results/e2e $(ARGS)
 
 check:  ## Линтер, форматирование, типы
 	$(RUN) sh -c "ruff check . && ruff format --check . && mypy ."

@@ -12,9 +12,12 @@
 
 {% block extrastyle %}{{ block.super }}
 <link rel="stylesheet" href="{% asset 'seo/admin-palettes.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/soft-nav.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}
+{# Переходы, фильтры и формы без перезагрузки страницы (E9-09, ADR-046). #}
+<script src="{% asset 'seo/soft-nav.js' %}" defer></script>
 <script>
   // Расцветку ставим до первой отрисовки, иначе страница мигнёт чужими цветами.
   // Выбор помнит браузер; в первый раз — по настройке системы (светлая / тёмная).

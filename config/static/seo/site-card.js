@@ -7,7 +7,9 @@
  * «Добавить заметку») окно отправляет само и показывает обновлённую карточку.
  *
  * Закрыть — ✕, Esc или щелчок мимо окна. Если в карточке что-то поменяли,
- * страница под окном перечитывается: колонки списка должны показать новое.
+ * экран под окном перечитывается на месте, без перезагрузки и с прокруткой
+ * там же (seo/soft-nav.js, E9-09): колонки списка должны показать новое.
+ * Ушли с экрана (ссылка из карточки) — окно закрывается без перечитывания.
  * Ссылка с Ctrl/Cmd/Shift или средней кнопкой открывает карточку страницей.
  * Без скрипта ссылки и формы работают обычными переходами.
  */
@@ -83,15 +85,24 @@
     document.documentElement.classList.remove("seo-card-open");
     if (changed) {
       // Цена или заметки поменялись — список под окном показывает старое.
-      // Страница, которая умеет обновиться сама (экраны загрузки, E1-08),
-      // ловит событие и подгружает себя без перезагрузки.
+      // Экран со своим обновлением ловит событие и отменяет его; иначе —
+      // перечитать экран на месте.
       var event = new CustomEvent("seo:card-changed", { cancelable: true });
-      if (document.dispatchEvent(event)) window.location.reload();
-      if (opener) opener.focus();
-      return;
+      if (document.dispatchEvent(event)) {
+        if (window.seoNav) window.seoNav.reload();
+        else window.location.reload();
+      }
     }
-    if (opener) opener.focus();
+    if (opener && opener.isConnected) opener.focus();
   }
+
+  // Переход на другой экран при открытом окне — закрыть, ничего не перечитывая.
+  document.addEventListener("seo:unload", function () {
+    if (!panel || panel.hidden) return;
+    changed = false;
+    opener = null;
+    close();
+  });
 
   function onSubmit(event) {
     var form = event.target.closest("form[data-card-form]");

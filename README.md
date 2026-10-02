@@ -86,6 +86,7 @@ Docker `pgdata`, очередь задач — в томе `redisdata`.
 | `make migrate` | применить миграции |
 | `make superuser` | создать пользователя для админки |
 | `make test` | тесты |
+| `make e2e` | браузерные проверки экранов: Chromium без окна, тестовая база; `ARGS="-k <имя>"` — часть |
 | `make check` | ruff, проверка форматирования, mypy strict |
 | `make fmt` | автоисправление стиля |
 | `make shell` | Django shell |
@@ -227,7 +228,7 @@ seo-system/
 │   ├── content/                 статьи, пул знаний, правила, промпты
 │   ├── observability/           проверки, вызовы LLM, запуски задач
 │   └── integrations/            клиенты внешних API
-├── tests/                       тесты
+├── tests/                       тесты; tests/e2e/ — браузерные проверки (make e2e)
 ├── schema.sql                   эталон схемы БД, миграции дают ту же схему
 ├── docs/                        ПРОЕКТНАЯ документация — как строить
 │   ├── 00-VISION.md … 16-AGENT-SETUP.md

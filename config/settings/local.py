@@ -19,6 +19,9 @@ DEBUG_TOOLBAR_CONFIG = {
     "SHOW_TOOLBAR_CALLBACK": "config.settings.local.show_toolbar",
     # Свёрнута в ярлычок у края: развёрнутая закрывала шапку и переключатели (E9-08).
     "SHOW_COLLAPSED": True,
+    # Экраны подгружаются без перезагрузки (E9-09): панель показывает запросы
+    # подгруженного экрана, а не только первого открытого.
+    "UPDATE_ON_FETCH": True,
 }
 
 

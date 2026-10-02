@@ -1,0 +1,32 @@
+{% comment %}
+Окно «Решение по площадке» в «Площадках» (E9-09): статус и причина отказа
+без перехода на форму. Окно и отправку ведёт seo/site-decision.js; полная
+форма — ссылка «Открыть полностью».
+{% endcomment %}
+<form method="post" action="{{ action_url }}" class="seo-decision" data-decision-form>
+  {% csrf_token %}
+  <header class="seo-dialog-head">
+    <h2>{{ row.site.domain }} · {{ row.product.name }}</h2>
+    <button type="button" class="seo-dialog-close" data-dialog-close aria-label="Закрыть">✕</button>
+  </header>
+  {% if form.non_field_errors %}<div class="errornote">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+  <div class="seo-decision-row">
+    <label for="{{ form.status.id_for_label }}">Статус</label>
+    {{ form.status }}
+    {{ form.status.errors }}
+  </div>
+  <div class="seo-decision-row">
+    <label for="{{ form.reject_reason.id_for_label }}">Причина отказа</label>
+    {{ form.reject_reason }}
+    {{ form.reject_reason.errors }}
+    <div class="help">Причина попадёт в историю заметок площадки.</div>
+  </div>
+  {% if row.imported_undecided %}
+  <p class="seo-sub">Импортирована без решения — пометка снимется, когда статус станет не «Новая».</p>
+  {% endif %}
+  <footer class="seo-dialog-foot">
+    <button type="submit" class="seo-btn seo-btn-primary">Сохранить</button>
+    <button type="button" class="seo-btn" data-dialog-close>Отмена</button>
+    <a href="{{ change_url }}" class="seo-dialog-more">Открыть полностью</a>
+  </footer>
+</form>

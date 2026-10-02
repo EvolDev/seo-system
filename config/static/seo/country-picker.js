@@ -8,7 +8,8 @@
  *
  * У <option> можно задать data-search — по чему ещё искать, и data-flag —
  * код страны для флага или «globe». С data-navigate у контейнера выбор открывает адрес из value
- * (фильтр «Регион»), иначе пишется в тот же <select> и уходит с формой.
+ * без перезагрузки страницы (фильтр «Регион», seo/soft-nav.js), иначе пишется в тот же
+ * <select> и уходит с формой.
  *
  * Список не закрывается, когда тянут его полосу прокрутки: щелчок по полосе
  * переводит фокус на сам список (tabindex=-1), а закрываемся мы, только если
@@ -104,7 +105,10 @@
         if (option.value !== select.value) {
           select.value = option.value;
           showCurrent();
-          window.location.href = option.value;
+          // Без перезагрузки страницы (seo/soft-nav.js, E9-09); прокрутка на месте.
+          var url = new URL(option.value, window.location.href).href;
+          if (window.seoNav) window.seoNav.visit(url, { scroll: "keep" });
+          else window.location.href = url;
         } else {
           showCurrent();
         }
@@ -213,4 +217,6 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initAll);
   else initAll();
+  // Экран подгружен без перезагрузки (seo/soft-nav.js) — новые поля выбора.
+  document.addEventListener("seo:load", initAll);
 })();
