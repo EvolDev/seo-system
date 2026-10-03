@@ -34,7 +34,8 @@
  * скрипт получил сам (отправка файла с ходом загрузки), mount(container, doc,
  * source) — показать кусок полученной страницы в контейнере со стилями,
  * скриптами и виджетами (панель записи, E9-11), progress — полоска,
- * toast(text, kind) — сообщение внизу справа.
+ * toast(text, kind, action) — сообщение внизу справа; action — кнопка в нём,
+ * `{ label, run }` («Отменить» после удаления набора фильтров, E9-10).
  * Без скрипта всё работает обычными переходами.
  */
 (function () {
@@ -113,7 +114,7 @@
   // ---------- Сообщения ----------
 
   // kind: error (по умолчанию, висит дольше) или success.
-  function toast(text, kind) {
+  function toast(text, kind, action) {
     kind = kind || "error";
     var box = document.querySelector(".seo-toast-box");
     if (!box) {
@@ -125,6 +126,17 @@
     var item = document.createElement("div");
     item.className = "seo-toast seo-toast-" + kind;
     item.textContent = text;
+    if (action) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "seo-toast-action";
+      button.textContent = action.label;
+      button.addEventListener("click", function () {
+        item.remove();
+        action.run();
+      });
+      item.appendChild(button);
+    }
     box.appendChild(item);
     setTimeout(function () { item.remove(); }, kind === "error" ? TOAST_MS * 2 : TOAST_MS);
   }

@@ -17,6 +17,8 @@ from django.contrib.admin.apps import AdminConfig
 from django.db.models import Count, Q
 from django.http import HttpRequest
 from django.template.response import TemplateResponse
+from django.urls import URLPattern, URLResolver, path
+from django.views.decorators.http import require_POST
 
 # Группы меню: (название, код группы, [(приложение, модель)]). Порядок — как в меню.
 MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
@@ -97,6 +99,31 @@ class SeoAdminSite(admin.AdminSite):
             group["has_module_perms"] = True
             result.append(group)
         return result
+
+    def get_urls(self) -> list[URLPattern | URLResolver]:
+        # «Мои фильтры» над колонкой фильтров любого списка (E9-10, ADR-050) —
+        # не у одной модели, поэтому адреса у сайта. Импорт здесь: модуль сайта
+        # загружается вместе с приложением админки, раньше моделей.
+        from apps.workspace import views
+
+        own = [
+            path(
+                "saved-filters/save/",
+                self.admin_view(require_POST(views.save_view)),
+                name="saved_filters_save",
+            ),
+            path(
+                "saved-filters/<int:pk>/delete/",
+                self.admin_view(require_POST(views.delete_view)),
+                name="saved_filters_delete",
+            ),
+            path(
+                "saved-filters/<int:pk>/restore/",
+                self.admin_view(require_POST(views.restore_view)),
+                name="saved_filters_restore",
+            ),
+        ]
+        return own + super().get_urls()
 
     def index(
         self, request: HttpRequest, extra_context: dict[str, Any] | None = None

@@ -1,0 +1,17 @@
+/* «Мои фильтры» — первым в колонке фильтров (E9-10, ADR-050).
+   Заголовок — как «Фильтр» ниже (стили колонки Django), содержимое — с теми же
+   отступами, кнопки — .seo-btn в компактном размере, как у «от — до». */
+#changelist-filter .seo-saved {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--hairline-color);
+}
+.seo-saved-body { display: flex; flex-direction: column; gap: 8px; padding: 0 15px; }
+.seo-saved-select,
+.seo-saved-form .vTextField { width: 100%; box-sizing: border-box; }
+.seo-saved-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.seo-saved-buttons[hidden],
+.seo-saved-form[hidden] { display: none; }
+.seo-saved-form { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+body.admin-interface .seo-saved .seo-btn { min-height: 28px; padding: 4px 12px; font-size: 0.75rem; }
+.seo-saved-note { margin: 0; padding: 0; font-size: 0.75rem; color: var(--body-quiet-color); }

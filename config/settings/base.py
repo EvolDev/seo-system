@@ -48,6 +48,8 @@ INSTALLED_APPS = [
     "apps.content",
     "apps.observability",
     "apps.integrations",
+    # Личное у каждого пользователя — не домен линкбилдинга (ADR-050).
+    "apps.workspace",
 ]
 
 MIDDLEWARE = [

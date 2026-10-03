@@ -40,6 +40,13 @@
 }
 .seo-toast-error { border-color: var(--error-fg, #ba2121); }
 .seo-toast-success { border-color: var(--seo-accent, #2a65a8); }
+/* Действие в сообщении — «Отменить» после удаления набора фильтров (E9-10). */
+.seo-toast-action {
+  margin-left: auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
+  color: var(--seo-accent, #2a65a8); font: inherit; font-weight: 600;
+}
+.seo-toast-action:hover { text-decoration: underline; }
+.seo-toast-action:focus-visible { outline: 2px solid var(--seo-accent, #2a65a8); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   .seo-topbar, .seo-spin, .seo-btn-busy::after { animation: none; }

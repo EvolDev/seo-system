@@ -1,0 +1,33 @@
+{% comment %}
+«Мои фильтры» (E9-10, ADR-050) — первым в колонке фильтров. Ведёт
+seo/saved-filters.js: выбор набора — переход подгрузкой, «Добавить» и
+«Удалить» — POST с ответом JSON. «Как в прошлый раз» скрипт берёт из браузера.
+Без скрипта блок ничего не делает — фильтры работают как обычно.
+{% endcomment %}
+<section class="seo-saved" aria-labelledby="seo-saved-title"
+  data-screen="{{ screen }}" data-user="{{ user_id }}" data-list-path="{{ list_path }}"
+  data-save-url="{% url 'admin:saved_filters_save' %}"
+  data-delete-url="{% url 'admin:saved_filters_delete' 0 %}"
+  data-restore-url="{% url 'admin:saved_filters_restore' 0 %}">
+  <h2 id="seo-saved-title">Мои фильтры</h2>
+  <div class="seo-saved-body">
+    <select class="seo-saved-select" aria-label="Набор фильтров">
+      <option value=""{% if not selected %} selected{% endif %}>Набор не выбран</option>
+      <option value="last" data-last>Как в прошлый раз</option>
+      {% if sets %}<optgroup label="Сохранённые">
+        {% for item in sets %}<option value="{{ item.pk }}" data-query="{{ item.query }}"{% if item.pk == selected %} selected{% endif %}>{{ item.name }}</option>
+        {% endfor %}</optgroup>{% endif %}
+    </select>
+    <div class="seo-saved-buttons" data-saved-buttons>
+      <button type="button" class="seo-btn" data-saved-add title="Сохранить текущие фильтры, поиск и сортировку под названием">+ Добавить</button>
+      <button type="button" class="seo-btn" data-saved-delete title="Удалить выбранный набор"{% if not selected %} disabled{% endif %}>Удалить</button>
+    </div>
+    <form class="seo-saved-form" data-no-soft hidden>
+      <input type="text" name="name" class="vTextField" maxlength="{{ name_max }}" placeholder="Название набора" aria-label="Название набора" autocomplete="off">
+      <div class="seo-saved-buttons">
+        <button type="submit" class="seo-btn seo-btn-primary">Сохранить</button>
+        <button type="button" class="seo-btn" data-saved-cancel>Отмена</button>
+      </div>
+    </form>
+  </div>
+</section>

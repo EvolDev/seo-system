@@ -1,13 +1,15 @@
-"""Доменные приложения подключены и не конфликтуют метками (ADR-024)."""
+"""Доменные приложения подключены и не конфликтуют метками (ADR-024, ADR-050)."""
 
 import pytest
 from django.apps import apps
 from django.core.management import call_command
 
 DOMAIN_APPS = ["sites", "placements", "keywords", "content", "observability", "integrations"]
+# Не домен, а личное у пользователя — рядом с доменами, по тем же правилам (ADR-050).
+APPS = [*DOMAIN_APPS, "workspace"]
 
 
-@pytest.mark.parametrize("label", DOMAIN_APPS)
+@pytest.mark.parametrize("label", APPS)
 def test_domain_app_installed(label: str) -> None:
     # Метка приложения (label) — последняя часть пути: apps.sites → sites.
     assert apps.get_app_config(label).name == f"apps.{label}"

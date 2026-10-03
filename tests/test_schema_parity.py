@@ -77,6 +77,8 @@ TABLES = [
     # E1-13
     "site_status_changes",
     "placement_status_changes",
+    # E9-10
+    "saved_filters",
 ]
 
 VIEWS = [
