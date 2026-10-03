@@ -49,12 +49,14 @@ from apps.sites.models import (
     SiteNote,
     SitePrice,
     SiteStatus,
+    StatusSource,
     Upload,
     UploadItem,
 )
 from apps.sites.rates import latest_rates, to_eur_cents
 from apps.sites.uploads.plan import REJECTED_STATUSES, refusal_text
 from apps.sites.uploads.plan import blocked_ids as plan_blocked_ids
+from config.changes import bind_change, stamped
 
 PAGE_SIZE = 100
 ISSUES = "issues"
@@ -259,7 +261,9 @@ def decide(
     - `block` — «Заблокировать»: чёрный список у всех продуктов, загрузки её пропускают.
     """
     if action in REMOVE_ACTIONS:
-        return _remove(upload, item_ids, action, author=author)
+        # Блокировка меняет статусы — в истории это «загрузка» (ADR-049).
+        with bind_change(StatusSource.UPLOAD, _actor_id(author)):
+            return _remove(upload, item_ids, action, author=author)
     items = list(
         UploadItem.objects.filter(upload=upload, pk__in=list(item_ids), needs_decision=True)
         .select_related("price")
@@ -360,10 +364,15 @@ def undo(entries: Iterable[dict[str, Any]], *, author: Any) -> int:
                 site.save(update_fields=["is_deleted", "updated_at"])
                 offers.add_note(site, "Возвращена в базу — отмена удаления", author=author)
             elif kind == "block":
-                for pk, (status, undecided) in (entry.get("statuses") or {}).items():
-                    ProductSite.objects.filter(pk=int(pk), site_id=site_id).update(
-                        status=status, imported_undecided=bool(undecided)
-                    )
+                # Статус до блокировки — в истории «загрузка», от того, кто отменил.
+                with (
+                    bind_change(StatusSource.UPLOAD, _actor_id(author)),
+                    stamped(),
+                ):
+                    for pk, (status, undecided) in (entry.get("statuses") or {}).items():
+                        ProductSite.objects.filter(pk=int(pk), site_id=site_id).update(
+                            status=status, imported_undecided=bool(undecided)
+                        )
                 offers.add_note(site, "Разблокирована — отмена блокировки", author=author)
             elif kind == "price":
                 price_id = entry.get("price")
@@ -493,3 +502,9 @@ def _rejected(site_ids: Sequence[int]) -> dict[int, list[str]]:
 def _issues_count(upload: Upload) -> int:
     data = upload.summary or {}
     return sum(int(data.get(f"{name}_total") or 0) for name in ("errors", "duplicates", "urls"))
+
+
+def _actor_id(author: Any) -> int | None:
+    """Пользователь для истории статусов; без входа (тесты, команды) — пусто."""
+    pk = getattr(author, "pk", None)
+    return int(pk) if pk is not None else None

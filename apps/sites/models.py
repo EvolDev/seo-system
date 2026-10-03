@@ -1,12 +1,13 @@
 """Блок 1 модели данных: продукты, площадки, решения по ним, снапшоты.
 
-Схема — `schema.sql` 1.9, как модели её повторяют — ADR-029: имена
+Схема — `schema.sql` 1.11, как модели её повторяют — ADR-029: имена
 таблиц, индексов и ограничений из схемы, значения по умолчанию в базе
 (`db_default`), `on_delete=PROTECT`. Несколько продуктов — ADR-030:
 площадка хранит только факты о себе, решение по ней — в `ProductSite`.
 Продавцы, предложения, рабочая цена площадки, заметки, курсы — ADR-043.
 Загрузки файлов продавцов и каталога, строки их разбора — ADR-044.
 Выгрузки Ahrefs Batch Analysis и трафик по странам — ADR-045.
+История смены статусов — ADR-049.
 """
 
 from collections.abc import Iterable
@@ -19,6 +20,7 @@ from django.db import models, transaction
 from django.db.models.functions import Lower
 
 from apps.sites.domains import normalize_domain
+from config.changes import stamped
 from config.db import PgEnumField, PgNow
 
 
@@ -100,6 +102,21 @@ class AuditAuthor(models.TextChoices):
     SYSTEM = "system", "Система"
 
 
+class StatusSource(models.TextChoices):
+    """Откуда смена статуса площадки или размещения (ADR-049).
+
+    Отметку ставит код (`config.changes`), строку истории пишет триггер.
+    Пусто в истории — код смену не отметил.
+    """
+
+    PANEL = "panel", "панель"
+    FORM = "form", "форма"
+    PLACEMENT = "placement", "по размещению"
+    IMPORT = "import", "импорт таблицы"
+    UPLOAD = "upload", "загрузка"
+    MIGRATION = "migration", "миграция"
+
+
 class Product(models.Model):
     """Продвигаемый продукт. Заводит человек в админке (ADR-030)."""
 
@@ -152,6 +169,9 @@ class Product(models.Model):
                 self.keywords.all(),
                 self.prompt_templates.all(),
                 self.site_notes.all(),
+                # Статус меняли и вернули «Новую» — строка снова нетронутая, но
+                # история смен у неё есть.
+                SiteStatusChange.objects.filter(product_site__product=self),
             )
         )
 
@@ -362,7 +382,65 @@ class ProductSite(models.Model):
             update_fields = kwargs.get("update_fields")
             if update_fields is not None:
                 kwargs["update_fields"] = {*update_fields, "imported_undecided"}
-        super().save(*args, **kwargs)
+        # Смену статуса запишет триггер; кто и откуда — отметка (ADR-049).
+        with transaction.atomic(), stamped():
+            super().save(*args, **kwargs)
+
+
+class SiteStatusChange(models.Model):
+    """Смена статуса площадки у продукта — строка истории (ADR-049).
+
+    Пишет только триггер `product_sites_status_*` в базе: код строк не
+    создаёт, а отмечает, кто и откуда меняет (`config.changes.stamped`).
+    `from_status` пусто — строка создана сразу не «Новой». `placement` —
+    размещение, по которому статус сменила система (ADR-047).
+    """
+
+    product_site = models.ForeignKey(
+        ProductSite,
+        models.PROTECT,
+        verbose_name="площадка у продукта",
+        related_name="status_changes",
+        db_index=False,
+    )
+    from_status = PgEnumField(
+        "был", enum_type="site_status", choices=SiteStatus.choices, null=True, blank=True
+    )
+    to_status = PgEnumField("стал", enum_type="site_status", choices=SiteStatus.choices)
+    source = PgEnumField(
+        "откуда", enum_type="status_source", choices=StatusSource.choices, null=True, blank=True
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="кто",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    placement = models.ForeignKey(
+        "placements.Placement",
+        models.PROTECT,
+        verbose_name="по размещению",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    run_id = models.UUIDField("run_id", null=True, blank=True)
+    changed_at = models.DateTimeField("когда", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_status_changes"
+        verbose_name = "смена статуса площадки"
+        verbose_name_plural = "история статусов площадок"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["product_site", "-changed_at"], name="idx_site_status_changes"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product_site_id}: {self.from_status} → {self.to_status}"
 
 
 class SiteMetric(models.Model):

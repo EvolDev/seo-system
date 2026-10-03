@@ -33,6 +33,8 @@ from apps.sites.importing.rows import (
     parse_keywords,
 )
 from apps.sites.importing.workbook import open_workbook, read_sheet
+from apps.sites.models import StatusSource
+from config.changes import bind_change
 from config.run_id import current_run_id
 
 logger = logging.getLogger(__name__)
@@ -103,7 +105,8 @@ def _import(options: ImportOptions, report: Report) -> None:
 
     # transaction.atomic — всё внутри блока применяется целиком или никак:
     # исключение откатывает все записи, как BEGIN … ROLLBACK в SQL.
-    with transaction.atomic():
+    # bind_change — смены статусов в истории отмечены «импорт таблицы» (ADR-049).
+    with transaction.atomic(), bind_change(StatusSource.IMPORT):
         importer = Importer(
             as_of=options.as_of,
             list_name=options.list_name,

@@ -1,0 +1,19 @@
+/* История статусов (E1-13, ADR-049): в карточке площадки — «история (N)» в
+   строке статуса продукта, список раскрывается под ней; в размещении — список
+   под кнопками статуса. */
+.seo-status-history { display: inline; margin-left: 6px; }
+.seo-status-history > summary {
+  display: inline;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--link-fg, #2a65a8);
+}
+.seo-status-history > summary::-webkit-details-marker { display: none; }
+.seo-status-history > summary::after { content: " ▸"; }
+.seo-status-history[open] > summary::after { content: " ▾"; }
+/* form .aligned ul у админки — отступ 160px под подписи полей; здесь он лишний. */
+ul.seo-status-list,
+form .aligned ul.seo-status-list { margin: 4px 0 6px; padding: 0; }
+ul.seo-status-list li { list-style: none; padding: 2px 0; font-size: 0.8125rem; }
+.seo-card-status ul.seo-status-list a { margin-left: 0; font-size: inherit; }

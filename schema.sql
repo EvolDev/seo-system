@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.11 от 03.10.2026 — история смены статусов площадки и размещения (ADR-049)
 -- Версия 1.10 от 02.10.2026 — статусы площадки: просмотрено, заявка отправлена, отбрасываю, отказала площадка (ADR-047)
 -- Версия 1.9 от 02.10.2026 — выгрузки Ahrefs Batch Analysis, трафик по странам (ADR-045)
 -- Версия 1.8 от 01.10.2026 — загрузка файлов продавцов и каталога Collaborator (ADR-044)
@@ -9,7 +10,7 @@
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 37 таблиц и заглушка auth_user, 10 представлений, 1 функция)
+-- (проверена применением на PostgreSQL 16: 39 таблиц и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -66,6 +67,11 @@ CREATE TYPE upload_kind AS ENUM ('price_list','collaborator_catalog','ahrefs_bat
 CREATE TYPE upload_status AS ENUM ('new','checking','checked','writing','done','failed');
 CREATE TYPE review_group AS ENUM
     ('cheaper','changed','new','rejected','pricier','other_service','same');
+-- Откуда смена статуса (ADR-049): панель и полная форма админки, система по
+-- размещению (ADR-047), импорт таблицы, разбор загрузки, миграция. Пусто — код
+-- не отметил, откуда.
+CREATE TYPE status_source AS ENUM
+    ('panel','form','placement','import','upload','migration');
 
 -- ---------- Блок 1. Площадки ----------
 
@@ -338,6 +344,39 @@ CREATE TABLE placements (
 CREATE INDEX idx_placements_site ON placements(site_id, product_id);
 CREATE INDEX idx_placements_status ON placements(status);
 CREATE INDEX idx_placements_pub ON placements(published_at DESC);
+
+-- История смены статусов (ADR-049): строку пишет триггер при каждой смене
+-- статуса, «кто и откуда» — отметка кода в переменных транзакции seo.change_*
+-- (config/changes.py). Правка без смены статуса строки не даёт.
+-- Не правятся и не удаляются.
+
+-- Статус площадки у продукта. from_status пусто — строка создана сразу не «Новой».
+-- placement_id — размещение, по которому система сменила статус (ADR-047).
+CREATE TABLE site_status_changes (
+    id               bigserial PRIMARY KEY,
+    product_site_id  bigint NOT NULL REFERENCES product_sites(id),
+    from_status      site_status,
+    to_status        site_status NOT NULL,
+    source           status_source,
+    actor_id         integer REFERENCES auth_user(id),
+    placement_id     bigint REFERENCES placements(id),
+    run_id           uuid,
+    changed_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_site_status_changes ON site_status_changes(product_site_id, changed_at DESC);
+
+-- Статус размещения. from_status пусто — размещение создано.
+CREATE TABLE placement_status_changes (
+    id            bigserial PRIMARY KEY,
+    placement_id  bigint NOT NULL REFERENCES placements(id),
+    from_status   placement_status,
+    to_status     placement_status NOT NULL,
+    source        status_source,
+    actor_id      integer REFERENCES auth_user(id),
+    run_id        uuid,
+    changed_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_placement_status_changes ON placement_status_changes(placement_id, changed_at DESC);
 
 CREATE TABLE keywords (
     id           bigserial PRIMARY KEY,
@@ -658,6 +697,59 @@ LANGUAGE sql STABLE AS $$
                 ELSE (SELECT r.rate FROM exchange_rates r WHERE r.currency = cur
                       ORDER BY r.rate_date DESC LIMIT 1) END
 $$;
+
+-- Строка истории статуса (ADR-049). Отметку «откуда, кто, по какому размещению,
+-- run_id» код ставит set_config(…, true) — до конца транзакции; не поставил —
+-- пусто. current_setting(…, true) — пусто, а не ошибка, если отметки не было.
+CREATE FUNCTION log_site_status_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO site_status_changes
+        (product_site_id, from_status, to_status, source, actor_id, placement_id, run_id)
+    VALUES (
+        NEW.id,
+        CASE WHEN TG_OP = 'UPDATE' THEN OLD.status END,
+        NEW.status,
+        NULLIF(current_setting('seo.change_source', true), '')::status_source,
+        NULLIF(current_setting('seo.change_actor', true), '')::integer,
+        NULLIF(current_setting('seo.change_placement', true), '')::bigint,
+        NULLIF(current_setting('seo.change_run_id', true), '')::uuid
+    );
+    RETURN NULL;
+END
+$$;
+
+CREATE FUNCTION log_placement_status_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO placement_status_changes
+        (placement_id, from_status, to_status, source, actor_id, run_id)
+    VALUES (
+        NEW.id,
+        CASE WHEN TG_OP = 'UPDATE' THEN OLD.status END,
+        NEW.status,
+        NULLIF(current_setting('seo.change_source', true), '')::status_source,
+        NULLIF(current_setting('seo.change_actor', true), '')::integer,
+        NULLIF(current_setting('seo.change_run_id', true), '')::uuid
+    );
+    RETURN NULL;
+END
+$$;
+
+-- ---------- Триггеры ----------
+
+-- Смена статуса — строка истории; тот же статус ещё раз — нет (ADR-049). Строки
+-- «Новая», которые создаёт система для каждой пары продукт × площадка, — не смена.
+CREATE TRIGGER product_sites_status_insert AFTER INSERT ON product_sites
+    FOR EACH ROW WHEN (NEW.status <> 'new') EXECUTE FUNCTION log_site_status_change();
+CREATE TRIGGER product_sites_status_update AFTER UPDATE OF status ON product_sites
+    FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION log_site_status_change();
+CREATE TRIGGER placements_status_insert AFTER INSERT ON placements
+    FOR EACH ROW EXECUTE FUNCTION log_placement_status_change();
+CREATE TRIGGER placements_status_update AFTER UPDATE OF status ON placements
+    FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION log_placement_status_change();
 
 -- ---------- Представления ----------
 

@@ -135,6 +135,7 @@ PostgreSQL 16: 37 таблиц и заглушка `auth_user`, 10 предст�
 по лесенке `new` → … → `placed`; новый факт перекрывает `discarded`,
 `declined`, `auditing`, но не `blacklisted`. Правила —
 `apps/sites/statuses.py` и `04-DOMAIN-RULES.md` §1.7 (ADR-047).
+Каждая смена — строка `site_status_changes` (ADR-049).
 
 Общего чёрного списка («не работаем ни под каким продуктом») пока нет:
 когда понадобится — колонка в `sites`, без переделки.
@@ -420,6 +421,31 @@ Clideo) сюда не входит — его показывают ссылко�
 | created_at / updated_at | timestamptz | |
 
 Индексы: `(site_id, product_id)`, `status`, `published_at`.
+
+### `site_status_changes` и `placement_status_changes`
+История смены статусов (ADR-049): строка на каждую смену статуса площадки у
+продукта (`product_sites.status`) и размещения (`placements.status`). Пишет
+триггер в базе — только если статус правда сменился; правка без смены
+статуса и тот же статус ещё раз строки не дают. Строки не правятся и не
+удаляются. История копится с 03.10.2026, задним числом не заполнялась.
+
+| Поле | Тип | Описание |
+|---|---|---|
+| id | bigserial PK | |
+| product_site_id / placement_id | FK product_sites / FK placements | чей статус сменился |
+| from_status | enum, null | был; пусто — запись создана сразу с этим статусом («Создано» у размещения) |
+| to_status | enum | стал. Тип — `site_status` или `placement_status` |
+| source | enum `status_source`, null | откуда: `panel`, `form`, `placement` (система по размещению, ADR-047), `import`, `upload` (блокировка в разборе загрузки и её отмена), `migration`; пусто — код не отметил |
+| actor_id | FK auth_user, null | кто; у `placement` — тот, кто сменил размещение |
+| placement_id | FK placements, null | только у `site_status_changes`: размещение, по которому сменила система |
+| run_id | uuid | цепочка, если смена шла в ней (импорт) |
+| changed_at | timestamptz | когда |
+
+Индексы: `(product_site_id, changed_at DESC)`, `(placement_id, changed_at DESC)`.
+
+«Откуда», «кто», размещение и `run_id` триггер берёт из переменных
+транзакции `seo.change_source`, `seo.change_actor`, `seo.change_placement`,
+`seo.change_run_id` — их ставит код (`config/changes.py`).
 
 ### `placement_links`
 Конкретная ссылка внутри статьи.

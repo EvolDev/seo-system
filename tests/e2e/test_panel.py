@@ -167,6 +167,45 @@ def test_placement_status_from_list(
     assert decision.status == SiteStatus.PLACED
 
 
+def test_status_history_in_panel_and_card(
+    admin_page: Page, live_server: LiveServer, placements: list[Placement]
+) -> None:
+    """Критерий E1-13: смена статуса — в истории размещения и в карточке площадки."""
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/?o=1")
+    mark(page)
+    status = page.locator("#result_list tbody tr", has_text="alpha.com").locator(
+        "a[title='Сменить статус']"
+    )
+    panel = page.locator(PANEL)
+    status.click()
+    panel.locator(".seo-choice-item", has_text="Заявка отправлена").click()
+    panel.locator("[data-panel-save]").click()
+    expect(panel).to_be_hidden()
+
+    # Размещение: история сразу под кнопками статуса, новые сверху.
+    status.click()
+    history = panel.locator("ul.seo-status-list li")
+    expect(history).to_have_count(2)
+    expect(history.first).to_contain_text("Запланировано → Заявка отправлена")
+    expect(history.first).to_contain_text("admin, панель")
+    expect(history.last).to_contain_text("Создано: Запланировано")
+
+    # Карточка площадки из той же панели: «история (1)» у Convertio, раскрывается.
+    panel.locator("a[data-panel]", has_text="Карточка площадки").click()
+    expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com")
+    summary = panel.locator(".seo-status-history summary")
+    expect(summary).to_have_text("история (1)")
+    change = panel.locator(".seo-status-history li")
+    expect(change).to_be_hidden()
+    summary.click()
+    expect(change).to_contain_text("Новая → Заявка отправлена")
+    # «по размещению» — само размещение в той же панели.
+    change.locator("a", has_text="по размещению").click()
+    expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com · Convertio")
+    assert same_document(page)
+
+
 def test_keys_and_unsaved_changes(
     admin_page: Page, live_server: LiveServer, placements: list[Placement]
 ) -> None:

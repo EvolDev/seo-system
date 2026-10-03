@@ -12,6 +12,7 @@
 поля группами, даты без времени, «Заплачено» в валюте.
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
@@ -31,6 +32,7 @@ from apps.placements.forms import PlacementForm
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE
 from apps.placements.models import Placement, PlacementLink
 from apps.placements.tasks import check_indexation
+from apps.sites.status_history import placement_history
 from config.admin import NoDeleteAdmin, StackedInline
 from config.assets import Css, Js
 from config.queue import MAX_ATTEMPTS
@@ -161,10 +163,12 @@ class PlacementAdmin(NoDeleteAdmin):
         "updated_at",
         "indexation_history",
         "indexation_button",
+        "status_history",
     )
     fieldsets = (
         (None, {"fields": ("site", "product")}),
-        (None, {"fields": ("status",)}),
+        # История — сразу под кнопками статуса (E1-13); у новой записи её нет.
+        (None, {"fields": ("status", "status_history")}),
         # По одному полю в строке (сумма с валютой — вместе): панель — по ширине
         # содержимого, без пустого места справа (пользователь, 03.10.2026).
         (
@@ -204,7 +208,9 @@ class PlacementAdmin(NoDeleteAdmin):
 
     class Media:
         js = (Js("seo/indexation.js"),)
-        css: ClassVar[dict[str, tuple[Css, ...]]] = {"all": (Css("seo/indexation.css"),)}
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {
+            "all": (Css("seo/indexation.css"), Css("seo/status-history.css"))
+        }
 
     def get_urls(self) -> list[URLPattern]:
         own = [
@@ -298,7 +304,12 @@ class PlacementAdmin(NoDeleteAdmin):
 
     def get_fieldsets(self, request: HttpRequest, obj: Any = None) -> Any:
         fieldsets = list(super().get_fieldsets(request, obj))
-        if obj is None or not self.in_panel(request):
+        if obj is None:
+            return [
+                (name, {**options, "fields": _without(options["fields"], "status_history")})
+                for name, options in fieldsets
+            ]
+        if not self.in_panel(request):
             return fieldsets
         # Панель: площадка и продукт — в заголовке; кнопка проверки — в «Проверках»
         # (кнопки над формой у панели нет).
@@ -445,6 +456,21 @@ class PlacementAdmin(NoDeleteAdmin):
         )
         self.message_user(request, f"Снова проверяется по расписанию: {count}.")
 
+    @admin.display(description="история статуса")
+    def status_history(self, obj: Placement) -> SafeString | str:
+        """Смены статуса, новые сверху: когда, с какого на какой, кто и откуда (ADR-049)."""
+        rows = placement_history(obj.pk) if obj.pk is not None else []
+        if not rows:
+            return "—"
+        return format_html(
+            '<ul class="seo-status-list">{}</ul>',
+            format_html_join(
+                "",
+                '<li><span class="seo-sub">{}</span> {} · <span class="seo-sub">{}</span></li>',
+                ((row.when, row.change, row.who) for row in rows),
+            ),
+        )
+
     @admin.display(description="проверки индексации")
     def indexation_history(self, obj: Placement) -> str:
         if obj.pk is None:
@@ -460,6 +486,10 @@ class PlacementAdmin(NoDeleteAdmin):
             "<th>Следующая</th></tr></thead><tbody>{}</tbody></table>",
             format_html_join("", "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", rows),
         )
+
+
+def _without(fields: Sequence[Any], name: str) -> tuple[Any, ...]:
+    return tuple(field for field in fields if field != name)
 
 
 def _when(moment: Any) -> str:

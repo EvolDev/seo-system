@@ -133,6 +133,13 @@ LLMClient.run(task="site_audit", payload={...}, run_id=...) -> LLMResult
 системы; на них строятся решения и весь E8. Хранятся вечно, выводятся
 в интерфейс.
 
+История смены статусов площадки и размещения (`site_status_changes`,
+`placement_status_changes`, ADR-049) — тоже доменный аудит. Строку пишет
+триггер в базе при любой смене статуса, «кто и откуда» — отметка кода в
+переменных транзакции (`config/changes.py`): точка входа — `bind_change`,
+запись статуса — внутри `stamped()`. Запрос админки отмечает
+`ChangeContextMiddleware`.
+
 **3. Ошибки** — Sentry, с алертом в Telegram.
 
 **Prometheus, Grafana, Jaeger на старте не ставим.** Обоснование — ADR-012.

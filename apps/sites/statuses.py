@@ -17,9 +17,11 @@
 таблицы, аудита (E4). Человек в окне статуса ставит любой статус.
 """
 
+from django.db import transaction
 from django.utils import timezone
 
-from apps.sites.models import ProductSite, SiteStatus
+from apps.sites.models import ProductSite, SiteStatus, StatusSource
+from config.changes import stamped
 
 LADDER = (
     SiteStatus.NEW,
@@ -48,15 +50,24 @@ def replaceable(target: SiteStatus, *, fact: bool = False) -> tuple[SiteStatus, 
     return behind + OVERRIDDEN_BY_FACT if fact and target in FACTS else behind
 
 
-def advance(site_id: int, product_id: int, target: SiteStatus) -> bool:
+def advance(
+    site_id: int, product_id: int, target: SiteStatus, *, placement_id: int | None = None
+) -> bool:
     """Новый факт размещения: поставить площадке у продукта `target`, если можно.
 
     True — статус сменился. Один UPDATE с условием на текущий статус: строка
     проверяется и меняется разом, решение, которое человек сохранил в ту же
     секунду, не перезаписывается. `update()` не вызывает `save()`, поэтому
     время правки и снятие пометки «импортирована без решения» — здесь же.
+
+    В истории (ADR-049) смена — «по размещению» `placement_id`; кто — тот,
+    кто сменил размещение.
     """
-    changed = ProductSite.objects.filter(
-        site_id=site_id, product_id=product_id, status__in=replaceable(target, fact=True)
-    ).update(status=target, imported_undecided=False, updated_at=timezone.now())
+    with (
+        transaction.atomic(),
+        stamped(source=StatusSource.PLACEMENT, placement_id=placement_id),
+    ):
+        changed = ProductSite.objects.filter(
+            site_id=site_id, product_id=product_id, status__in=replaceable(target, fact=True)
+        ).update(status=target, imported_undecided=False, updated_at=timezone.now())
     return changed > 0

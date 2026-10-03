@@ -70,6 +70,7 @@ from apps.sites.models import (
     SitePrice,
     SiteStatus,
 )
+from apps.sites.status_history import site_history
 from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline, is_partial
 from config.assets import Css, Js
 from config.forms import ChoiceButtons
@@ -321,7 +322,8 @@ class SiteAdmin(NoDeleteAdmin):
 
 
 def _card_context(site: Site) -> dict[str, Any]:
-    """Всё для карточки: метрики, рабочая цена, предложения, история, заметки."""
+    """Всё для карточки: метрики, статусы с историей, рабочая цена, предложения,
+    история цен, заметки."""
     rows = list(
         ProductSiteLatest.objects.filter(site_id=site.pk)
         .select_related("product")
@@ -367,6 +369,7 @@ def _card_context(site: Site) -> dict[str, Any]:
         .select_related("seller")
         .order_by("-checked_at", "-pk")
     )
+    status_history = site_history(site.pk)
     return {
         "site": site,
         "latest": latest,
@@ -375,6 +378,8 @@ def _card_context(site: Site) -> dict[str, Any]:
                 "row": row,
                 "change_url": reverse("admin:sites_productsite_change", args=[row.pk]),
                 "decision_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
+                # Строка «Площадок» — та же строка product_sites (pk общий).
+                "history": status_history.get(row.pk, []),
             }
             for row in rows
         ],

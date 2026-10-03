@@ -56,6 +56,9 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Кто и откуда меняет статусы — для истории статусов (ADR-049). После
+    # AuthenticationMiddleware: ему нужен request.user.
+    "config.changes.ChangeContextMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

@@ -3,7 +3,8 @@
 Тест разворачивает `schema.sql` в отдельной схеме Postgres `ref` внутри
 транзакции теста (после теста она откатывается) и сравнивает с тем, что
 построили миграции в `public`: колонки, значения по умолчанию, индексы,
-ограничения, внешние ключи, значения перечислений, текст представлений.
+ограничения, внешние ключи, значения перечислений, текст представлений,
+функций и триггеров.
 
 Принятые расхождения из ADR-029 нормализуются перед сравнением:
 `id` — identity вместо `bigserial`; `char(n)` — `varchar(n)`; имена,
@@ -33,6 +34,7 @@ from apps.sites.models import (
     PlacementType,
     ReviewGroup,
     SiteStatus,
+    StatusSource,
     UploadKind,
     UploadStatus,
 )
@@ -72,6 +74,9 @@ TABLES = [
     "upload_items",
     # E1-10
     "site_country_metrics",
+    # E1-13
+    "site_status_changes",
+    "placement_status_changes",
 ]
 
 VIEWS = [
@@ -90,8 +95,17 @@ VIEWS = [
     "v_site_country_latest",
 ]
 
-# Функции схемы: E1-07 — пересчёт в евро для представлений.
-FUNCTIONS = ["eur_rate"]
+# Функции схемы: E1-07 — пересчёт в евро для представлений; E1-13 — строки
+# истории статусов для триггеров.
+FUNCTIONS = ["eur_rate", "log_site_status_change", "log_placement_status_change"]
+
+# Триггеры схемы: E1-13 — история статусов (ADR-049).
+TRIGGERS = [
+    "product_sites_status_insert",
+    "product_sites_status_update",
+    "placements_status_insert",
+    "placements_status_update",
+]
 
 ENUMS: dict[str, type[TextChoices]] = {
     "site_status": SiteStatus,
@@ -108,6 +122,7 @@ ENUMS: dict[str, type[TextChoices]] = {
     "upload_kind": UploadKind,
     "upload_status": UploadStatus,
     "review_group": ReviewGroup,
+    "status_source": StatusSource,
 }
 
 REF = "ref"
@@ -263,6 +278,21 @@ def _functions(schema: str) -> dict[str, str | None]:
     return {name: " ".join(str(_unqualify(definition)).split()) for name, definition in rows}
 
 
+def _triggers(schema: str) -> dict[str, str | None]:
+    # Внутренние триггеры внешних ключей — не наши, у них tgisinternal.
+    rows = _rows(
+        """
+        SELECT t.tgname, pg_get_triggerdef(t.oid)
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = %s AND NOT t.tgisinternal
+        """,
+        schema,
+    )
+    return {name: _unqualify(definition) for name, definition in rows}
+
+
 def _enum_labels(schema: str) -> dict[str, list[str]]:
     rows = _rows(
         """
@@ -310,6 +340,13 @@ class TestSchemaParity:
 
     def test_functions(self) -> None:
         assert _functions(OURS) == _functions(REF)
+
+    def test_reference_has_all_triggers(self) -> None:
+        assert set(_triggers(REF)) == set(TRIGGERS)
+
+    def test_triggers(self) -> None:
+        # Лишний триггер в базе — тоже ошибка: его нет в схеме.
+        assert _triggers(OURS) == _triggers(REF)
 
     def test_enum_types(self) -> None:
         assert _enum_labels(OURS) == _enum_labels(REF)

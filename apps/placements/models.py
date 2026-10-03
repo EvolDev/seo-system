@@ -20,7 +20,8 @@ from apps.keywords.models import AnchorType
 from apps.sites import statuses
 
 # Формат размещения — колонка «Тип ссылки» Excel; общий с ценами площадки (ADR-043).
-from apps.sites.models import PlacementType, SiteStatus
+from apps.sites.models import PlacementType, SiteStatus, StatusSource
+from config.changes import stamped
 from config.db import PgEnumField, PgNow
 from config.run_id import current_run_id
 
@@ -171,12 +172,64 @@ class Placement(models.Model):
                 .first()
             )
         # atomic — размещение и статус площадки записываются вместе или никак.
+        # Смену статуса размещения запишет триггер, кто и откуда — отметка (ADR-049).
         with transaction.atomic():
-            super().save(*args, **kwargs)
+            with stamped():
+                super().save(*args, **kwargs)
             target = SITE_STATUS_BY_PLACEMENT.get(self.status)
             moved = before != (self.status, self.site_id, self.product_id)
             if watched and target is not None and moved:
-                statuses.advance(self.site_id, self.product_id, target)
+                statuses.advance(self.site_id, self.product_id, target, placement_id=self.pk)
+
+
+class PlacementStatusChange(models.Model):
+    """Смена статуса размещения — строка истории (ADR-049).
+
+    Пишет только триггер `placements_status_*` в базе; кто и откуда —
+    отметка кода (`config.changes.stamped`). `from_status` пусто —
+    размещение создано.
+    """
+
+    placement = models.ForeignKey(
+        Placement,
+        models.PROTECT,
+        verbose_name="размещение",
+        related_name="status_changes",
+        db_index=False,
+    )
+    from_status = PgEnumField(
+        "был",
+        enum_type="placement_status",
+        choices=PlacementStatus.choices,
+        null=True,
+        blank=True,
+    )
+    to_status = PgEnumField("стал", enum_type="placement_status", choices=PlacementStatus.choices)
+    source = PgEnumField(
+        "откуда", enum_type="status_source", choices=StatusSource.choices, null=True, blank=True
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="кто",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    run_id = models.UUIDField("run_id", null=True, blank=True)
+    changed_at = models.DateTimeField("когда", db_default=PgNow())
+
+    class Meta:
+        db_table = "placement_status_changes"
+        verbose_name = "смена статуса размещения"
+        verbose_name_plural = "история статусов размещений"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["placement", "-changed_at"], name="idx_placement_status_changes"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.placement_id}: {self.from_status} → {self.to_status}"
 
 
 class PlacementLink(models.Model):
