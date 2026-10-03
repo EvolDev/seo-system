@@ -67,32 +67,8 @@ html[data-palette="ahrefs"] body.admin-interface {
 }
 .seo-notes:hover { border-color: var(--link-fg, #2a65a8); }
 
-/* Окно карточки справа. */
-.seo-card-back {
-  position: fixed;
-  inset: 0;
-  z-index: 9990;
-  background: rgba(20, 26, 34, 0.35);
-}
-.seo-card {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 9991;
-  width: min(820px, 100%);
-  overflow-y: auto;
-  padding: 18px 22px 28px;
-  background: var(--body-bg, #fff);
-  color: var(--body-fg, #333);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-}
-.seo-card:focus { outline: none; }
-html.seo-card-open { overflow: hidden; }
-.seo-card-message { color: var(--body-quiet-color, #666); }
-
-/* Содержимое — одинаковое в окне и на странице. */
-.seo-card-content { display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
+/* Карточка площадки — одинаковая в панели справа (seo/panel.css) и на странице. */
+.seo-card-content { display: flex; flex-direction: column; gap: 18px; max-width: 1100px; padding-bottom: 24px; }
 .seo-card-content h3 {
   margin: 0 0 8px;
   color: var(--body-quiet-color, #666);
@@ -103,18 +79,9 @@ html.seo-card-open { overflow: hidden; }
   background: none;
   padding: 0;
 }
-.seo-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.seo-card-title { margin: 0 0 4px; font-size: 1.25rem; font-weight: 500; }
-.seo-card-tools { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
-.seo-card-close {
-  padding: 2px 9px;
-  border: 1px solid var(--border-color, #ccc);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.seo-card-page .seo-card-close { display: none; }
+.seo-card-summary { display: flex; flex-direction: column; gap: 4px; }
+.seo-card-status { font-size: 0.8125rem; }
+.seo-card-status a { margin-left: 6px; font-size: 0.75rem; }
 .seo-card-working { font-size: 0.9375rem; }
 .seo-table-wrap { overflow-x: auto; }
 .seo-card-table { width: 100%; }

@@ -1,4 +1,7 @@
-"""Наши экраны на общей подгрузке (E9-09, ADR-046): загрузки, карточка площадки."""
+"""Наши экраны на общей подгрузке (E9-09, ADR-046): загрузки, проверка индексации.
+
+Карточка площадки и решение по площадке — панелью, tests/e2e/test_panel.py.
+"""
 
 import datetime as dt
 from decimal import Decimal
@@ -17,15 +20,10 @@ from apps.sites.models import (
     ExchangeRate,
     MetricSource,
     Product,
-    ProductSite,
     Seller,
     Site,
-    SiteList,
-    SiteListItem,
     SiteMetric,
-    SiteNote,
     SitePrice,
-    SiteStatus,
 )
 from apps.sites.uploads.plan import start_of_day
 
@@ -106,29 +104,6 @@ def test_price_list_upload_to_review(
     assert same_document(page)
 
 
-def test_site_card_changes_refresh_list_in_place(
-    admin_page: Page, live_server: LiveServer, known: Site
-) -> None:
-    """Заметка в карточке → закрыть → «Площадки» обновились на месте."""
-    site_list = SiteList.objects.create(name="Октябрь")
-    SiteListItem.objects.create(site_list=site_list, site=known)
-    page = admin_page
-    page.goto(f"{live_server.url}/admin/sites/productsitelatest/")
-    mark(page)
-    expect(page.locator(".seo-notes")).to_have_count(0)
-
-    page.locator("#result_list a[data-site-card]", has_text="known.com").click()
-    page.locator(".seo-note-form textarea").fill("Позвонить продавцу")
-    page.locator(".seo-note-form button[type=submit]").click()
-    expect(page.locator(".seo-card")).to_contain_text("Позвонить продавцу")
-
-    with soft_load(page):
-        page.keyboard.press("Escape")
-    expect(page.locator(".seo-notes")).to_have_text("💬 1")
-    assert SiteNote.objects.filter(site=known).count() == 1
-    assert same_document(page)
-
-
 class _FoundEverywhere:
     """Выдача Google без Serper: статья всегда в индексе. Платных запросов нет."""
 
@@ -172,42 +147,11 @@ def test_indexation_buttons_after_soft_navigation(
     expect(done).to_have_count(1)
     page.evaluate(clear)
 
-    with soft_load(page):
-        page.locator("#result_list a", has_text="example.com").click()
-    page.locator("form[data-indexation-form] button").click()
+    # Размещение открывается панелью (E9-11): кнопка проверки — в группе «Проверки».
+    page.locator("#result_list a", has_text="example.com").click()
+    page.locator(".seo-panel button[data-indexation-button]").click()
     expect(done).to_have_count(1)
-    assert same_document(page)
-
-
-def test_status_window_on_sites_list(
-    admin_page: Page, live_server: LiveServer, known: Site
-) -> None:
-    """Статус в «Площадках» — окно «Решение по площадке» поверх списка (E9-09)."""
-    site_list = SiteList.objects.create(name="Октябрь")
-    SiteListItem.objects.create(site_list=site_list, site=known)
-    page = admin_page
-    page.goto(f"{live_server.url}/admin/sites/productsitelatest/")
-    mark(page)
-    status = page.locator("#result_list a[data-decision]")
-    expect(status).to_have_text("Новая")
-
-    # Esc — окно закрылось, ничего не поменялось.
-    status.click()
-    window = page.locator("dialog.seo-dialog")
-    expect(window.locator("select[name=status]")).to_be_visible()
-    page.keyboard.press("Escape")
-    expect(window).not_to_be_visible()
-
-    # Выбрали статус, сохранили — окно закрылось, строка показывает новый статус.
-    # Статусы в окне — в согласованном порядке (E1-12).
-    status.click()
-    options = window.locator("select[name=status] option")
-    expect(options).to_have_text([choice.label for choice in SiteStatus])
-    window.locator("select[name=status]").select_option(label="Отбрасываю")
-    with soft_load(page):
-        window.locator("button[type=submit]").click()
-    expect(window).not_to_be_visible()
-    expect(page.locator("#result_list a[data-decision]")).to_have_text("Отбрасываю")
-    expect(page.locator(".seo-toast-success")).to_contain_text("known.com · Convertio — Отбрасываю")
-    assert ProductSite.objects.get(site=known).status == SiteStatus.DISCARDED
+    expect(page.locator(".seo-panel .field-is_indexed .readonly img")).to_have_attribute(
+        "alt", "True"
+    )
     assert same_document(page)

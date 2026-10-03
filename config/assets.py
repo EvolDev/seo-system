@@ -6,7 +6,7 @@
 файла>`: файл изменился — адрес другой, браузер берёт свежий.
 
 - В шаблонах — `{% load seo_assets %}{% asset 'seo/offers.css' %}`.
-- В `Media` админки — `Css("seo/offers.css")`, `Js("seo/site-card.js")`:
+- В `Media` админки — `Css("seo/offers.css")`, `Js("seo/indexation.js")`:
   Django рисует объекты с `__html__` как есть, и версия считается при
   каждой отрисовке страницы, а не при запуске сервера.
 """

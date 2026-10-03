@@ -1,0 +1,13 @@
+{% comment %}
+Низ панели записи (E9-11): «Сохранить» и «Отмена», закреплены внизу
+(seo/panel.css). Без права на правку — только «Закрыть». Строка вопроса о
+несохранённых правках появляется здесь же (seo/panel.js).
+{% endcomment %}
+<footer class="seo-panel-foot">
+  {% if panel_can_save %}
+  <button type="submit" name="_save" class="seo-btn seo-btn-primary" data-panel-save>Сохранить</button>
+  <button type="button" class="seo-btn" data-panel-cancel>Отмена</button>
+  {% else %}
+  <button type="button" class="seo-btn" data-panel-cancel>Закрыть</button>
+  {% endif %}
+</footer>

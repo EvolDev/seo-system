@@ -69,12 +69,19 @@ class TestOrder:
     def test_labels(self) -> None:
         assert [status.label for status in SiteStatus] == AGREED
 
-    def test_decision_window(self, admin_client: Client, site: Site, convertio: Product) -> None:
+    def test_decision_panel(self, admin_client: Client, site: Site, convertio: Product) -> None:
         url = reverse("admin:sites_productsite_decision", args=[_row(site, convertio).pk])
         page = admin_client.get(url, headers=PARTIAL).content.decode()
-        select = re.search(r'<select name="status".*?</select>', page, re.S)
-        assert select is not None
-        assert re.findall(r"<option[^>]*>([^<]*)</option>", select.group()) == AGREED
+        buttons = re.search(r'<div class="seo-choice".*?</div></div>', page, re.S)
+        assert buttons is not None
+        assert re.findall(r"<span>([^<]*)</span>", buttons.group()) == AGREED
+        # Ряды: путь площадки, отказы, аудит.
+        rows = re.findall(r'<div class="seo-choice-row">(.*?)</div>', buttons.group(), re.S)
+        assert [re.findall(r"<span>([^<]*)</span>", row) for row in rows] == [
+            AGREED[:5],
+            AGREED[5:8],
+            AGREED[8:],
+        ]
 
     def test_status_filter(self, admin_client: Client, site: Site) -> None:
         response = admin_client.get(SITES_URL, {"list": "all"})

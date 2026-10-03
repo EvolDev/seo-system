@@ -3,7 +3,7 @@
 Шаг 4 — разбор загрузки (E1-08, ADR-043, ADR-044), по прототипу
 price-review.html. Вкладки — ссылки; решения в строке и для отмеченных —
 без перезагрузки (seo/uploads.js), клавиши J/K, A, S, X, O, отмена — U.
-Домен открывает карточку площадки окном (seo/site-card.js).
+Домен открывает карточку площадки панелью справа (seo/panel.js).
 {% endcomment %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
@@ -74,7 +74,7 @@ price-review.html. Вкладки — ссылки; решения в строк
               <td class="seo-cb"><input type="checkbox" data-select aria-label="Отметить {{ r.domain }}"></td>
             {% endif %}
             <td>
-              <a href="{{ r.card_url }}" data-site-card data-open>{{ r.domain }}</a>
+              <a href="{{ r.card_url }}" data-panel data-open>{{ r.domain }}</a>
               {% if r.item.site_created %}<span class="seo-chip seo-info">новая в базе</span>{% endif %}
               {% if r.item.source_value %}<span class="seo-chip" title="В файле: {{ r.item.source_value }}">из адреса</span>{% endif %}
               {% for reason in r.row.rejected %}<div class="seo-warnline">{{ reason }}</div>{% endfor %}

@@ -3,7 +3,13 @@
 {% comment %}
 Хлебные крошки без уровня приложения Django (E9-08): меню собрано по работе
 человека (config/admin_site.py), и «Начало › Площадки › Площадки» только путало.
+
+Класс seo-panel-list — записи списка открываются панелью справа (E9-11,
+`panel = True` у админки): seo/panel.js перехватывает ссылки строк на запись и
+«Добавить».
 {% endcomment %}
+{% block bodyclass %}{{ block.super }}{% if cl.model_admin.panel %} seo-panel-list{% endif %}{% endblock %}
+
 {% block breadcrumbs %}
 <div class="breadcrumbs">
 <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>

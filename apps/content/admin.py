@@ -275,6 +275,7 @@ class DomainSettingAdmin(NoDeleteAdmin):
     Локальные значения здесь не показываются — их правят на странице продукта.
     """
 
+    panel = True
     form = GeneralSettingForm
     list_display = ("key", "value_text", "description", "updated_at")
     search_fields = ("key", "description")

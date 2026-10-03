@@ -121,6 +121,8 @@ def _widgets(page: Page) -> dict[str, int]:
         """() => ({
             dateTime: document.querySelectorAll('.vDateField, .vTimeField').length,
             shortcuts: document.querySelectorAll('#content-main .datetimeshortcuts').length,
+            days: document.querySelectorAll('#content-main input[type=date]').length,
+            today: document.querySelectorAll('#content-main [data-today]').length,
             autocomplete: document.querySelectorAll(
                 'select.admin-autocomplete:not([name*=__prefix__])').length,
             select2: document.querySelectorAll('#content-main .select2-container').length,
@@ -133,10 +135,11 @@ def _widgets(page: Page) -> dict[str, int]:
 def test_admin_scripts_work_after_soft_navigation(
     admin_page: Page, live_server: LiveServer, placement: Placement
 ) -> None:
-    """Главная без jQuery → список → форма → «Сохранить и продолжить».
+    """Главная без jQuery → список → панель → полная форма → «Сохранить и продолжить».
 
     Штатные скрипты Django на каждом экране работают ровно один раз: галочки
-    и счётчик, календарь, автодополнение, «Добавить ещё», окно «+».
+    и счётчик, автодополнение, «Добавить ещё», окно «+», календарь (у формы
+    позиции ключа: у размещения даты — днём без времени, E9-11).
     """
     page = admin_page
     page.goto(f"{live_server.url}/admin/")
@@ -148,21 +151,18 @@ def test_admin_scripts_work_after_soft_navigation(
     expect(page.locator(".action-counter")).to_contain_text("1 из 1")
     expect(page.locator("#result_list tbody tr").first).to_have_class("selected")
 
+    # Запись — панелью (E9-11), полная форма — «Открыть полностью», тоже подгрузкой.
+    page.locator("#result_list a", has_text="blog.example.com").click()
     with soft_load(page):
-        page.locator("#result_list a", has_text="blog.example.com").click()
+        page.locator(".seo-panel a", has_text="Открыть полностью").click()
     expect(page.locator("#content h1")).to_contain_text("Размещение")
 
     for _ in range(2):  # открыта переходом, затем — после сохранения
         counts = _widgets(page)
-        assert counts["shortcuts"] == counts["dateTime"] > 0
+        assert counts["today"] == counts["days"] == 2
         assert counts["select2"] == counts["autocomplete"] > 0
         page.locator(".add-row a").click()
         assert _widgets(page)["inlines"] == counts["inlines"] + 1
-
-        # Календарь открывается.
-        page.locator(".datetimeshortcuts a[id^=calendarlink]").first.click()
-        expect(page.locator(".calendarbox:visible")).to_have_count(1)
-        page.keyboard.press("Escape")
 
         # Автодополнение ищет.
         page.locator("#id_site + .select2-container").click()
@@ -178,6 +178,16 @@ def test_admin_scripts_work_after_soft_navigation(
         with soft_load(page):
             page.locator("input[name=_continue]").click()
         expect(page.locator(".messagelist")).to_contain_text("успешно")
+
+    # Календарь Django — у формы позиции ключа.
+    for _ in range(2):  # открыта переходом, затем — после второго перехода
+        with soft_load(page):
+            page.evaluate("seoNav.visit('/admin/keywords/keywordposition/add/')")
+        counts = _widgets(page)
+        assert counts["shortcuts"] == counts["dateTime"] > 0
+        page.locator(".datetimeshortcuts a[id^=calendarlink]").first.click()
+        expect(page.locator(".calendarbox:visible")).to_have_count(1)
+        page.keyboard.press("Escape")
 
     assert same_document(page)
 
@@ -213,12 +223,13 @@ def test_forms_without_reload(
     placement.refresh_from_db()
     assert placement.skip_checks
 
-    # Ошибка в форме: остаёмся на форме, новой записи в истории нет.
+    # Ошибка в полной форме: остаёмся на форме, новой записи в истории нет.
+    page.locator("#result_list a", has_text="blog.example.com").click()
     with soft_load(page):
-        page.locator("#result_list a", has_text="blog.example.com").click()
+        page.locator(".seo-panel a", has_text="Открыть полностью").click()
     change_url = page.url
     history = page.evaluate("history.length")
-    page.locator("#id_ordered_at_0").fill("не дата")
+    page.locator("#id_price_paid_cents").fill("не сумма")
     with soft_load(page):
         page.locator("input[name=_save]").click()
     expect(page.locator(".errornote")).to_be_visible()
@@ -226,7 +237,7 @@ def test_forms_without_reload(
     assert page.evaluate("history.length") == history
 
     # Исправили — список с сообщением об успехе.
-    page.locator("#id_ordered_at_0").fill("")
+    page.locator("#id_price_paid_cents").fill("")
     with soft_load(page):
         page.locator("input[name=_save]").click()
     expect(page).to_have_url(f"{live_server.url}{PLACEMENTS}")
@@ -332,7 +343,15 @@ def test_every_menu_screen_opens_softly(
         expect(page).to_have_url(f"{live_server.url}{href}")
         expect(page.locator("#content")).to_be_visible()
         add = page.locator(".object-tools a.addlink")
-        if add.count():
+        if not add.count():
+            continue
+        # Списки с панелью (E9-11) открывают форму «Добавить» панелью справа.
+        if "seo-panel-list" in (page.locator("body").get_attribute("class") or ""):
+            add.first.click()
+            expect(page.locator(".seo-panel form")).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(page.locator(".seo-panel")).to_be_hidden()
+        else:
             with soft_load(page):
                 add.first.click()
             expect(page.locator("#content form")).to_be_visible()

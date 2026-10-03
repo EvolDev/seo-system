@@ -1,7 +1,7 @@
-"""Окно «Решение по площадке» в «Площадках» (E9-09): статус без перехода.
+"""«Решение по площадке» в «Площадках» (E9-09, E9-11): статус без перехода.
 
-Окно (seo/site-decision.js) берёт форму и отправляет её с заголовком
-X-Seo-Partial; браузерную часть проверяет tests/e2e/test_soft_nav_screens.py.
+Панель справа (seo/panel.js) берёт форму и отправляет её с заголовком
+X-Seo-Partial; браузерную часть проверяет tests/e2e/test_panel.py.
 """
 
 import pytest
@@ -30,21 +30,28 @@ def _url(row: ProductSite) -> str:
     return reverse("admin:sites_productsite_decision", args=[row.pk])
 
 
-def test_sites_list_status_opens_decision_window(admin_client: Client, row: ProductSite) -> None:
+def test_sites_list_status_opens_decision_panel(admin_client: Client, row: ProductSite) -> None:
     site_list = SiteList.objects.create(name="Октябрь")
     SiteListItem.objects.create(site_list=site_list, site=row.site)
     page = admin_client.get(reverse("admin:sites_productsitelatest_changelist")).content.decode()
-    assert f'data-decision="{_url(row)}"' in page
-    assert "seo/site-decision.js" in page
+    # Щелчок — панель с решением, Ctrl и без скрипта — полная форма.
+    full = reverse("admin:sites_productsite_change", args=[row.pk])
+    assert f'<a href="{full}" data-panel="{_url(row)}" title="Сменить статус">Новая</a>' in page
+    assert "seo/panel.js" in page
 
 
-def test_window_gets_only_the_form(admin_client: Client, row: ProductSite) -> None:
+def test_panel_gets_only_the_form(admin_client: Client, row: ProductSite) -> None:
     response = admin_client.get(_url(row), headers=PARTIAL)
     page = response.content.decode()
     assert response.status_code == 200
     assert "<html" not in page
-    assert "coingabbar.com · Convertio" in page
-    assert 'name="status"' in page and 'name="reject_reason"' in page
+    assert '<h2 class="seo-panel-title">coingabbar.com · Convertio</h2>' in page
+    # Статус — кнопками; рядом — карточка той же площадки в той же панели.
+    assert 'type="radio" name="status"' in page and 'name="reject_reason"' in page
+    card = reverse("admin:sites_site_card", args=[row.site_id])
+    assert f'<a href="{card}" data-panel>Карточка площадки</a>' in page
+    assert "data-panel-save" in page
+    assert "seo/widgets.css" in page.split("<header")[0]  # стили кнопок — до содержимого
     assert "Импортирована без решения" in page
 
 
@@ -73,7 +80,8 @@ def test_save_status_and_reason(admin_client: Client, row: ProductSite) -> None:
 
 def test_wrong_status_shows_form_with_error(admin_client: Client, row: ProductSite) -> None:
     response = admin_client.post(_url(row), {"status": "New", "reject_reason": ""}, headers=PARTIAL)
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("text/html")
     assert "errorlist" in response.content.decode()
     row.refresh_from_db()
     assert row.status == SiteStatus.NEW

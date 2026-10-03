@@ -6,6 +6,10 @@
 Проверка индексации (E2-03): кнопка в карточке и действие в списке ставят
 проверку в очередь, в карточке — история проверок. «Не проверять» убирает
 размещение из проверок по расписанию.
+
+Размещение открывается панелью справа поверх списка (E9-11): щелчок по
+площадке или статусу. Форма — `apps/placements/forms.py`: статус кнопками,
+поля группами, даты без времени, «Заплачено» в валюте.
 """
 
 from datetime import datetime, timedelta
@@ -19,9 +23,11 @@ from django.shortcuts import get_object_or_404
 from django.urls import URLPattern, path, reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
+from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
+from apps.placements.forms import PlacementForm
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE
 from apps.placements.models import Placement, PlacementLink
 from apps.placements.tasks import check_indexation
@@ -60,14 +66,17 @@ class PlacementLinkInline(StackedInline):
         "last_checked_at",
         "lost_at",
     )
+    # По одному полю в строке: панель размещения — по ширине содержимого (E9-11).
     fieldsets = (
         (
             None,
             {
                 "fields": (
-                    ("anchor", "anchor_type"),
+                    "anchor",
+                    "anchor_type",
                     "target_url",
-                    ("keyword", "link_index"),
+                    "keyword",
+                    "link_index",
                     "extraction_test_passed",
                 )
             },
@@ -102,6 +111,17 @@ def _queue_checks(placement_ids: list[int]) -> list[str]:
         ]
 
 
+# Группы формы размещения; ссылки статьи (инлайн) — между «Публикацией» и
+# «Проверками»: Django рисует их после всех групп, поэтому группы после
+# ссылок шаблон рисует отдельно (admin/placements/placement/change_form.html).
+REQUEST = "Заявка"
+PUBLICATION = "Публикация"
+CHECKS = "Проверки"
+COMMENT = "Комментарий"
+SERVICE = "Служебное"
+AFTER_LINKS = (CHECKS, COMMENT, SERVICE)
+
+
 @admin.register(Placement)
 class PlacementAdmin(NoDeleteAdmin):
     """Размещения. Проверка индексации без перезагрузки страницы — кнопка ↻ в
@@ -110,14 +130,19 @@ class PlacementAdmin(NoDeleteAdmin):
     запросом (`check_indexation_batch_view`), спрашивает их состояние тоже
     одним (`indexation_status_view`) и показывает ход и итог всплывающим
     окном. Без скрипта кнопка в карточке и действие работают с переходом.
+
+    В панели (E9-11) площадка и продукт — в заголовке, а не полями: правят их
+    на полной странице. Кнопка проверки там — в группе «Проверки».
     """
 
+    panel = True
+    form = PlacementForm
     list_display = (
         "site",
         "product",
-        "status",
+        "status_link",
         "placement_type",
-        "published_at",
+        "published_day",
         "indexed_cell",
         "indexed_at_cell",
         "skip_checks",
@@ -135,6 +160,44 @@ class PlacementAdmin(NoDeleteAdmin):
         "created_at",
         "updated_at",
         "indexation_history",
+        "indexation_button",
+    )
+    fieldsets = (
+        (None, {"fields": ("site", "product")}),
+        (None, {"fields": ("status",)}),
+        # По одному полю в строке (сумма с валютой — вместе): панель — по ширине
+        # содержимого, без пустого места справа (пользователь, 03.10.2026).
+        (
+            REQUEST,
+            {
+                "fields": (
+                    "placement_type",
+                    "seller",
+                    "employee",
+                    "collaborator_order_id",
+                    "ordered_at",
+                    ("price_paid_cents", "currency"),
+                    "ad_label_requested",
+                )
+            },
+        ),
+        (
+            PUBLICATION,
+            {
+                "fields": (
+                    "article_url",
+                    "published_at",
+                    "announce_on_homepage",
+                    "clicks_from_homepage",
+                )
+            },
+        ),
+        (
+            CHECKS,
+            {"fields": ("is_indexed", "indexed_checked_at", "skip_checks", "indexation_history")},
+        ),
+        (COMMENT, {"fields": ("comment",)}),
+        (SERVICE, {"classes": ("collapse",), "fields": ("run_id", "created_at", "updated_at")}),
     )
     inlines = (PlacementLinkInline,)
     actions = ("check_indexation_action", "skip_checks_action", "resume_checks_action")
@@ -229,6 +292,44 @@ class PlacementAdmin(NoDeleteAdmin):
             items[str(placement_id)] = state
         return JsonResponse({"items": items})
 
+    def panel_title(self, obj: Placement) -> str:
+        # Статус — кнопками в самой форме, в заголовке он лишний.
+        return f"{obj.site.domain} · {obj.product.name}"
+
+    def get_fieldsets(self, request: HttpRequest, obj: Any = None) -> Any:
+        fieldsets = list(super().get_fieldsets(request, obj))
+        if obj is None or not self.in_panel(request):
+            return fieldsets
+        # Панель: площадка и продукт — в заголовке; кнопка проверки — в «Проверках»
+        # (кнопки над формой у панели нет).
+        result = []
+        for name, options in fieldsets:
+            fields = options["fields"]
+            if fields == ("site", "product"):
+                continue
+            if name == CHECKS:
+                # Кнопка — сразу под «Индексация проверена».
+                at = fields.index("indexed_checked_at") + 1
+                options = {**options, "fields": (*fields[:at], "indexation_button", *fields[at:])}
+            result.append((name, options))
+        return result
+
+    def render_change_form(
+        self,
+        request: HttpRequest,
+        context: dict[str, Any],
+        add: bool = False,
+        change: bool = False,
+        form_url: str = "",
+        obj: Any = None,
+    ) -> Any:
+        context["after_links"] = AFTER_LINKS
+        if obj is not None:
+            context["panel_links"] = [
+                ("Карточка площадки", reverse("admin:sites_site_card", args=[obj.site_id]), True)
+            ]
+        return super().render_change_form(request, context, add, change, form_url, obj)
+
     def change_view(
         self,
         request: HttpRequest,
@@ -245,6 +346,39 @@ class PlacementAdmin(NoDeleteAdmin):
             extra["indexation_urls"] = _batch_urls()
             extra["indexation_name"] = placement.site.domain
         return super().change_view(request, object_id, form_url, extra)
+
+    @admin.display(description="статус", ordering="status")
+    def status_link(self, obj: Placement) -> SafeString:
+        # Щелчок — панель с формой размещения, статус в ней первым (seo/panel.js);
+        # с Ctrl и без скрипта — полная страница.
+        url = reverse("admin:placements_placement_change", args=[obj.pk])
+        return format_html(
+            '<a href="{}" title="Сменить статус">{}</a>', url, obj.get_status_display()
+        )
+
+    @admin.display(description="опубликовано", ordering="published_at")
+    def published_day(self, obj: Placement) -> str:
+        # День без времени — как в форме: время публикации никто не вводит.
+        if obj.published_at is None:
+            return ""
+        return f"{timezone.localtime(obj.published_at):%d.%m.%Y}"
+
+    @admin.display(description="проверить сейчас")
+    def indexation_button(self, obj: Placement) -> SafeString | str:
+        """Кнопка проверки внутри формы (панель): без формы вокруг — форма в форме нельзя."""
+        if obj.pk is None or not obj.article_url:
+            return "Нет адреса статьи — проверять нечего."
+        check_url, status_url = _batch_urls()
+        return format_html(
+            '<button type="button" class="seo-btn" data-indexation-button data-check-url="{}"'
+            ' data-status-url="{}" data-placement="{}" data-name="{}"'
+            ' title="Поиск в Google по адресу статьи, около 0,1 цента">'
+            "Проверить индексацию</button>",
+            check_url,
+            status_url,
+            obj.pk,
+            obj.site.domain,
+        )
 
     @admin.display(description="в индексе", ordering="is_indexed")
     def indexed_cell(self, obj: Placement) -> str:

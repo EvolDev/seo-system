@@ -31,7 +31,9 @@
  *
  * Наши скрипты зовут `window.seoNav`: visit(url) — перейти, reload() —
  * перечитать экран на месте, render(html, url) — показать страницу, которую
- * скрипт получил сам (отправка файла с ходом загрузки), progress — полоска,
+ * скрипт получил сам (отправка файла с ходом загрузки), mount(container, doc,
+ * source) — показать кусок полученной страницы в контейнере со стилями,
+ * скриптами и виджетами (панель записи, E9-11), progress — полоска,
  * toast(text, kind) — сообщение внизу справа.
  * Без скрипта всё работает обычными переходами.
  */
@@ -487,8 +489,10 @@
     });
   }
 
+  // Возвращает добавленные стили: панель записи снимает свои, когда закрывается.
   function loadStyles(doc) {
     var have = new Set(stylesOf(document));
+    var added = [];
     var waits = stylesOf(doc).filter(function (href) { return !have.has(href); }).map(function (href) {
       return new Promise(function (resolve) {
         var link = document.createElement("link");
@@ -498,9 +502,10 @@
         link.addEventListener("error", resolve);
         setTimeout(resolve, STYLE_TIMEOUT_MS);
         document.head.appendChild(link);
+        added.push(link);
       });
     });
-    return Promise.all(waits);
+    return Promise.all(waits).then(function () { return added; });
   }
 
   // Стили прошлого экрана, которых у нового нет (списки — у формы), убираем:
@@ -594,39 +599,76 @@
     return wait;
   }
 
+  // Был ли файл на странице до перехода. Пути в наборе — с /static/ впереди,
+  // сравниваем окончание.
+  function wasLoaded(loadedBefore, path) {
+    return Array.from(loadedBefore).some(function (key) { return key.slice(-path.length) === path; });
+  }
+
   // Штатные скрипты Django и темы, которые запускаются один раз при загрузке
   // страницы. Новые (загруженные этим переходом) уже запустились сами.
   async function restartAdmin(loadedBefore, hadJQuery, sidebarReplaced) {
-    var $ = hasJQuery() ? window.django.jQuery : null;
-    // Пути в наборе — с /static/ впереди, сравниваем окончание.
-    var was = function (path) {
-      return Array.from(loadedBefore).some(function (key) { return key.slice(-path.length) === path; });
-    };
+    var was = function (path) { return wasLoaded(loadedBefore, path); };
     var again = RERUN.slice();
-    if (!hadJQuery && $) again = again.concat(NEED_JQUERY);
+    if (!hadJQuery && hasJQuery()) again = again.concat(NEED_JQUERY);
     if (sidebarReplaced) again.push(NAV_SIDEBAR);
     // Файлы выполняются по порядку вставки: плагин раньше того, кто его зовёт.
     await Promise.all(again.filter(was).map(rerun));
     if (was("/admin/js/filters.js")) restoreFilters();
+    restartWidgets(document, loadedBefore);
+    // Сворачивание групп меню (тема) — тоже по load: window.onload.
+    if (typeof window.onload === "function") window.onload(new Event("load"));
+  }
+
+  // Виджеты полей формы внутри scope (страница или панель записи).
+  function restartWidgets(scope, loadedBefore) {
+    var $ = hasJQuery() ? window.django.jQuery : null;
+    var was = function (path) { return wasLoaded(loadedBefore, path); };
     // Автодополнение: его скрипт слушает document — выполнять заново нельзя.
     if ($ && $.fn.djangoAdminSelect2 && was("/admin/js/autocomplete.js")) {
-      $(".admin-autocomplete").not("[name*=__prefix__]").djangoAdminSelect2();
+      $(scope).find(".admin-autocomplete").not("[name*=__prefix__]").djangoAdminSelect2();
     }
     // Ссылки «изменить / посмотреть» у выбранного связанного объекта.
     if ($ && was("/admin/js/admin/RelatedObjectLookups.js")) {
-      $(".related-widget-wrapper select").trigger("change");
+      $(scope).find(".related-widget-wrapper select").trigger("change");
     }
     // Календарь, часы и выбор из двух списков ждут события load у окна, а оно
     // было один раз. Старые окошки календаря остаются скрытыми в <body>: их
-    // ищут обработчики прошлого экрана, удалять нельзя.
-    if (window.DateTimeShortcuts) window.DateTimeShortcuts.init();
+    // ищут обработчики прошлого экрана, удалять нельзя. Календарь ищет поля
+    // по всей странице и второй раз добавил бы значки к уже настроенным —
+    // зовём, только когда в scope есть поля даты.
+    if (window.DateTimeShortcuts && scope.querySelector("input.vDateField, input.vTimeField")) {
+      window.DateTimeShortcuts.init();
+    }
     if (window.SelectFilter) {
-      document.querySelectorAll("select.selectfilter, select.selectfilterstacked").forEach(function (el) {
+      scope.querySelectorAll("select.selectfilter, select.selectfilterstacked").forEach(function (el) {
         window.SelectFilter.init(el.id, el.dataset.fieldName, parseInt(el.dataset.isStacked, 10));
       });
     }
-    // Сворачивание групп меню (тема) — тоже по load: window.onload.
-    if (typeof window.onload === "function") window.onload(new Event("load"));
+  }
+
+  // ---------- Кусок страницы в контейнере (панель записи, E9-11) ----------
+
+  // Показать в container содержимое source из ответа doc (разобранного
+  // DOMParser) — так панель записи показывает форму с сервера. Порядок тот же,
+  // что у перехода: стили — до показа, скрипты — после вставки (штатные скрипты
+  // Django настраивают то, что уже на странице), затем скрипты внутри куска.
+  // Перезапуск штатного — только внутри container: список под панелью уже
+  // настроен, повторный actions.js задвоил бы его обработчики. inlines.js
+  // ищет наборы строк по всей странице, но под панелью их нет.
+  // Возвращает стили, добавленные ради куска.
+  async function mount(container, doc, source) {
+    var added = await loadStyles(doc);
+    var loadedBefore = loadedScripts();
+    var hadJQuery = hasJQuery();
+    container.innerHTML = source.innerHTML;
+    await loadScripts(doc, loadedBefore);
+    await runInlineScripts(container);
+    var again = ["/admin/js/inlines.js"];
+    if (!hadJQuery && hasJQuery()) again = again.concat(NEED_JQUERY);
+    await Promise.all(again.filter(function (path) { return wasLoaded(loadedBefore, path); }).map(rerun));
+    restartWidgets(container, loadedBefore);
+    return added;
   }
 
   // Что делает filters.js: свёрнутые и раскрытые фильтры списка помнятся
@@ -787,6 +829,7 @@
     visit: visit,
     render: function (html, url) { return render(html, url, { push: !sameUrl(url, window.location.href), scroll: "top" }); },
     reload: function () { return visit(window.location.href, { push: false, scroll: "keep" }); },
+    mount: mount,
     progress: progress,
     toast: toast,
     enabled: !off,

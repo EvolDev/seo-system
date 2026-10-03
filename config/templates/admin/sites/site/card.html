@@ -1,16 +1,12 @@
 {% extends "admin/base_site.html" %}
 {% comment %}
-Карточка площадки отдельной страницей — если окно не открылось (нет
+Карточка площадки отдельной страницей — если панель не открылась (нет
 скрипта) или ссылку открыли в новой вкладке. Содержимое — card_body.html.
 {% endcomment %}
 {% load static seo_assets %}
 
 {% block extrastyle %}{{ block.super }}
 <link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
-{% endblock %}
-
-{% block extrahead %}{{ block.super }}
-<script src="{% asset 'seo/site-card.js' %}" defer></script>
 {% endblock %}
 
 {% block breadcrumbs %}

@@ -7,13 +7,13 @@
 from typing import Any
 
 import pytest
-from django import forms
 from django.contrib import admin
 from django.test import Client
 from django.urls import reverse
 
 from apps.sites.models import Product, ProductSite, Site, SiteList, SiteStatus
 from config.admin_site import HIDDEN, SeoAdminSite
+from config.forms import ChoiceButtons
 
 pytestmark = pytest.mark.django_db
 
@@ -167,7 +167,8 @@ def test_status_fields_stay_dropdowns(admin_client: Client) -> None:
     row = ProductSite.objects.get(site=site, product=product)
     response = admin_client.get(reverse("admin:sites_productsite_change", args=[row.pk]))
     status = response.context["adminform"].form.fields["status"]
-    assert isinstance(status.widget, forms.Select)
+    # С E9-11 — кнопками по порядку (config/forms.py); это тоже выбор из списка.
+    assert isinstance(status.widget, ChoiceButtons)
     assert [value for value, _ in status.choices] == [value for value, _ in SiteStatus.choices]
 
     response = admin_client.post(
@@ -179,4 +180,4 @@ def test_status_fields_stay_dropdowns(admin_client: Client) -> None:
     assert row.status == SiteStatus.APPROVED
 
     placement = admin_client.get(reverse("admin:placements_placement_add"))
-    assert isinstance(placement.context["adminform"].form.fields["status"].widget, forms.Select)
+    assert isinstance(placement.context["adminform"].form.fields["status"].widget, ChoiceButtons)

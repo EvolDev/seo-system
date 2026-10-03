@@ -762,7 +762,7 @@
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       var target = event.target instanceof Element ? event.target : null;
       if (target && target.closest("input, textarea, select, [contenteditable]")) return;
-      if (document.querySelector(".seo-card:not([hidden])")) return; // открыта карточка
+      if (document.documentElement.classList.contains("seo-panel-open")) return; // открыта панель
       var key = event.key.toLowerCase();
       var row = rows[focus];
       if (key === "j" || key === "о") setFocus(focus + 1);
@@ -783,7 +783,7 @@
     }
     document.addEventListener("keydown", onKey);
     // Цену поменяли в карточке площадки — разбор перечитает общая подгрузка
-    // (seo/site-card.js → seoNav.reload()), с прокруткой на месте.
+    // (seo/panel.js → seoNav.reload()), с прокруткой на месте.
     cleanups.push(function () {
       document.removeEventListener("keydown", onKey);
     });

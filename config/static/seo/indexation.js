@@ -1,8 +1,8 @@
 /* Проверка индексации без перезагрузки страницы (E2-03).
  *
  * Откуда запускается: кнопка ↻ в колонке «в индексе», действие «Проверить
- * индексацию» для отмеченных строк списка, кнопка в карточке. Всё — одна
- * пачка проверок:
+ * индексацию» для отмеченных строк списка, кнопка в карточке (форма над ней)
+ * и в группе «Проверки» панели размещения (E9-11). Всё — одна пачка проверок:
  * 1. POST …/check-indexation/ с `ids` — сервер ставит проверки в очередь и
  *    отвечает id задач;
  * 2. скрипт спрашивает состояние всей пачки одним запросом
@@ -288,12 +288,22 @@
     };
   }
 
-  // Карточка: поля только для чтения и история проверок.
-  function cardView(form) {
-    var button = form.querySelector("button");
+  // Карточка: поля только для чтения и история проверок; заодно — ячейки
+  // строки списка под панелью (E9-11), если она на экране.
+  function cardView(box) {
+    var button = box.matches("button") ? box : box.querySelector("button");
     var label = button.textContent;
+    var id = button.closest("[data-placement]").getAttribute("data-placement");
+    var cells = {
+      value: document.querySelector('#result_list [data-indexed="' + id + '"]'),
+      checkedAt: document.querySelector('#result_list [data-indexed-at="' + id + '"]'),
+    };
+    // Два поля в одной строке формы: у строки классы обоих полей, поэтому
+    // сначала ищем ячейку самого поля (fieldBox), потом — строку.
     function field(name) {
-      return document.querySelector(".field-" + name + " .readonly");
+      var form = button.closest(".seo-panel") || document;
+      return form.querySelector(".fieldBox.field-" + name + " .readonly")
+        || form.querySelector(".form-row.field-" + name + " .readonly");
     }
     return {
       busy: function (on) {
@@ -307,9 +317,26 @@
         if (indexed) indexed.innerHTML = state.indexed_html;
         if (checkedAt) checkedAt.textContent = state.checked_at;
         if (history && state.history_html) history.innerHTML = state.history_html;
+        if (cells.value) cells.value.innerHTML = state.indexed_html;
+        if (cells.checkedAt) cells.checkedAt.textContent = state.checked_at;
       },
     };
   }
+
+  // Кнопка в группе «Проверки» панели размещения: внутри формы своей формы
+  // у неё нет — запускаем по щелчку.
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("button[data-indexation-button]");
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    run(
+      [{ id: button.getAttribute("data-placement"), name: button.getAttribute("data-name"),
+         view: cardView(button) }],
+      button.getAttribute("data-check-url"),
+      button.getAttribute("data-status-url"),
+      true
+    );
+  });
 
   // Кнопка ↻ в строке.
   document.addEventListener("click", function (event) {

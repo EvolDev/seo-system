@@ -1,0 +1,71 @@
+/* Виджеты форм под удобство (E9-11, ADR-048) — config/forms.py, seo/widgets.js.
+   Цвета и скругления — от расцветки (admin-palettes.css). */
+
+/* Выбор кнопками: статусы по порядку, ряд за рядом. Под кнопкой — обычная
+   радиокнопка, прозрачная поверх неё: Tab, стрелки и отправка формы — штатные. */
+.seo-choice { display: flex; flex-direction: column; gap: 6px; }
+.seo-choice-row { display: flex; flex-wrap: wrap; gap: 6px; }
+body.admin-interface .seo-choice label.seo-choice-item {
+  position: relative;
+  display: inline-flex;
+  float: none;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font-weight: normal;
+  cursor: pointer;
+}
+.seo-choice-item input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.seo-choice-item span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: var(--seo-radius, 8px);
+  color: var(--body-fg, #333);
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background-color .15s, border-color .15s, color .15s;
+}
+.seo-choice-item:hover span { border-color: var(--body-quiet-color, #888); background: var(--darkened-bg, #f0f0f0); }
+.seo-choice-item input:checked + span {
+  border-color: var(--seo-accent, #2a65a8);
+  background: var(--seo-accent, #2a65a8);
+  color: var(--seo-on-accent, #fff);
+  font-weight: 600;
+}
+.seo-choice-item input:focus-visible + span { outline: 2px solid var(--seo-accent, #2a65a8); outline-offset: 2px; }
+.seo-choice-item input:disabled + span { opacity: .5; cursor: not-allowed; }
+
+/* День без времени: поле даты браузера и «Сегодня». */
+.seo-day { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.admin-interface .seo-day input[type="date"] {
+  min-height: 32px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 6px;
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+html[data-mode="dark"] .seo-day input[type="date"] { color-scheme: dark; }
+body.admin-interface .seo-day .seo-btn { min-height: 28px; padding: 4px 12px; font-size: 0.75rem; }
+body.admin-interface .seo-day.seo-day-auto input[type="date"] {
+  border-color: var(--seo-accent, #2a65a8);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--seo-accent, #2a65a8) 22%, transparent);
+}

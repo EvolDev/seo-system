@@ -15,6 +15,7 @@ from config.admin import NoDeleteAdmin, SnapshotAdmin
 
 @admin.register(Keyword)
 class KeywordAdmin(NoDeleteAdmin):
+    panel = True
     list_display = ("keyword", "product", "tool", "page_type", "volume", "anchor_type", "is_active")
     list_filter = ("product", "tool", "is_active", "anchor_type")
     # Поиск нужен и выбору ключа у ссылки размещения.

@@ -10,7 +10,6 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
 
-from apps.sites.admin import PARTIAL_HEADER
 from apps.sites.models import (
     ExchangeRate,
     Product,
@@ -22,6 +21,7 @@ from apps.sites.models import (
     SitePrice,
     SiteStatus,
 )
+from config.admin import PARTIAL_HEADER
 
 pytestmark = pytest.mark.django_db
 

@@ -1,28 +1,26 @@
-{% load l10n %}
+{% load l10n seo_assets %}
 {% comment %}
 Карточка площадки (E1-07, ADR-043): метрики, рабочая цена, предложения
 продавцов, история цен, прочие данные, заметки. Одна и та же разметка — в
-окне справа (seo/site-card.js подгружает её без перезагрузки) и на
-отдельной странице card.html. Формы с data-card-form окно отправляет само
-и показывает обновлённую карточку; без скрипта они уходят обычным путём.
-{% endcomment %}
+панели справа (panel — запрос панели, seo/panel.js, E9-11) и на отдельной
+странице card.html. Формы с data-card-form панель отправляет сама и
+показывает обновлённую карточку; без скрипта они уходят обычным путём.
+Ссылки с data-panel («Факты о площадке», «сменить» у статуса) открывают
+запись в той же панели.
+{% endcomment %}{% if panel %}<link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
+{% include "admin/panel_head.html" %}{% endif %}
 <div class="seo-card-content">
-  <div class="seo-card-head">
-    <div>
-      <h2 class="seo-card-title">{{ site.domain }}</h2>
-      <div class="seo-sub">
-        {% if latest %}DR {{ latest.dr|default:"—" }}{{ metrics_mark }} · трафик {{ latest.organic_traffic|default:"—" }}{% if latest.metrics_at %} · замер {{ latest.metrics_at|date:"d.m.Y" }}{% endif %}{% else %}Метрик нет{% endif %}
-      </div>
-      {% if statuses %}
-      <div class="seo-sub">
-        {% for row in statuses %}{{ row.product.name }}: <b>{{ row.get_status_display }}</b>{% if row.reject_reason %} — {{ row.reject_reason }}{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
-      </div>
-      {% endif %}
+  <div class="seo-card-summary">
+    <div class="seo-sub">
+      {% if latest %}DR {{ latest.dr|default:"—" }}{{ metrics_mark }} · трафик {{ latest.organic_traffic|default:"—" }}{% if latest.metrics_at %} · замер {{ latest.metrics_at|date:"d.m.Y" }}{% endif %}{% else %}Метрик нет{% endif %}
     </div>
-    <div class="seo-card-tools">
-      <a href="{{ change_url }}">Факты о площадке</a>
-      <button type="button" class="seo-card-close" data-card-close aria-label="Закрыть карточку">✕</button>
+    {% for status in statuses %}
+    <div class="seo-card-status">
+      {{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.reject_reason %} — {{ status.row.reject_reason }}{% endif %}
+      {% if can_change %}<a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
     </div>
+    {% endfor %}
+    {% if not panel %}<div><a href="{{ change_url }}">Факты о площадке</a></div>{% endif %}
   </div>
 
   <section>

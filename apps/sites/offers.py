@@ -31,6 +31,8 @@ from apps.sites.models import (
 )
 
 TABLE_SOURCE = "таблица линкбилдинга"
+# Валюты прайсов и оплат — на выбор в формах (загрузка прайса, размещение).
+CURRENCIES = ("USD", "EUR", "GBP", "PLN", "CZK", "UAH")
 
 _SYMBOLS = {"EUR": "€", "USD": "$", "GBP": "£"}
 

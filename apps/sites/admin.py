@@ -70,17 +70,16 @@ from apps.sites.models import (
     SitePrice,
     SiteStatus,
 )
-from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline
+from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline, is_partial
 from config.assets import Css, Js
-
-# Окно карточки просит у сервера только её содержимое, без страницы вокруг.
-PARTIAL_HEADER = "X-Seo-Partial"
+from config.forms import ChoiceButtons
 
 
 @admin.register(Product)
 class ProductAdmin(NoDeleteAdmin):
     """Продукт и его настройки: заводя продукт, человек сразу видит, что заполнить."""
 
+    panel = True
     form = ProductSettingsForm
     list_display = ("name", "domain", "is_active", "created_at")
     readonly_fields = ("created_at",)
@@ -184,6 +183,7 @@ def card_url(site_id: int) -> str:
 class SiteAdmin(NoDeleteAdmin):
     """Каталог площадок — факты о площадке. Цены и заметки — в её карточке."""
 
+    panel = True
     list_display = ("domain", "working_price", "language", "link_type", "marks_as_ad", "is_deleted")
     list_filter = (DeletedFilter, "language", "link_type", "marks_as_ad")
     search_fields = ("domain",)
@@ -195,7 +195,6 @@ class SiteAdmin(NoDeleteAdmin):
     inlines = (ProductSiteInline,)
 
     class Media:
-        js = (Js("seo/site-card.js"),)
         css: ClassVar[dict[str, tuple[Css, ...]]] = {"all": (Css("seo/offers.css"),)}
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Site]:
@@ -236,12 +235,13 @@ class SiteAdmin(NoDeleteAdmin):
     def card_link(self, obj: Site) -> SafeString | str:
         if obj.pk is None:
             return "появится после сохранения"
+        # Открывается в той же панели (seo/panel.js), на полной странице — тоже панелью.
         return format_html(
-            '<a href="{}" data-site-card>Цены, предложения продавцов и заметки</a>',
+            '<a href="{}" data-panel>Цены, предложения продавцов и заметки</a>',
             card_url(obj.pk),
         )
 
-    # ---------- Карточка площадки: окно в «Площадках» или отдельная страница ----------
+    # ---------- Карточка площадки: панель справа или отдельная страница ----------
 
     def get_urls(self) -> list[URLPattern]:
         own = [
@@ -269,9 +269,11 @@ class SiteAdmin(NoDeleteAdmin):
         return own + super().get_urls()
 
     def card_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Карточка: панели (заголовок X-Seo-Partial) — только содержимое, иначе страница."""
         site = get_object_or_404(Site.all_objects.select_related("price__seller"), pk=object_id)
         if not self.has_view_permission(request, site):
             return HttpResponse(status=403)
+        partial = is_partial(request)
         context = {
             **self.admin_site.each_context(request),
             **_card_context(site),
@@ -279,8 +281,14 @@ class SiteAdmin(NoDeleteAdmin):
             "subtitle": "Карточка площадки",
             "opts": self.model._meta,
             "can_change": self.has_change_permission(request, site),
+            "panel": partial,
+            "panel_title": site.domain,
+            "panel_sub": "Карточка площадки",
+            "panel_links": [
+                ("Факты о площадке", reverse("admin:sites_site_change", args=[site.pk]), True)
+            ],
+            "panel_full_url": card_url(site.pk),
         }
-        partial = request.headers.get(PARTIAL_HEADER) == "1"
         template = "admin/sites/site/card_body.html" if partial else "admin/sites/site/card.html"
         return TemplateResponse(request, template, context)
 
@@ -306,8 +314,8 @@ class SiteAdmin(NoDeleteAdmin):
         return self._back_to_card(request, object_id)
 
     def _back_to_card(self, request: HttpRequest, object_id: int) -> HttpResponse:
-        # Окно ждёт новую карточку целиком, страница без скрипта — переход на неё.
-        if request.headers.get(PARTIAL_HEADER) == "1":
+        # Панель ждёт новую карточку целиком, страница без скрипта — переход на неё.
+        if is_partial(request):
             return self.card_view(request, object_id)
         return HttpResponseRedirect(card_url(object_id))
 
@@ -362,7 +370,14 @@ def _card_context(site: Site) -> dict[str, Any]:
     return {
         "site": site,
         "latest": latest,
-        "statuses": rows,
+        "statuses": [
+            {
+                "row": row,
+                "change_url": reverse("admin:sites_productsite_change", args=[row.pk]),
+                "decision_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
+            }
+            for row in rows
+        ],
         "metrics_mark": seller_mark(latest.metrics_seller)
         if latest is not None and latest.metrics_trusted is False
         else "",
@@ -392,14 +407,23 @@ def _card_context(site: Site) -> dict[str, Any]:
     }
 
 
+# Ряды кнопок статуса площадки: путь площадки, отказы, аудит (ADR-047).
+SITE_STATUS_ROWS = (SiteStatus.DISCARDED, SiteStatus.AUDITING)
+
+
 class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
-    """Окно «Решение по площадке» из «Площадок»: статус и причина отказа."""
+    """Решение по площадке: статус кнопками по порядку и причина отказа.
+
+    Панель «Решение по площадке» в «Площадках»; у полной формы решения те же
+    кнопки (`ProductSiteAdmin.formfield_for_dbfield`).
+    """
 
     class Meta:
         model = ProductSite
         fields = ("status", "reject_reason")
         widgets: ClassVar[dict[str, forms.Widget]] = {
-            "reject_reason": forms.Textarea(attrs={"rows": 3})
+            "status": ChoiceButtons(rows=SITE_STATUS_ROWS),
+            "reject_reason": forms.Textarea(attrs={"rows": 3}),
         }
 
 
@@ -407,8 +431,8 @@ class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
 class ProductSiteAdmin(NoDeleteAdmin):
     """Решения по площадкам: статус площадки у продукта (ADR-030).
 
-    В «Площадках» статус открывает окно с этим решением без перехода
-    (`decision_view`, seo/site-decision.js, E9-09); полная форма — здесь.
+    В «Площадках» статус открывает решение панелью справа (`decision_view`,
+    seo/panel.js, E9-11); полная форма — здесь, с теми же кнопками статуса.
     """
 
     list_display = ("site", "product", "status", "imported_undecided", "updated_at")
@@ -419,6 +443,13 @@ class ProductSiteAdmin(NoDeleteAdmin):
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
+
+    def formfield_for_dbfield(
+        self, db_field: "models.Field[Any, Any]", request: HttpRequest, **kwargs: Any
+    ) -> forms.Field | None:
+        if db_field.name == "status":
+            kwargs["widget"] = ChoiceButtons(rows=SITE_STATUS_ROWS)
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def save_model(self, request: HttpRequest, obj: ProductSite, form: Any, change: bool) -> None:
         super().save_model(request, obj, form, change)
@@ -435,15 +466,15 @@ class ProductSiteAdmin(NoDeleteAdmin):
         return own + super().get_urls()
 
     def decision_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
-        """Окно решения: GET — форма, POST — сохранить.
+        """Решение панелью: GET — форма, POST — сохранить.
 
-        Окно (заголовок X-Seo-Partial) получает только форму, после записи —
-        JSON с подписью для сообщения; список под окном перечитывается сам.
+        Панель (заголовок X-Seo-Partial) получает только форму, после записи —
+        JSON с подписью для сообщения; строку списка панель обновит сама.
         Без скрипта — полная форма решения.
         """
         row = get_object_or_404(ProductSite.objects.select_related("site", "product"), pk=object_id)
         change_url = reverse("admin:sites_productsite_change", args=[row.pk])
-        if request.headers.get(PARTIAL_HEADER) != "1":
+        if not is_partial(request):
             return HttpResponseRedirect(change_url)
         if not self.has_change_permission(request, row):
             return HttpResponse(status=403)
@@ -456,19 +487,22 @@ class ProductSiteAdmin(NoDeleteAdmin):
         context = {
             "form": form,
             "row": row,
-            "change_url": change_url,
             "action_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
+            "panel_title": f"{row.site.domain} · {row.product.name}",
+            "panel_sub": "Решение по площадке",
+            "panel_links": [("Карточка площадки", card_url(row.site_id), True)],
+            "panel_full_url": change_url,
+            "panel_can_save": True,
         }
-        status = 400 if request.method == "POST" else 200
-        return TemplateResponse(
-            request, "admin/sites/productsite/decision_body.html", context, status=status
-        )
+        # Ошибка в форме — та же форма с подсказками, код 200, как у формы записи.
+        return TemplateResponse(request, "admin/sites/productsite/decision_body.html", context)
 
 
 @admin.register(Seller)
 class SellerAdmin(NoDeleteAdmin):
     """Продавцы (ADR-041, ADR-043). Collaborator — тоже продавец, его заводит миграция."""
 
+    panel = True
     list_display = (
         "name",
         "currency",
@@ -610,6 +644,7 @@ class SiteAuditAdmin(SiteSnapshotAdmin):
 class SiteListAdmin(NoDeleteAdmin):
     """Рабочие списки (ADR-033). Создаёт их импорт; здесь — обзор и имя."""
 
+    panel = True
     list_display = (
         "name",
         "sites_count",
@@ -1064,7 +1099,8 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
 
     Строка — это представление, поэтому сами строки не правятся. Статус
     меняется по ссылке в колонке «статус», цены и заметки — в карточке
-    (окно по щелчку на домене), рабочая цена отмеченных строк — действиями.
+    (панель справа по щелчку на домене, E9-11), рабочая цена отмеченных
+    строк — действиями.
     Всё, что в колонках, приходит одним запросом из представления, плюс
     один запрос — предложения строк страницы.
     """
@@ -1111,7 +1147,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     actions = ("accept_new_prices_action", "fix_seller_action", "keep_current_action")
 
     class Media:
-        js = (Js("seo/site-card.js"), Js("seo/site-decision.js"), Js("seo/country-picker.js"))
+        js = (Js("seo/country-picker.js"),)
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             "all": (Css("seo/offers.css"), Css("flags/sprite-hq.css"))
         }
@@ -1175,20 +1211,20 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
 
     @admin.display(description="домен", ordering="domain")
     def domain_link(self, obj: ProductSiteLatest) -> SafeString:
-        # Карточка открывается окном без перезагрузки (seo/site-card.js),
-        # без скрипта — отдельной страницей.
+        # Карточка открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
+        # скрипта — отдельной страницей.
         return format_html(
-            '<a href="{}" data-site-card title="Карточка площадки">{}</a>',
+            '<a href="{}" data-panel title="Карточка площадки">{}</a>',
             card_url(obj.site_id),
             obj.domain,
         )
 
     @admin.display(description="статус", ordering="status")
     def status_link(self, obj: ProductSiteLatest) -> SafeString:
-        # Решение открывается окном поверх списка (seo/site-decision.js, E9-09),
-        # с Ctrl и без скрипта — полной формой.
+        # Решение открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
+        # скрипта — полной формой.
         return format_html(
-            '<a href="{}" data-decision="{}" title="Сменить статус">{}</a>',
+            '<a href="{}" data-panel="{}" title="Сменить статус">{}</a>',
             reverse("admin:sites_productsite_change", args=[obj.pk]),
             reverse("admin:sites_productsite_decision", args=[obj.pk]),
             obj.get_status_display(),
@@ -1309,7 +1345,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         last = obj.last_note or ""
         when = _day(obj.last_note_at)
         return format_html(
-            '<a class="seo-notes" href="{}" data-site-card title="{}">💬 {}</a>',
+            '<a class="seo-notes" href="{}" data-panel title="{}">💬 {}</a>',
             card_url(obj.site_id),
             f"{last}\n{when}".strip(),
             obj.notes_count,

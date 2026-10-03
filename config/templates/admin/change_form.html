@@ -3,6 +3,11 @@
 {% comment %}
 Хлебные крошки без уровня приложения Django (E9-08), как в списках
 (config/templates/admin/change_list.html).
+
+Панель записи (E9-11, ADR-048): seo_panel — запрос панели к админке с
+`panel = True` (config/admin.py). Панель берёт со страницы #content: вместо
+заголовка страницы — шапка панели, вместо кнопок внизу — закреплённые
+«Сохранить» и «Отмена»; «История» и удаление — на полной странице.
 {% endcomment %}
 {% block breadcrumbs %}
 <div class="breadcrumbs">
@@ -11,3 +16,8 @@
 &rsaquo; {% if add %}новая запись{% else %}{{ original|truncatewords:"18" }}{% endif %}
 </div>
 {% endblock %}
+
+{% block content_title %}{% if seo_panel %}{% include "admin/panel_head.html" %}{% else %}{{ block.super }}{% endif %}{% endblock %}
+{% block content_subtitle %}{% if not seo_panel %}{{ block.super }}{% endif %}{% endblock %}
+{% block object-tools %}{% if not seo_panel %}{{ block.super }}{% endif %}{% endblock %}
+{% block submit_buttons_bottom %}{% if seo_panel %}{% include "admin/panel_foot.html" %}{% else %}{{ block.super }}{% endif %}{% endblock %}

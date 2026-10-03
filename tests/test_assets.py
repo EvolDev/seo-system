@@ -26,8 +26,8 @@ def test_media_objects_render_versioned_tags() -> None:
         str(Css("seo/offers.css").__html__()),
     )
     assert re.fullmatch(
-        r'<script src="/static/seo/site-card\.js\?v=\d+"></script>',
-        str(Js("seo/site-card.js").__html__()),
+        r'<script src="/static/seo/indexation\.js\?v=\d+"></script>',
+        str(Js("seo/indexation.js").__html__()),
     )
     assert Css("seo/offers.css") == Css("seo/offers.css")
 

@@ -33,7 +33,7 @@ from apps.sites.models import (
     UploadKind,
     UploadStatus,
 )
-from apps.sites.offers import money
+from apps.sites.offers import CURRENCIES, money
 from apps.sites.rates import latest_rates
 from apps.sites.tasks import upload_check, upload_write
 from apps.sites.uploads import filters, review, service
@@ -43,7 +43,6 @@ from config.admin import NoDeleteAdmin
 from config.assets import Css
 from config.run_id import bind_run_id, new_run_id
 
-CURRENCIES = ("USD", "EUR", "GBP", "PLN", "CZK", "UAH")
 # Запрос со страницы без перезагрузки (seo/uploads.js) — ответ JSON.
 AJAX_HEADER = "X-Seo-Ajax"
 ALLOWED_SUFFIXES = (".xlsx", ".xlsm", ".csv", ".tsv", ".txt")
@@ -717,5 +716,5 @@ def _int(value: str | None) -> int | None:
 
 
 def card_url(site_id: int) -> str:
-    """Карточка площадки — окном по ссылке с data-site-card (seo/site-card.js)."""
+    """Карточка площадки — панелью справа по ссылке с data-panel (seo/panel.js)."""
     return reverse("admin:sites_site_card", args=[site_id])
