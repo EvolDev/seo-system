@@ -382,6 +382,53 @@ class TestRepeatedImport:
             "— не тронуто"
         ]
 
+    def test_clideo_placement_from_upload_is_completed(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        # Список доменов от продавца (E1-09) дал размещение Clideo без адреса;
+        # таблица с адресом его дополняет, а не заводит второе (ADR-051).
+        _, clideo = products
+        site = Site.objects.create(domain="a.com")
+        placement = Placement.objects.create(
+            site=site, product=clideo, status=PlacementStatus.ORDERED
+        )
+        book = make_workbook(
+            base=[("a.com", {"Пример статьи на Clideo": "https://a.com/clideo"})],
+            keywords=KEYWORDS,
+        )
+        run(book)
+        placement.refresh_from_db()
+        assert Placement.objects.filter(product=clideo).count() == 1
+        assert placement.article_url == "https://a.com/clideo"
+        assert placement.status == PlacementStatus.PUBLISHED
+        assert _status("a.com", clideo).status == SiteStatus.PLACED
+
+    def test_clideo_article_matches_other_url_notation(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        # Адрес из файла коллеги — без www и метки текста: та же статья.
+        _, clideo = products
+        site = Site.objects.create(domain="a.com")
+        Placement.objects.create(
+            site=site,
+            product=clideo,
+            status=PlacementStatus.PUBLISHED,
+            article_url="https://a.com/blog/clideo/",
+        )
+        url = "https://www.a.com/blog/clideo#:~:text=Video%20editor"
+        report = run(
+            make_workbook(base=[("a.com", {"Пример статьи на Clideo": url})], keywords=KEYWORDS)
+        )
+        [placement] = Placement.objects.filter(product=clideo)
+        assert placement.article_url == "https://a.com/blog/clideo/"
+        assert report.counts["placements"][Outcome.UNCHANGED] == 1
+
     def test_placement_moves_forward_only(
         self,
         make_workbook: MakeWorkbook,

@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.13 от 04.10.2026 — загрузки размещений и ссылающиеся домены Ahrefs (ADR-051)
 -- Версия 1.12 от 03.10.2026 — сохранённые наборы фильтров списков (ADR-050)
 -- Версия 1.11 от 03.10.2026 — история смены статусов площадки и размещения (ADR-049)
 -- Версия 1.10 от 02.10.2026 — статусы площадки: просмотрено, заявка отправлена, отбрасываю, отказала площадка (ADR-047)
@@ -11,7 +12,7 @@
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 40 таблиц и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
+-- (проверена применением на PostgreSQL 16: 41 таблица и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -64,7 +65,8 @@ CREATE TYPE task_status AS ENUM ('running','success','failed');
 CREATE TYPE placement_type AS ENUM ('guest_post','link_insertion');
 CREATE TYPE review_verdict AS ENUM ('accepted','needs_revision','rejected');
 -- Загрузка файла (ADR-044): что за файл, где он в работе, вкладка разбора.
-CREATE TYPE upload_kind AS ENUM ('price_list','collaborator_catalog','ahrefs_batch');
+CREATE TYPE upload_kind AS ENUM
+    ('price_list','collaborator_catalog','ahrefs_batch','placements','ahrefs_refdomains');
 CREATE TYPE upload_status AS ENUM ('new','checking','checked','writing','done','failed');
 CREATE TYPE review_group AS ENUM
     ('cheaper','changed','new','rejected','pricier','other_service','same');
@@ -273,11 +275,16 @@ CREATE TABLE exchange_rates (
 -- Загрузка файла продавца или каталога Collaborator (ADR-044): файл, разметка
 -- колонок, сводка до записи, итог записи. Результат — рабочий список. Выгрузка
 -- Ahrefs Batch Analysis (ADR-045) — без продавца и рабочего списка, со страной.
+-- Размещения продукта (ADR-051) — с продуктом; продавец и сотрудник — «от кого
+-- файл», подставляются в строки без своих колонок. Ссылающиеся домены Ahrefs
+-- (ADR-051) — с продуктом, без продавца и рабочего списка.
 CREATE TABLE uploads (
     id            bigserial PRIMARY KEY,
     kind          upload_kind NOT NULL,
-    seller_id     bigint REFERENCES sellers(id),  -- пусто только у выгрузки Ahrefs: замер наш
-    prices_date   date NOT NULL,                -- дата цен (у Ahrefs — замера): на неё пишутся снимки
+    seller_id     bigint REFERENCES sellers(id),  -- обязателен у прайса и каталога
+    product_id    bigint REFERENCES products(id), -- обязателен у размещений и ссылающихся доменов
+    employee_id   integer REFERENCES auth_user(id), -- «от кого» у файла размещений
+    prices_date   date NOT NULL,                -- дата цен (у Ahrefs — замера, у размещений — файла)
     country       char(2),                      -- страна выгрузки Ahrefs; пусто — все страны
     file_name     text NOT NULL,                -- имя файла у пользователя
     file_path     text NOT NULL,                -- путь от папки загрузок, её видит воркер
@@ -295,7 +302,10 @@ CREATE TABLE uploads (
     author_id     integer REFERENCES auth_user(id),   -- кто загрузил
     created_at    timestamptz NOT NULL DEFAULT now(),
     written_at    timestamptz,
-    CONSTRAINT uploads_seller_check CHECK (seller_id IS NOT NULL OR kind = 'ahrefs_batch')
+    CONSTRAINT uploads_seller_check
+        CHECK (seller_id IS NOT NULL OR kind IN ('ahrefs_batch','placements','ahrefs_refdomains')),
+    CONSTRAINT uploads_product_check
+        CHECK (product_id IS NOT NULL OR kind IN ('price_list','collaborator_catalog','ahrefs_batch'))
 );
 
 -- Строка разбора загрузки: предложение из файла и с чем его сравнили. Вкладка —
@@ -314,6 +324,25 @@ CREATE TABLE upload_items (
     source_value    text                             -- адрес из файла, если там не домен
 );
 CREATE INDEX idx_upload_items_upload ON upload_items(upload_id, review_group);
+
+-- Кто ссылается на продукт — по выгрузке Ahrefs «Referring domains» (ADR-051).
+-- Отдельно от площадок: google.com и тысячи случайных доменов в «Площадки» не
+-- попадают. Площадка с тем же доменом (точное совпадение) в «Площадках» продукта
+-- по умолчанию скрыта. Ссылка пропала — дата Lost у Ahrefs или домена нет в новой
+-- выгрузке продукта; строка не удаляется, вернулся — пометки снимаются.
+CREATE TABLE product_ref_domains (
+    id             bigserial PRIMARY KEY,
+    product_id     bigint NOT NULL REFERENCES products(id),
+    domain         text NOT NULL,
+    first_seen_at  timestamptz,                   -- First seen у Ahrefs
+    lost_at        timestamptz,                   -- Lost у Ahrefs: ссылка пропала
+    seen_on        date NOT NULL,                 -- дата последней выгрузки, где домен есть
+    missing_since  date,                          -- дата выгрузки, где его не стало
+    upload_id      bigint REFERENCES uploads(id), -- эта последняя выгрузка
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (product_id, domain)
+);
 
 -- ---------- Блок 2. Размещения ----------
 
@@ -336,6 +365,7 @@ CREATE TABLE placements (
     announce_on_homepage   boolean,
     clicks_from_homepage   smallint,
     comment                text,
+    extra                  jsonb,          -- прочие данные строки файла: заголовок → значение (ADR-051)
     seller_id              bigint REFERENCES sellers(id),    -- через кого куплено
     employee_id            integer REFERENCES auth_user(id), -- кто из сотрудников вёл
     run_id                 uuid,

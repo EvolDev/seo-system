@@ -117,6 +117,9 @@ class Placement(models.Model):
     comment = models.TextField(
         "комментарий", null=True, blank=True, help_text="Что не так с полученной статьёй."
     )
+    # «Прочие данные» строки файла размещений: колонки без своего поля,
+    # заголовок → значение (E1-09). Из файла ничего не теряется (ADR-041).
+    extra = models.JSONField("прочие данные из файла", null=True, blank=True)
     # Через кого куплено и кто из сотрудников вёл (ADR-041). Сотрудник —
     # пользователь системы, можно без права входа.
     seller = models.ForeignKey(

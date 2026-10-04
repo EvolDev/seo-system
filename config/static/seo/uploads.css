@@ -2,6 +2,8 @@
    Цвета — переменные расцветок и offers.css (--seo-down ▼, --seo-up ▲). */
 
 .seo-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+/* Шаги другого типа файла — скрыты: `display: flex` выше иначе перебил бы `hidden`. */
+.seo-steps[hidden] { display: none; }
 .seo-steps li {
   list-style: none; padding: 4px 10px; border-radius: 999px; font-size: 0.8125rem;
   background: var(--darkened-bg, #f4f4f4); color: var(--body-quiet-color, #666);
@@ -163,6 +165,9 @@
 .seo-icon-btn:hover { opacity: 1; border-color: var(--hairline-color, #ddd); background: var(--darkened-bg, #f4f4f4); }
 .seo-dropdown li.seo-active { background: var(--seo-info-bg); }
 .submit-row + .seo-boxes { margin-top: 16px; }
+/* Несколько кнопок записи в одном ряду — у каждой своя форма и свой лоадер (E1-09). */
+.seo-run-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.seo-run-row > form { margin: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .seo-refreshing::after { animation: none; }

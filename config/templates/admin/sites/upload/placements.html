@@ -1,0 +1,166 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Файл размещений (E1-09, ADR-051): сводка до записи и итог. Разбора нет — решать
+нечего: размещения дополняются, а что в базе другое — список «Расходится с базой»
+и кнопка «Записать, заменив расходящиеся». Пока идёт проверка или запись, страница
+опрашивает состояние (seo/uploads.js).
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<p class="seo-lead">
+  Размещения <b>{{ upload.product.name }}</b> из файла «{{ upload.file_name }}»{% if upload.seller %}, от продавца {{ upload.seller.name }}{% endif %}{% if upload.employee %}, от сотрудника {{ upload.employee.first_name|default:upload.employee.username }}{% endif %} · файл на {{ upload.prices_date|date:"d.m.Y" }}{% if upload.currency %} · цены в {{ upload.currency }}{% endif %}.
+</p>
+{% if busy %}
+  <div class="seo-busy" data-state-url="{% url 'admin:sites_upload_state' upload.pk %}">
+    <div class="seo-spin" aria-hidden="true"></div>
+    <div>
+      <b data-state-label>{{ upload.get_status_display }}…</b>
+      <div class="seo-sub">Задача очереди «{% if upload.status == 'writing' %}upload_write{% else %}upload_check{% endif %}» — видна в «Запусках задач». Обычно несколько секунд.</div>
+    </div>
+  </div>
+{% elif upload.status == 'failed' %}
+  <div class="errornote">{{ upload.error }}</div>
+  <div class="submit-row">
+    <a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">К колонкам</a>
+    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить файл снова</a>
+  </div>
+{% else %}
+  {% if done %}
+    <div class="seo-stats">
+      <div class="seo-stat seo-good"><b>{{ counts.placements_created|default:0 }}</b><span>размещений создано</span></div>
+      <div class="seo-stat"><b>{{ counts.placements_updated|default:0 }}</b><span>дополнено</span></div>
+      <div class="seo-stat"><b>{{ counts.placements_unchanged|default:0 }}</b><span>без изменений</span></div>
+      <div class="seo-stat"><b>{{ counts.sites_created|default:0 }}</b><span>новых площадок</span></div>
+      <div class="seo-stat"><b>{{ counts.links_created|default:0 }}</b><span>ссылок</span></div>
+      <div class="seo-stat"><b>{{ counts.checks_created|default:0 }}</b><span>отметок индексации</span></div>
+      <div class="seo-stat"><b>{{ counts.offers_created|default:0 }}</b><span>цен продавцов, рабочих — {{ counts.working_set|default:0 }}</span></div>
+      <div class="seo-stat"><b>{{ counts.sellers_created|default:0 }}</b><span>новых продавцов</span></div>
+      <div class="seo-stat"><b>{{ counts.employees_created|default:0 }}</b><span>новых сотрудников</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.conflicts_total|default:0 }}</b><span>расходилось с базой{% if result.runs.0.action == 'replace' %} — заменено{% else %} — не тронуто{% endif %}</span></div>
+    </div>
+    <p class="seo-hint">
+      Площадки файла — в рабочем списке «{{ list_name }}»: в «Площадках» другого продукта у них видно «другие продукты: {{ upload.product.name }}», а у площадок без рабочей цены — цена продавца, через которого брали.
+    </p>
+    <div class="submit-row">
+      {% if sites_url %}<a class="seo-btn" href="{{ sites_url }}">Открыть «Площадки»</a>{% endif %}
+      <a class="seo-btn" href="{{ placements_url }}">Размещения {{ upload.product.name }}</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить ещё файл</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+    </div>
+  {% else %}
+    <p class="seo-lead">В базу ещё ничего не записано. Проверьте цифры и списки ниже и нажмите «Записать в базу».</p>
+    <div class="seo-stats">
+      <div class="seo-stat"><b>{{ summary.rows }}</b><span>строк в файле</span></div>
+      <div class="seo-stat"><b>{{ summary.sites }}</b><span>площадок: в базе {{ summary.known }}, новых {{ summary.new }}</span></div>
+      <div class="seo-stat seo-good"><b>{{ summary.placements_new }}</b><span>размещений будет создано</span></div>
+      <div class="seo-stat"><b>{{ summary.placements_supplemented }}</b><span>дополнится</span></div>
+      <div class="seo-stat"><b>{{ summary.placements_unchanged }}</b><span>уже есть, без изменений</span></div>
+      <div class="seo-stat"><b>{{ summary.links_new }}</b><span>новых ссылок</span></div>
+      <div class="seo-stat"><b>{{ summary.checks_new }}</b><span>отметок индексации</span></div>
+      <div class="seo-stat"><b>{{ summary.offers_new }}</b><span>цен продавцов, станут рабочими — {{ summary.offers_working }}</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.conflicts_total }}</b><span>расходится с базой</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.errors_total|add:summary.price_cap_total }}</b><span>ошибки и цены-ошибки</span></div>
+    </div>
+    <p class="seo-hint">
+      Найденное размещение только дополняется: пустое заполнится, статус — только вперёд. Что в базе заполнено по-другому — в списке «Расходится с базой», без галочки не тронется.
+      Строки без статуса ({{ summary.no_status }}) — «Опубликовано». Цена, которую заплатили, станет и ценой продавца на дату размещения: рабочей — у площадок без рабочей цены.
+      Цены выше €{{ summary.cap_eur|floatformat:0 }} похожи на ошибку и не пишутся — порог в «Настройках», UPLOAD_PRICE_CAP.
+    </p>
+    <div class="submit-row seo-run-row">
+      <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" data-run-form="all" data-done-url="{% url 'admin:sites_upload_summary' upload.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="default seo-run-btn">Записать в базу</button>
+        <div class="seo-inline-loader" data-loader hidden></div>
+      </form>
+      {% if summary.conflicts_total %}
+        <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" data-run-form="replace" data-done-url="{% url 'admin:sites_upload_summary' upload.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="replace">
+          <button type="submit" class="seo-btn seo-run-btn" title="Значения из файла заменят расходящиеся в базе: дату, цену, продавца, сотрудника, тип, ссылки. Статус назад не идёт.">Записать, заменив расходящиеся ({{ summary.conflicts_total }})</button>
+          <div class="seo-inline-loader" data-loader hidden></div>
+        </form>
+      {% endif %}
+      <a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">К колонкам</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+    </div>
+  {% endif %}
+
+  <div class="seo-boxes">
+    {% if summary.conflicts %}
+      <div class="seo-box">
+        <h3>Расходится с базой</h3>
+        <ul>
+          {% for row in summary.conflicts %}<li>Строка {{ row.line }}, {{ row.domain }}: {{ row.what }} — в базе {{ row.base }}, в файле {{ row.file }}</li>{% endfor %}
+          {% if summary.conflicts_total > summary.conflicts|length %}<li class="seo-flat">всего {{ summary.conflicts_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+    {% if summary.price_cap %}
+      <div class="seo-box">
+        <h3>Цена похожа на ошибку — не запишется</h3>
+        <ul>
+          {% for row in summary.price_cap %}<li>Строка {{ row.line }}, {{ row.domain }}: {{ row.what|lower }} {{ row.value }}</li>{% endfor %}
+          {% if summary.price_cap_total > summary.price_cap|length %}<li class="seo-flat">всего {{ summary.price_cap_total }}</li>{% endif %}
+        </ul>
+        <p class="seo-hint">Похоже, потерялся десятичный разделитель. Исправьте в файле и загрузите его снова — уже записанное не задвоится.</p>
+      </div>
+    {% endif %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Три цифры после точки — прочитано как евро и центы" rows=summary.prices_fixed total=summary.prices_fixed_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Перепутаны анкор и ссылка — исправлено" rows=summary.links_swapped total=summary.links_swapped_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Вместо ссылки не адрес — ссылка не запишется" rows=summary.links_not_url total=summary.links_not_url_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Ссылки не на домен продукта — запишутся" rows=summary.links_foreign total=summary.links_foreign_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Непонятная дата — останется пустой" rows=summary.bad_dates total=summary.bad_dates_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Индексация не распознана" rows=summary.bad_index total=summary.bad_index_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Тип размещения не распознан" rows=summary.bad_service total=summary.bad_service_total %}
+    {% if summary.other_article %}
+      <div class="seo-box">
+        <h3>На площадке уже есть другая статья {{ upload.product.name }}</h3>
+        <ul>
+          {% for row in summary.other_article %}<li>Строка {{ row.line }}, {{ row.domain }}: {{ row.url }} — будет вторым размещением</li>{% endfor %}
+          {% if summary.other_article_total > summary.other_article|length %}<li class="seo-flat">всего {{ summary.other_article_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+    {% if summary.ambiguous %}
+      <div class="seo-box">
+        <h3>Неясно, какое размещение дополнить — не тронуто</h3>
+        <ul>
+          {% for row in summary.ambiguous %}<li>Строка {{ row.line }}, {{ row.domain }}: у площадки несколько размещений {{ upload.product.name }} без адреса статьи</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    {% if summary.sellers_new or summary.employees_new %}
+      <div class="seo-box">
+        <h3>Новые в базе</h3>
+        <ul>
+          {% if summary.sellers_new %}<li>Продавцы ({{ summary.sellers_new|length }}): {{ summary.sellers_new|join:", " }}</li>{% endif %}
+          {% if summary.employees_new %}<li>Сотрудники без права входа: {{ summary.employees_new|join:", " }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+    <div class="seo-box">
+      <h3>Ошибки — строки не запишутся</h3>
+      <ul>
+        {% for row in summary.errors %}<li>Строка {{ row.line }}: {{ row.message }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% if summary.errors_total > summary.errors|length %}<li class="seo-flat">всего {{ summary.errors_total }}</li>{% endif %}
+      </ul>
+    </div>
+    {% if summary.duplicates %}
+      <div class="seo-box">
+        <h3>Дубли в файле</h3>
+        <ul>{% for row in summary.duplicates %}<li><b>{{ row.domain }}</b>: строки {{ row.lines|join:" и " }}; взята первая</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if summary.blocked %}
+      <div class="seo-box">
+        <h3>Заблокированы — пропущены</h3>
+        <ul>{% for row in summary.blocked %}<li>{{ row.domain }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

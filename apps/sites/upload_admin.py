@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.auth.models import User
 from django.db.models import Count, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -26,6 +27,8 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.sites import countries
 from apps.sites.display import delta_html, price_html, seller_mark, writing_html
 from apps.sites.models import (
+    UPLOADS_FOR_PRODUCT,
+    Product,
     Seller,
     SiteCountryMetric,
     Upload,
@@ -36,9 +39,9 @@ from apps.sites.models import (
 from apps.sites.offers import CURRENCIES, money
 from apps.sites.rates import latest_rates
 from apps.sites.tasks import upload_check, upload_write
-from apps.sites.uploads import filters, review, service
+from apps.sites.uploads import filters, placements, review, service
 from apps.sites.uploads.apply import Part
-from apps.sites.uploads.columns import FIELD_LABELS, Confidence, Field
+from apps.sites.uploads.columns import Confidence
 from config.admin import NoDeleteAdmin
 from config.assets import Css
 from config.run_id import bind_run_id, new_run_id
@@ -55,6 +58,13 @@ class UploadForm(forms.Form):
         initial=UploadKind.PRICE_LIST,
         widget=forms.RadioSelect,
     )
+    # У размещений и ссылающихся доменов — чьи они (E1-09).
+    product = forms.ModelChoiceField(
+        label="Продукт",
+        queryset=Product.objects.order_by("pk"),
+        required=False,
+        empty_label="— выберите —",
+    )
     seller = forms.ModelChoiceField(
         label="Продавец",
         queryset=Seller.objects.filter(is_collaborator=False).order_by("name"),
@@ -62,6 +72,14 @@ class UploadForm(forms.Form):
         empty_label="— выберите —",
     )
     new_seller = forms.CharField(label="или новый продавец", required=False, max_length=200)
+    # «От кого» у файла размещений — сотрудник: подставится в строки без своей колонки.
+    employee = forms.ModelChoiceField(
+        label="Сотрудник",
+        queryset=User.objects.order_by("first_name", "username"),
+        required=False,
+        empty_label="— никто —",
+    )
+    new_employee = forms.CharField(label="или новый сотрудник", required=False, max_length=150)
     new_seller_currency = forms.ChoiceField(
         label="Валюта его прайсов",
         choices=[(c, c) for c in CURRENCIES],
@@ -95,20 +113,32 @@ class UploadForm(forms.Form):
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
-        if data.get("kind") == UploadKind.AHREFS_BATCH:
-            # Замер наш: продавца нет.
+        kind = data.get("kind")
+        if kind in UPLOADS_FOR_PRODUCT and data.get("product") is None:
+            raise forms.ValidationError("Выберите продукт: чьи это размещения или ссылки.")
+        if kind not in UPLOADS_FOR_PRODUCT:
+            data["product"] = None
+        if kind != UploadKind.PLACEMENTS:
+            data["employee"] = None
+            data["new_employee"] = ""
+        if kind != UploadKind.AHREFS_BATCH:
+            data["country"] = ""
+        if kind in (UploadKind.AHREFS_BATCH, UploadKind.REF_DOMAINS):
+            # Замер и ссылки — наши, из Ahrefs: продавца нет.
             data["seller"] = None
             return data
-        data["country"] = ""
-        if data.get("kind") == UploadKind.COLLABORATOR_CATALOG:
+        if kind == UploadKind.COLLABORATOR_CATALOG:
             data["seller"] = Seller.collaborator()
             return data
         name = " ".join((data.get("new_seller") or "").split())
         if data.get("seller") is None and not name:
+            if kind == UploadKind.PLACEMENTS:
+                # У размещений «от кого» необязательно: продавец может быть в строках.
+                return data
             raise forms.ValidationError("Выберите продавца или впишите нового.")
         if data.get("seller") is None:
             existing = Seller.objects.filter(name__iexact=name).first()
-            if existing is not None and existing.is_collaborator:
+            if existing is not None and existing.is_collaborator and kind == UploadKind.PRICE_LIST:
                 raise forms.ValidationError("Collaborator загружается как «Каталог Collaborator».")
             data["seller_name"] = name
             data["seller_existing"] = existing
@@ -145,7 +175,9 @@ class UploadAdmin(NoDeleteAdmin):
             "items", filter=Q(items__needs_decision=True, items__price__reviewed_at__isnull=True)
         )
         queryset: QuerySet[Upload] = super().get_queryset(request)
-        return queryset.select_related("seller", "site_list").annotate(need=need, pending=pending)
+        return queryset.select_related("seller", "product", "employee", "site_list").annotate(
+            need=need, pending=pending
+        )
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         # Штатной формы правки нет: загрузку продолжают по шагам.
@@ -162,8 +194,19 @@ class UploadAdmin(NoDeleteAdmin):
             obj.get_kind_display(),
         )
 
-    @admin.display(description="продавец")
+    @admin.display(description="чей файл")
     def source_cell(self, obj: Upload) -> SafeString:
+        if obj.kind == UploadKind.PLACEMENTS:
+            whose = [obj.seller.name] if obj.seller is not None else []
+            if obj.employee is not None:
+                whose.append(placements.employee_name(obj.employee))
+            return format_html(
+                'Размещения {}<div class="seo-sub">{}</div>',
+                obj.product,
+                ", ".join(whose) or "от кого — в строках файла",
+            )
+        if obj.kind == UploadKind.REF_DOMAINS:
+            return format_html('Ahrefs<div class="seo-sub">ссылаются на {}</div>', obj.product)
         if obj.seller is not None:
             return format_html("{}", obj.seller.name)
         where = countries.name(obj.country) if obj.country else "все страны"
@@ -172,8 +215,12 @@ class UploadAdmin(NoDeleteAdmin):
 
     @admin.display(description="дата", ordering="prices_date")
     def date_cell(self, obj: Upload) -> SafeString:
-        # У прайса и каталога — дата цен, у выгрузки Ahrefs — дата замера.
-        what = "замер" if obj.kind == UploadKind.AHREFS_BATCH else "цены"
+        # У прайса и каталога — дата цен, у Ahrefs — замера и выгрузки, у размещений — файла.
+        what = {
+            UploadKind.AHREFS_BATCH: "замер",
+            UploadKind.REF_DOMAINS: "выгрузка",
+            UploadKind.PLACEMENTS: "файл",
+        }.get(UploadKind(obj.kind), "цены")
         return format_html('{}<div class="seo-sub">{}</div>', f"{obj.prices_date:%d.%m.%Y}", what)
 
     @admin.display(description="площадок")
@@ -185,7 +232,9 @@ class UploadAdmin(NoDeleteAdmin):
     @admin.display(description="разобрано")
     def progress_cell(self, obj: Upload) -> SafeString:
         need = getattr(obj, "need", 0)
-        if obj.status != UploadStatus.DONE or obj.kind == UploadKind.AHREFS_BATCH:
+        # Разбор — только у прайса и каталога.
+        reviewed = obj.kind in (UploadKind.PRICE_LIST, UploadKind.COLLABORATOR_CATALOG)
+        if obj.status != UploadStatus.DONE or not reviewed:
             return format_html('<span class="seo-flat">{}</span>', "—")
         if not need:
             return format_html('<span class="seo-chip seo-down">{}</span>', "решать нечего")
@@ -279,14 +328,22 @@ class UploadAdmin(NoDeleteAdmin):
     ) -> HttpResponse:
         if not self.has_add_permission(request):
             return HttpResponse(status=403)
-        form = UploadForm(request.POST or None, request.FILES or None)
+        form = UploadForm(
+            request.POST or None, request.FILES or None, initial=_last_choice(request)
+        )
         if request.method == "POST" and form.is_valid():
             data = form.cleaned_data
             kind = UploadKind(data["kind"])
             seller = data["seller"] or data.get("seller_existing")
-            if seller is None and kind != UploadKind.AHREFS_BATCH:
+            if seller is None and data.get("seller_name"):
                 seller = Seller.objects.create(
                     name=data["seller_name"], currency=data.get("new_seller_currency") or "USD"
+                )
+            employee = data.get("employee")
+            new_employee = " ".join((data.get("new_employee") or "").split())
+            if employee is None and new_employee:
+                employee = placements.find_employee(new_employee) or placements.create_employee(
+                    new_employee
                 )
             created = service.create_upload(
                 data["file"],
@@ -294,11 +351,13 @@ class UploadAdmin(NoDeleteAdmin):
                 seller=seller,
                 prices_date=data["prices_date"],
                 country=data.get("country") or None,
+                product=data.get("product"),
+                employee=employee,
                 author=request.user,
             )
             upload = created.upload
             if created.duplicate:
-                opened = "итог" if kind == UploadKind.AHREFS_BATCH else "разбор"
+                opened = "разбор" if kind == UploadKind.PRICE_LIST else "итог"
                 messages.info(
                     request, f"Этот файл с этой датой уже загружен — открыт его {opened}."
                 )
@@ -320,10 +379,12 @@ class UploadAdmin(NoDeleteAdmin):
         return TemplateResponse(request, "admin/sites/upload/new.html", context)
 
     def columns_view(self, request: HttpRequest, upload_id: int) -> HttpResponse:
-        upload = get_object_or_404(Upload.objects.select_related("seller"), pk=upload_id)
+        upload = get_object_or_404(
+            Upload.objects.select_related("seller", "product", "employee"), pk=upload_id
+        )
         if not self.has_add_permission(request):
             return HttpResponse(status=403)
-        if upload.kind != UploadKind.PRICE_LIST or upload.status not in (
+        if not service.has_columns_step(upload) or upload.status not in (
             UploadStatus.NEW,
             UploadStatus.CHECKED,
             UploadStatus.FAILED,
@@ -339,7 +400,7 @@ class UploadAdmin(NoDeleteAdmin):
                 )
                 return HttpResponseRedirect(_url("columns", upload))
             mapping = {
-                str(column["key"]): request.POST.get(f"field:{column['key']}", Field.EXTRA.value)
+                str(column["key"]): request.POST.get(f"field:{column['key']}", "extra")
                 for column in upload.columns or []
             }
             errors = service.confirm_mapping(
@@ -355,7 +416,8 @@ class UploadAdmin(NoDeleteAdmin):
             "asked": [c for c in columns if c.get("ask")],
             "known": [c for c in columns if not c.get("ask") and c.get("filled")],
             "empty": [c for c in columns if not c.get("filled")],
-            "fields": [(f.value, label) for f, label in FIELD_LABELS.items()],
+            "fields": service.field_choices(upload),
+            "placements_kind": upload.kind == UploadKind.PLACEMENTS,
             "confidence": {c.value: _confidence_class(c) for c in Confidence},
             "currencies": sorted({*CURRENCIES, upload.currency or "EUR"}),
             "rates": latest_rates(),
@@ -363,10 +425,17 @@ class UploadAdmin(NoDeleteAdmin):
         return TemplateResponse(request, "admin/sites/upload/columns.html", context)
 
     def summary_view(self, request: HttpRequest, upload_id: int) -> HttpResponse:
-        upload = get_object_or_404(Upload.objects.select_related("seller"), pk=upload_id)
+        upload = get_object_or_404(
+            Upload.objects.select_related("seller", "product", "employee", "site_list"),
+            pk=upload_id,
+        )
         catalog_kind = upload.kind == UploadKind.COLLABORATOR_CATALOG
         if upload.kind == UploadKind.AHREFS_BATCH:
             return self._ahrefs_summary(request, upload)
+        if upload.kind == UploadKind.PLACEMENTS:
+            return self._placements_summary(request, upload)
+        if upload.kind == UploadKind.REF_DOMAINS:
+            return self._refdomains_summary(request, upload)
         if upload.status == UploadStatus.DONE and not catalog_kind:
             return HttpResponseRedirect(_url("review", upload))
         if upload.status == UploadStatus.NEW:
@@ -411,6 +480,62 @@ class UploadAdmin(NoDeleteAdmin):
         }
         return TemplateResponse(request, "admin/sites/upload/ahrefs.html", context)
 
+    def _refdomains_summary(self, request: HttpRequest, upload: Upload) -> HttpResponse:
+        """Ссылающиеся домены Ahrefs: сводка до записи и итог. Разбора нет (ADR-051)."""
+        if upload.status == UploadStatus.NEW:
+            # Проверка не запустилась (сбой при отправке) — запускаем сейчас.
+            _start_check(upload)
+        done = upload.status == UploadStatus.DONE
+        sites = reverse("admin:sites_productsitelatest_changelist")
+        refs = reverse("admin:sites_productrefdomain_changelist")
+        context = {
+            **self._context(
+                request,
+                "Записано" if done else "Сводка до записи",
+                step=3 if done else 2,
+                upload=upload,
+            ),
+            "steps": ["Файл", "Сводка до записи", "Записано"],
+            "summary": upload.summary or {},
+            "result": upload.result or {},
+            "counts": (upload.result or {}).get("counts") or {},
+            "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
+            "done": done,
+            "linking_url": f"{sites}?product={upload.product_id}&list=all&refs=only",
+            "lost_url": f"{sites}?product={upload.product_id}&list=all&refs=lost",
+            "list_url": f"{refs}?product__id__exact={upload.product_id}",
+        }
+        return TemplateResponse(request, "admin/sites/upload/refdomains.html", context)
+
+    def _placements_summary(self, request: HttpRequest, upload: Upload) -> HttpResponse:
+        """Файл размещений: сводка до записи, а после — итог. Разбора нет (ADR-051)."""
+        if upload.status == UploadStatus.NEW:
+            return HttpResponseRedirect(_step_url(upload))
+        done = upload.status == UploadStatus.DONE
+        summary = upload.summary or {}
+        result = upload.result or {}
+        context = {
+            **self._context(
+                request,
+                "Записано" if done else "Сводка до записи",
+                step=4 if done else 3,
+                upload=upload,
+            ),
+            "steps": ["Файл", "Колонки", "Сводка до записи", "Записано"],
+            "summary": summary,
+            "result": result,
+            "counts": result.get("counts") or {},
+            "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
+            "done": done,
+            "list_name": placements.list_name(upload.get_product(), upload.prices_date),
+            "sites_url": _sites_url(upload) + f"&product={upload.product_id}"
+            if upload.site_list_id
+            else None,
+            "placements_url": reverse("admin:placements_placement_changelist")
+            + f"?product__id__exact={upload.product_id}",
+        }
+        return TemplateResponse(request, "admin/sites/upload/placements.html", context)
+
     def write_view(self, request: HttpRequest, upload_id: int) -> HttpResponse:
         """Запуск записи. Из страницы — JSON (без перезагрузки), без скрипта — переход."""
         upload = get_object_or_404(Upload, pk=upload_id)
@@ -428,6 +553,8 @@ class UploadAdmin(NoDeleteAdmin):
             return _answer(
                 request, upload, error="Выберите «Обновить в базе» или «Добавить новые»."
             )
+        if action == service.Action.REPLACE and upload.kind != UploadKind.PLACEMENTS:
+            return _answer(request, upload, error="Сейчас запустить нельзя — обновите страницу.")
         parts = [p for p in request.POST.getlist("parts") if p in Part.__members__.values()]
         if not catalog_kind:
             parts = [p.value for p in Part]
@@ -634,6 +761,29 @@ def _catalog_context(upload: Upload) -> dict[str, Any]:
     }
 
 
+def _last_choice(request: HttpRequest) -> dict[str, Any]:
+    """Начальные значения формы — как в прошлой загрузке этого человека (E1-09).
+
+    Тип файла, продукт и страна выгрузки — те же, что в прошлый раз: подряд обычно
+    грузят одно и то же. Продавца не подставляем: прайс чужого продавца под прошлым
+    именем молча привязал бы цены не к тому.
+    """
+    mine = Upload.objects.filter(author_id=request.user.pk).order_by("-created_at", "-pk")
+    last = mine.only("kind", "product_id", "country").first()
+    if last is None:
+        return {}
+    initial: dict[str, Any] = {"kind": last.kind}
+    product = (
+        last.product_id
+        or mine.filter(product__isnull=False).values_list("product_id", flat=True).first()
+    )
+    if product is not None:
+        initial["product"] = product
+    if last.kind == UploadKind.AHREFS_BATCH:
+        initial["country"] = last.country or ""
+    return initial
+
+
 def _start_check(upload: Upload) -> None:
     upload.run_id = new_run_id()
     upload.save(update_fields=["run_id"])
@@ -686,10 +836,13 @@ def _url(step: str, upload: Upload) -> str:
 
 
 def _step_url(upload: Upload) -> str:
-    """Куда ведёт загрузка: на шаг, где она сейчас. Каталог — на кнопки записи."""
+    """Куда ведёт загрузка: на шаг, где она сейчас. Каталог — на кнопки записи.
+
+    Разбор есть только у прайса; размещения после записи — итог на шаге сводки.
+    """
     if upload.status == UploadStatus.DONE and upload.kind == UploadKind.PRICE_LIST:
         return _url("review", upload)
-    if upload.status == UploadStatus.NEW and upload.kind == UploadKind.PRICE_LIST:
+    if upload.status == UploadStatus.NEW and service.has_columns_step(upload):
         return _url("columns", upload)
     return _url("summary", upload)
 

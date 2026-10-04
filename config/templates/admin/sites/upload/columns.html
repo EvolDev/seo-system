@@ -14,16 +14,26 @@
   {% csrf_token %}
   {% if errors %}<div class="errornote">{% for error in errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
   <div class="seo-note">
-    <p><b>{{ upload.file_name }}</b> · продавец {{ upload.seller.name }} · цены на {{ upload.prices_date|date:"d.m.Y" }}.</p>
+    {% if placements_kind %}
+      <p><b>{{ upload.file_name }}</b> · размещения {{ upload.product.name }}{% if upload.seller %} · от продавца {{ upload.seller.name }}{% endif %}{% if upload.employee %} · от сотрудника {{ upload.employee.first_name|default:upload.employee.username }}{% endif %} · файл на {{ upload.prices_date|date:"d.m.Y" }}.</p>
+    {% else %}
+      <p><b>{{ upload.file_name }}</b> · продавец {{ upload.seller.name }} · цены на {{ upload.prices_date|date:"d.m.Y" }}.</p>
+    {% endif %}
     <p>
-      Строка заголовков — <input type="number" name="header_row" value="{{ upload.header_row }}" min="1" class="seo-num">
-      (если не та — впишите номер и нажмите «Дальше»).
+      Строка заголовков — <input type="number" name="header_row" value="{{ upload.header_row }}" min="0" class="seo-num">
+      (если не та — впишите номер и нажмите «Дальше»{% if upload.header_row == 0 %}; 0 — заголовков нет, в файле одни домены{% endif %}).
       Валюта цен —
       <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>.
     </p>
     <ul>
-      <li>Колонки без своего поля идут в «прочие данные» и видны в карточке площадки — из файла ничего не теряется.</li>
-      <li>Разметка запомнится у продавца {{ upload.seller.name }}: следующий файл с теми же колонками пройдёт без этого шага, про новую колонку спрошу только её.</li>
+      {% if placements_kind %}
+        <li>Колонки без своего поля идут в «прочие данные» размещения и видны в его панели — из файла ничего не теряется. Метрики площадки из файла — тоже туда: когда их сняли, неизвестно.</li>
+        <li>Разметка запомнится для файлов размещений: следующий файл с теми же колонками пройдёт без этого шага, про новую колонку спрошу только её.</li>
+        <li>Колонок индексации может быть несколько: дата отметки — из заголовка («Индексация 02.09.26»), без неё — дата файла.</li>
+      {% else %}
+        <li>Колонки без своего поля идут в «прочие данные» и видны в карточке площадки — из файла ничего не теряется.</li>
+        <li>Разметка запомнится у продавца {{ upload.seller.name }}: следующий файл с теми же колонками пройдёт без этого шага, про новую колонку спрошу только её.</li>
+      {% endif %}
     </ul>
   </div>
 
@@ -34,7 +44,7 @@
 
   {% if known %}
     <details class="seo-details"{% if not asked %} open{% endif %}>
-      <summary>Уже размечены у продавца — {{ known|length }}</summary>
+      <summary>{% if placements_kind %}Уже размечены раньше{% else %}Уже размечены у продавца{% endif %} — {{ known|length }}</summary>
       {% include "admin/sites/upload/_columns_table.html" with columns=known %}
     </details>
   {% endif %}

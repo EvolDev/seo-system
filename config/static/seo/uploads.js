@@ -163,26 +163,26 @@
 
   // ---------- Шаг «Файл»: отправка с прогрессом ----------
 
+  function inKinds(node, attribute, kind) {
+    return node.getAttribute(attribute).split(" ").indexOf(kind) >= 0;
+  }
+
   function initForm(form) {
-    var rows = form.querySelectorAll("[data-seller-row]");
-    var countryRow = form.querySelector("[data-country-row]");
-    // Подписи даты: у выгрузки Ahrefs это дата замера, а не цен.
-    var swaps = Array.prototype.map.call(form.querySelectorAll("[data-ahrefs]"), function (node) {
-      return { node: node, plain: node.textContent, ahrefs: node.getAttribute("data-ahrefs") };
+    // Поля и подписи у каждого типа файла свои: `data-kinds` — для каких типов
+    // поле видно, `data-labels` — подпись по типу (без своей — исходная).
+    var rows = form.querySelectorAll("[data-kinds]");
+    var swaps = Array.prototype.map.call(form.querySelectorAll("[data-labels]"), function (node) {
+      return { node: node, plain: node.textContent, labels: JSON.parse(node.getAttribute("data-labels")) };
     });
     function sync() {
       var checked = form.querySelector("input[name=kind]:checked");
       var kind = checked ? checked.value : "price_list";
-      rows.forEach(function (row) { row.hidden = kind !== "price_list"; });
-      if (countryRow) countryRow.hidden = kind !== "ahrefs_batch";
-      swaps.forEach(function (swap) { swap.node.textContent = kind === "ahrefs_batch" ? swap.ahrefs : swap.plain; });
-      // У выгрузки Ahrefs шагов три: колонок и разбора нет.
-      var plainSteps = document.querySelector("[data-steps-plain]");
-      var ahrefsSteps = document.querySelector("[data-steps-ahrefs]");
-      if (plainSteps && ahrefsSteps) {
-        plainSteps.hidden = kind === "ahrefs_batch";
-        ahrefsSteps.hidden = kind !== "ahrefs_batch";
-      }
+      rows.forEach(function (row) { row.hidden = !inKinds(row, "data-kinds", kind); });
+      swaps.forEach(function (swap) { swap.node.textContent = swap.labels[kind] || swap.plain; });
+      // Шагов у типов файла разное число: у выгрузок Ahrefs колонок и разбора нет.
+      document.querySelectorAll("[data-steps-for]").forEach(function (steps) {
+        steps.hidden = !inKinds(steps, "data-steps-for", kind);
+      });
     }
     // Страна выгрузки — общий выбор с флагами и поиском (seo/country-picker.js).
     var picker = form.querySelector("[data-country-picker]");
@@ -266,7 +266,10 @@
     new: ["Добавляю новые площадки…", "Несколько тысяч площадок — около 20–60 секунд."],
     recheck: ["Пересчитываю сводку…", "Около 10 секунд."],
     all: ["Записываю в базу…", "Прайс — секунды. Потом откроется разбор."],
+    replace: ["Записываю в базу…", "Значения из файла заменят расходящиеся. Несколько секунд."],
   };
+  // После этих кнопок — переход на итог или разбор, а не обновление блоков страницы.
+  var FINAL = ["all", "replace"];
 
   function initRunForms(root) {
     root.querySelectorAll("form[data-run-form]").forEach(function (form) {
@@ -292,7 +295,7 @@
           });
           var state = await waitState(result.body.state_url, loader);
           if (state.status === "failed") throw new Error(state.error || "запись не удалась");
-          if (kind === "all") { finished = true; go(form.getAttribute("data-done-url") || state.next); return; }
+          if (FINAL.indexOf(kind) >= 0) { finished = true; go(form.getAttribute("data-done-url") || state.next); return; }
           await refreshCatalog();
           finished = true;
           var done = { known: "Площадки в базе обновлены", new: "Новые площадки добавлены", recheck: "Сводка пересчитана" }[kind];
@@ -304,7 +307,7 @@
           loader.stop();
           topbar.done();
           button.classList.remove("seo-btn-busy");
-          if (!(finished && kind === "all")) {
+          if (!(finished && FINAL.indexOf(kind) >= 0)) {
             snapshot.forEach(function (pair) {
               // Кнопку, которую обновила сводка, не трогаем — у неё уже свежее состояние.
               if (finished && pair[0].hasAttribute("data-swap")) return;
@@ -792,8 +795,16 @@
 
   // ---------- Сборка страницы ----------
 
+  // Экран, на котором обработчики уже висят: второй вызов на нём ничего не делает.
+  var initialized = null;
+
   function initPage() {
     var root = document.querySelector("main#content-start") || document;
+    var marker = root.querySelector(
+      "[data-upload-form], [data-state-url], form[data-run-form], [data-filters], table[data-review]"
+    );
+    if (!marker || marker === initialized) return;
+    initialized = marker;
     var form = root.querySelector("[data-upload-form]");
     if (form) initForm(form);
     var box = root.querySelector("[data-state-url]");
@@ -809,6 +820,11 @@
   // уходим с экрана — снять (seo/soft-nav.js).
   document.addEventListener("seo:load", initPage);
   document.addEventListener("seo:unload", function () {
+    initialized = null;
     cleanups.splice(0).forEach(function (fn) { fn(); });
   });
+  // Первый seo:load soft-nav.js шлёт, когда этот скрипт ещё не выполнен (оба с
+  // defer, он — раньше): после F5 или прямого захода страница уже разобрана —
+  // настраиваемся сами (так же — seo/saved-filters.js).
+  if (document.readyState !== "loading") initPage();
 })();

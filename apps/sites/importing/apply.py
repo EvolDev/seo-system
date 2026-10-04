@@ -26,6 +26,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.keywords.models import Keyword, KeywordPosition
+from apps.placements.matching import LADDER, match_placement
 from apps.placements.models import (
     SITE_STATUS_BY_PLACEMENT,
     Placement,
@@ -63,14 +64,8 @@ POSITIONS_COUNTRY = "US"
 # US Traff — страна снимка трафика по странам, код строчными, как у Ahrefs (маппинг §1.3).
 US = "us"
 
-# Статус размещения — только вперёд. Отклонённое и отменённое не трогает.
-PLACEMENT_LADDER = (
-    PlacementStatus.PLANNED,
-    PlacementStatus.ORDERED,
-    PlacementStatus.WRITING,
-    PlacementStatus.REVIEW,
-    PlacementStatus.PUBLISHED,
-)
+# Статус размещения — только вперёд, цепочка общая с загрузкой размещений.
+PLACEMENT_LADDER = LADDER
 WAITING = PLACEMENT_LADDER[:-1]
 
 
@@ -557,8 +552,9 @@ class Importer:
         wanted = data.placement
         if wanted is None:
             return False
-        placement, ambiguous = _match_placement(candidates, wanted.article_url)
-        if ambiguous:
+        match = match_placement(candidates, wanted.article_url)
+        placement = match.placement
+        if match.ambiguous:
             self.report.issue(
                 Section.PLACEMENT_CONFLICTS,
                 f"{data.where}: у площадки несколько размещений Convertio без адреса "
@@ -690,8 +686,18 @@ class Importer:
         if not values.is_url_on_domain(url, site.domain):
             self.report.issue(Section.CLIDEO_BAD, f"{data.where}: {url}")
             return
-        fact = not any(placement.article_url == url for placement in candidates)
-        if fact:
+        where = f"{data.where}, Clideo"
+        match = match_placement(candidates, url)
+        if match.ambiguous:
+            self.report.issue(
+                Section.PLACEMENT_CONFLICTS,
+                f"{where}: у площадки несколько размещений Clideo без адреса статьи — "
+                "какое дополнять, неясно, не тронуто",
+            )
+            return
+        placement = match.placement
+        fact = placement is None
+        if placement is None:
             candidates.append(
                 Placement.objects.create(
                     site=site,
@@ -702,8 +708,17 @@ class Importer:
             )
             self.report.count("placements", Outcome.CREATED)
         else:
-            self.report.count("placements", Outcome.UNCHANGED)
-        self._decide(product_site, SiteStatus.PLACED, None, f"{data.where}, Clideo", fact=fact)
+            changed: list[str] = []
+            if not placement.article_url:
+                # Размещение из списка доменов (загрузка размещений): адрес — из таблицы.
+                placement.article_url = url
+                changed.append("article_url")
+            if _ahead(placement.status, PlacementStatus.PUBLISHED, PLACEMENT_LADDER):
+                placement.status = PlacementStatus.PUBLISHED
+                changed.append("status")
+                fact = True
+            self._save(placement, changed, "placements")
+        self._decide(product_site, SiteStatus.PLACED, None, where, fact=fact)
 
     # --- Сверки после записи ---
 
@@ -778,26 +793,6 @@ class Importer:
             self.report.count(table, Outcome.UPDATED)
         else:
             self.report.count(table, Outcome.UNCHANGED)
-
-
-def _match_placement(
-    candidates: list[Placement], article_url: str | None
-) -> tuple[Placement | None, bool]:
-    """Какое размещение обновлять (маппинг §1.5): (размещение или None, неоднозначно ли).
-
-    Сначала — с тем же адресом статьи; иначе — единственное без адреса;
-    нет подходящих — создаётся новое.
-    """
-    if article_url:
-        same_url = [p for p in candidates if p.article_url == article_url]
-        if same_url:
-            return same_url[0], False
-    without_url = [p for p in candidates if not p.article_url]
-    if len(without_url) > 1:
-        return None, True
-    if without_url:
-        return without_url[0], False
-    return None, False
 
 
 def compare_copy(copy_rows: Iterable[CopyRow], sites: Iterable[SiteData], report: Report) -> None:

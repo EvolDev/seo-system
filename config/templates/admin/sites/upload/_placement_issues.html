@@ -1,0 +1,10 @@
+{% comment %}Список сомнительного в файле размещений: строка, площадка, что не так (E1-09).{% endcomment %}
+{% if rows %}
+  <div class="seo-box">
+    <h3>{{ title }}</h3>
+    <ul>
+      {% for row in rows %}<li>Строка {{ row.line }}, {{ row.domain }}: {{ row.message }}</li>{% endfor %}
+      {% if total > rows|length %}<li class="seo-flat">всего {{ total }}</li>{% endif %}
+    </ul>
+  </div>
+{% endif %}

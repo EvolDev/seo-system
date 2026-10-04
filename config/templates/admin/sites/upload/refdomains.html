@@ -1,0 +1,103 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Выгрузка Ahrefs «Referring domains» (E1-09, ADR-051): сводка до записи и итог.
+Разбора нет — решать нечего: домены ложатся в список «кто ссылается на продукт»,
+отдельно от площадок. Пока идёт проверка или запись, страница опрашивает состояние
+(seo/uploads.js).
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<p class="seo-lead">
+  Кто ссылается на <b>{{ upload.product.name }}</b> — выгрузка Ahrefs «Referring domains» на {{ upload.prices_date|date:"d.m.Y" }}, файл «{{ upload.file_name }}».
+</p>
+{% if busy %}
+  <div class="seo-busy" data-state-url="{% url 'admin:sites_upload_state' upload.pk %}">
+    <div class="seo-spin" aria-hidden="true"></div>
+    <div>
+      <b data-state-label>{{ upload.get_status_display }}…</b>
+      <div class="seo-sub">Задача очереди «{% if upload.status == 'writing' %}upload_write{% else %}upload_check{% endif %}» — видна в «Запусках задач». Обычно несколько секунд.</div>
+    </div>
+  </div>
+{% elif upload.status == 'failed' %}
+  <div class="errornote">{{ upload.error }}</div>
+  <div class="submit-row">
+    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить файл снова</a>
+  </div>
+{% else %}
+  {% if done %}
+    <div class="seo-stats">
+      <div class="seo-stat seo-good"><b>{{ counts.created|default:0 }}</b><span>новых в списке</span></div>
+      <div class="seo-stat"><b>{{ counts.updated|default:0 }}</b><span>обновлено</span></div>
+      <div class="seo-stat"><b>{{ counts.unchanged|default:0 }}</b><span>без изменений</span></div>
+      <div class="seo-stat seo-warn"><b>{{ counts.missing|default:0 }}</b><span>пропали из выгрузки</span></div>
+      <div class="seo-stat"><b>{{ summary.in_sites_total }}</b><span>из них — среди наших площадок</span></div>
+    </div>
+    <p class="seo-hint">
+      В «Площадках» {{ upload.product.name }} площадки, которые на него ссылаются, по умолчанию скрыты — фильтр «Ссылаются на нас». У других продуктов они видны.
+    </p>
+    <div class="submit-row">
+      <a class="seo-btn" href="{{ linking_url }}">Площадки, которые ссылаются</a>
+      <a class="seo-btn" href="{{ lost_url }}">Где ссылка пропала</a>
+      <a class="seo-btn" href="{{ list_url }}">Весь список доменов</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+    </div>
+  {% else %}
+    <p class="seo-lead">В базу ещё ничего не записано. Проверьте цифры и нажмите «Записать в базу».</p>
+    <div class="seo-stats">
+      <div class="seo-stat"><b>{{ summary.rows }}</b><span>строк в файле</span></div>
+      <div class="seo-stat"><b>{{ summary.domains }}</b><span>доменов</span></div>
+      <div class="seo-stat seo-good"><b>{{ summary.new }}</b><span>новых для списка</span></div>
+      <div class="seo-stat"><b>{{ summary.known }}</b><span>уже в списке</span></div>
+      <div class="seo-stat"><b>{{ summary.returned }}</b><span>вернулись</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.missing_total }}</b><span>пропадут из выгрузки</span></div>
+      <div class="seo-stat"><b>{{ summary.in_sites_total }}</b><span>среди наших площадок — скроются у {{ upload.product.name }}</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.duplicates_total|add:summary.errors_total }}</b><span>дубли и ошибки</span></div>
+    </div>
+    <p class="seo-hint">
+      Домены ложатся в отдельный список «кто ссылается на {{ upload.product.name }}» — в «Площадки» не попадают. Площадка с тем же доменом в «Площадках» {{ upload.product.name }} по умолчанию скроется, у других продуктов — нет.
+      {% if summary.newest %}Домены, которых нет в этой выгрузке, получат пометку «ссылка пропала» с {{ upload.prices_date|date:"d.m.Y" }}: проверьте, что выгрузка полная.{% else %}Есть выгрузка новее: эта только добавит домены, пропажу по ней не отмечаю.{% endif %}
+    </p>
+    <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="submit-row" data-run-form="all" data-done-url="{% url 'admin:sites_upload_summary' upload.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="default seo-run-btn">Записать в базу</button>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      <div class="seo-inline-loader" data-loader hidden></div>
+    </form>
+  {% endif %}
+  <div class="seo-boxes">
+    <div class="seo-box">
+      <h3>Среди наших площадок</h3>
+      <ul>
+        {% for row in summary.in_sites %}<li>{{ row.domain }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% if summary.in_sites_total > summary.in_sites|length %}<li class="seo-flat">всего {{ summary.in_sites_total }}</li>{% endif %}
+      </ul>
+    </div>
+    {% if summary.missing %}
+      <div class="seo-box">
+        <h3>Пропали из выгрузки</h3>
+        <ul>
+          {% for row in summary.missing %}<li>{{ row.domain }}</li>{% endfor %}
+          {% if summary.missing_total > summary.missing|length %}<li class="seo-flat">всего {{ summary.missing_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+    <div class="seo-box">
+      <h3>Ошибки</h3>
+      <ul>
+        {% for row in summary.errors %}<li>Строка {{ row.line }}: {{ row.message }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% if summary.errors_total > summary.errors|length %}<li class="seo-flat">всего {{ summary.errors_total }}</li>{% endif %}
+      </ul>
+    </div>
+    {% if summary.duplicates %}
+      <div class="seo-box">
+        <h3>Дубли в файле</h3>
+        <ul>{% for row in summary.duplicates %}<li><b>{{ row.domain }}</b>: строки {{ row.lines|join:" и " }}; взята первая</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

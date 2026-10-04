@@ -1,16 +1,23 @@
 {% extends "admin/base_site.html" %}
 {% comment %}
-Шаг 1 — файл, что это, продавец, дата цен (E1-08, ADR-044). У выгрузки Ahrefs
-вместо продавца — страна выгрузки с поиском, дата — дата замера (ADR-045).
-Без скрипта страна — обычный выпадающий список.
+Шаг 1 — файл, что это, чей, дата (E1-08, ADR-044). У каждого типа файла свои поля
+(`data-kinds`) и подписи (`data-labels`), их переключает seo/uploads.js:
+- прайс — продавец; каталог — ничего; выгрузка Ahrefs — страна с поиском (ADR-045);
+- размещения — продукт и «от кого»: продавец или сотрудник (ADR-051);
+- ссылающиеся домены Ahrefs — продукт (ADR-051).
+Без скрипта видны все поля, страна — обычный выпадающий список. Форма открывается
+с типом, продуктом и страной прошлой загрузки.
 {% endcomment %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
 {% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
 
 {% block content %}
-<div data-steps-plain>{% include "admin/sites/upload/_steps.html" %}</div>
-<ol class="seo-steps" data-steps-ahrefs hidden>
+<div data-steps-for="price_list collaborator_catalog">{% include "admin/sites/upload/_steps.html" %}</div>
+<ol class="seo-steps" data-steps-for="placements" hidden>
+  <li class="seo-step-on">1. Файл</li><li>2. Колонки</li><li>3. Сводка до записи</li><li>4. Записано</li>
+</ol>
+<ol class="seo-steps" data-steps-for="ahrefs_batch ahrefs_refdomains" hidden>
   <li class="seo-step-on">1. Файл</li><li>2. Сводка до записи</li><li>3. Записано</li>
 </ol>
 <form method="post" enctype="multipart/form-data" class="seo-upload-form" data-upload-form>
@@ -20,9 +27,14 @@
     <div class="form-row">
       <label>{{ form.kind.label }}</label>
       <div class="seo-radios">{% for radio in form.kind %}<label>{{ radio.tag }} {{ radio.choice_label }}</label>{% endfor %}</div>
-      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена. Ahrefs Batch Analysis — файл кнопки Export на странице Batch Analysis, продавец не нужен.</div>
+      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена. Ahrefs Batch Analysis — файл кнопки Export на странице Batch Analysis, продавец не нужен. Размещения продукта — файл коллеги или продавца: где уже размещались, хоть одним столбцом доменов. Ссылающиеся домены Ahrefs — выгрузка Referring domains по домену продукта.</div>
     </div>
-    <div class="form-row" data-country-row>
+    <div class="form-row" data-kinds="placements ahrefs_refdomains">
+      {{ form.product.errors }}
+      <label for="{{ form.product.id_for_label }}">{{ form.product.label }}</label> {{ form.product }}
+      <div class="help" data-labels='{"ahrefs_refdomains": "Продукт, по домену которого сделана выгрузка: эти площадки спрячутся из его «Площадок»."}'>Чьи это размещения.</div>
+    </div>
+    <div class="form-row" data-kinds="ahrefs_batch">
       {{ form.country.errors }}
       <label for="id_country">{{ form.country.label }}</label>
       <div class="seo-country" data-country-picker data-label="Страна выгрузки">
@@ -40,21 +52,27 @@
       </div>
       <div class="help">Как в Ahrefs над таблицей: All locations — «Все страны», иначе страна, которая была выбрана. «Все страны» дают DR, общий трафик, ключи и топ-регион; страна — трафик и ключи этой страны, и она появится в выборе «Регион» в «Площадках». Выбор сверю с файлом.</div>
     </div>
-    <div class="form-row" data-seller-row>
+    <div class="form-row" data-kinds="price_list placements">
       {{ form.seller.errors }}
       <label for="{{ form.seller.id_for_label }}">{{ form.seller.label }}</label> {{ form.seller }}
-      <div class="help">Первый файл от продавца — колонки разметим один раз и запомним у него.</div>
+      <div class="help" data-labels='{"placements": "Если файл от продавца: подставится в строки, где в файле нет своей колонки «Продавец». Можно не выбирать."}'>Первый файл от продавца — колонки разметим один раз и запомним у него.</div>
     </div>
-    <div class="form-row" data-seller-row>
+    <div class="form-row" data-kinds="price_list placements">
       {{ form.new_seller.errors }}
       <label for="{{ form.new_seller.id_for_label }}">{{ form.new_seller.label }}</label> {{ form.new_seller }}
       <label for="{{ form.new_seller_currency.id_for_label }}" class="seo-inline-label">{{ form.new_seller_currency.label }}</label> {{ form.new_seller_currency }}
       <div class="help">Имя без учёта регистра: «Athena Smith» и «Athena smith» — один продавец.</div>
     </div>
+    <div class="form-row" data-kinds="placements">
+      {{ form.employee.errors }}
+      <label for="{{ form.employee.id_for_label }}">{{ form.employee.label }}</label> {{ form.employee }}
+      <label for="{{ form.new_employee.id_for_label }}" class="seo-inline-label">{{ form.new_employee.label }}</label> {{ form.new_employee }}
+      <div class="help">Если файл от сотрудника: подставится в строки, где в файле нет своей колонки «Сотрудник». Новый сотрудник заведётся без права входа.</div>
+    </div>
     <div class="form-row">
       {{ form.prices_date.errors }}
-      <label for="{{ form.prices_date.id_for_label }}" data-date-label data-ahrefs="Дата замера">{{ form.prices_date.label }}</label> {{ form.prices_date }}
-      <div class="help" data-date-help data-ahrefs="Метрики станут замером на эту дату. Ещё одна выгрузка с той же датой обновит замер, а не задвоит.">{{ form.prices_date.help_text }}</div>
+      <label for="{{ form.prices_date.id_for_label }}" data-labels='{"ahrefs_batch": "Дата замера", "ahrefs_refdomains": "Дата выгрузки", "placements": "Дата файла"}'>{{ form.prices_date.label }}</label> {{ form.prices_date }}
+      <div class="help" data-labels='{"ahrefs_batch": "Метрики станут замером на эту дату. Ещё одна выгрузка с той же датой обновит замер, а не задвоит.", "ahrefs_refdomains": "День, когда сделана выгрузка: домены, которых в ней нет, получат пометку «ссылка пропала» с этой даты.", "placements": "На эту дату — отметки индексации из колонки без даты в заголовке и рабочий список «‹продукт› · размещения · дата»."}'>{{ form.prices_date.help_text }}</div>
     </div>
     <div class="form-row">
       {{ form.file.errors }}

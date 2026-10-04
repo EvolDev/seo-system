@@ -38,6 +38,7 @@ SETTING_KEYS: dict[str, str] = {
     ),
     # Загрузка цен — 13-CONFIG.md §2.5
     "OFFER_RECHECK": "Повторный разбор предложения продавца: min_change_pct",
+    "UPLOAD_PRICE_CAP": "Цена из файла похожа на ошибку, если больше: eur",
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
@@ -100,11 +101,37 @@ class OfferRecheck:
         return cls(float(number))
 
 
+@dataclass(frozen=True)
+class UploadPriceCap:
+    """Цена из файла выше `eur` евро похожа на ошибку — `UPLOAD_PRICE_CAP` (ADR-051).
+
+    Такая цена не записывается, строка попадает в сводку до записи: в файле
+    размещений бывают суммы в тысячу раз больше обычной — потерялся
+    десятичный разделитель (`241 258` вместо €241,26).
+    """
+
+    eur: float
+
+    @classmethod
+    def parse(cls, value: Any) -> "UploadPriceCap":
+        if not isinstance(value, dict) or set(value) != {"eur"}:
+            raise ValueError("Нужен объект ровно с полем eur.")
+        number = value["eur"]
+        if not isinstance(number, int | float) or isinstance(number, bool) or number <= 0:
+            raise ValueError("eur — сумма в евро, больше нуля.")
+        return cls(float(number))
+
+    @property
+    def eur_cents(self) -> int:
+        return round(self.eur * 100)
+
+
 # Настройки с проверкой формы значения: ошибку видно в админке при вводе,
 # а не в упавшей ночью задаче.
 SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "INDEXATION_SCHEDULE": IndexationSchedule.parse,
     "OFFER_RECHECK": OfferRecheck.parse,
+    "UPLOAD_PRICE_CAP": UploadPriceCap.parse,
 }
 
 
@@ -137,6 +164,18 @@ def offer_recheck() -> OfferRecheck:
         return OfferRecheck.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"OFFER_RECHECK: {error}") from error
+
+
+def upload_price_cap() -> UploadPriceCap:
+    """Действующий порог «цена похожа на ошибку»: общее значение, загрузки — не под продукт."""
+    value = get_setting("UPLOAD_PRICE_CAP", None)
+    if value is None:
+        # Общее значение заводит миграция content.0005 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки UPLOAD_PRICE_CAP — заведите общее значение.")
+    try:
+        return UploadPriceCap.parse(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"UPLOAD_PRICE_CAP: {error}") from error
 
 
 def set_product_setting(product_id: int, key: str, value: Any | None) -> None:

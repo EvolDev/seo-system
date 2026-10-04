@@ -56,6 +56,7 @@ from apps.sites.models import (
     GrayScan,
     PlacementType,
     Product,
+    ProductRefDomain,
     ProductSite,
     ProductSiteLatest,
     Seller,
@@ -370,6 +371,8 @@ def _card_context(site: Site) -> dict[str, Any]:
         .order_by("-checked_at", "-pk")
     )
     status_history = site_history(site.pk)
+    # Ссылается ли площадка на продукт — по его выгрузке Ahrefs (ADR-051).
+    refs = {ref.product_id: ref for ref in ProductRefDomain.objects.filter(domain=site.domain)}
     return {
         "site": site,
         "latest": latest,
@@ -380,6 +383,7 @@ def _card_context(site: Site) -> dict[str, Any]:
                 "decision_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
                 # Строка «Площадок» — та же строка product_sites (pk общий).
                 "history": status_history.get(row.pk, []),
+                "ref": refs.get(row.product_id),
             }
             for row in rows
         ],
@@ -853,6 +857,68 @@ class WorkedFilter(admin.SimpleListFilter):
         return queryset.filter(worked) if self.value() == self.YES else queryset.exclude(worked)
 
 
+class RefsFilter(admin.SimpleListFilter):
+    """«Ссылаются на нас» — по выгрузке Ahrefs «Referring domains» продукта (ADR-051).
+
+    Без выбора площадки, которые уже ссылаются на продукт, скрыты: второй
+    ссылкой с того же домена не выиграть. Ссылка пропала — дата Lost у Ahrefs
+    или домена нет в новой выгрузке продукта: такие видны, их можно выбрать.
+    Домен — точное совпадение. У продукта без выгрузки скрывать нечего.
+    """
+
+    title = "ссылаются на нас"
+    parameter_name = "refs"
+    HIDE, ONLY, LOST, ALL = "hide", "only", "lost", "all"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            (self.HIDE, "Скрыть"),
+            (self.ONLY, "Только они"),
+            (self.LOST, "Ссылка пропала"),
+            (self.ALL, "Показать все"),
+        ]
+
+    def value(self) -> str | None:
+        value = super().value()
+        if not value:
+            value = self.HIDE
+            # Запоминаем, чтобы пункт по умолчанию был выбран и в колонке фильтров.
+            self.used_parameters[self.parameter_name] = value
+        return str(value)
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        value = self.value()
+        if value == self.ALL:
+            return queryset
+        if value == self.ONLY:
+            return queryset.filter(pk__in=_ref_rows(linking=True))
+        if value == self.LOST:
+            return queryset.filter(pk__in=_ref_rows(linking=False))
+        return queryset.exclude(pk__in=_ref_rows(linking=True))
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        # Первый пункт Django — «Все»; у нас без выбора — «Скрыть», «Показать все» — свой.
+        choices = super().choices(changelist)
+        next(choices)
+        yield from choices
+
+
+def _ref_rows(*, linking: bool) -> Subquery:
+    """Строки «Площадок» (id `product_sites`), чей домен в списке продукта (ADR-051).
+
+    Подзапрос по таблицам, а не по представлению «Площадок»: `Exists` по
+    представлению сразу после записи выгрузки, пока у таблицы нет статистики,
+    Postgres перебирал все домены на каждую площадку — «Площадки» 6 с вместо
+    0,5 с (замер E1-09). Подзапрос считается один раз.
+    """
+    refs = ProductRefDomain.objects.filter(
+        product_id=OuterRef("product_id"), domain=OuterRef("site__domain")
+    )
+    linking_now = Q(lost_at__isnull=True, missing_since__isnull=True)
+    refs = refs.filter(linking_now) if linking else refs.exclude(linking_now)
+    return Subquery(ProductSite.objects.filter(Exists(refs)).values("pk"))
+
+
 class OffersFilter(admin.SimpleListFilter):
     """Разбор цен (ADR-043): что пришло нового, где дешевле, у кого нет цены."""
 
@@ -1131,6 +1197,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         ProductFilter,
         SiteListFilter,
         WorkedFilter,
+        RefsFilter,
         "status",
         OffersFilter,
         SellerFilter,
@@ -1427,5 +1494,6 @@ def _offers_tip(page_offers: list[SiteOffer], obj: ProductSiteLatest) -> str:
     return "\n".join(lines)
 
 
-# Экран «Загрузки» (E1-08) — в своём модуле; регистрируется при загрузке этого.
-from apps.sites import upload_admin  # noqa: E402, F401
+# Экраны «Загрузки» (E1-08) и «Ссылающиеся домены» (E1-09) — в своих модулях;
+# регистрируются при загрузке этого.
+from apps.sites import refdomain_admin, upload_admin  # noqa: E402, F401

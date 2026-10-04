@@ -73,6 +73,8 @@ _SERVICES = {
     BOTH: PlacementType.GUEST_POST,
     "link insertion": PlacementType.LINK_INSERTION,
     "link insert": PlacementType.LINK_INSERTION,
+    "linkinsert": PlacementType.LINK_INSERTION,
+    "linkinsertion": PlacementType.LINK_INSERTION,
     "link-insertion": PlacementType.LINK_INSERTION,
     "li": PlacementType.LINK_INSERTION,
     "niche edit": PlacementType.LINK_INSERTION,

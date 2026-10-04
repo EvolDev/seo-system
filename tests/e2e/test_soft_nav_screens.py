@@ -155,3 +155,63 @@ def test_indexation_buttons_after_soft_navigation(
         "alt", "True"
     )
     assert same_document(page)
+
+
+PLACEMENTS_CSV = (
+    "Target;Person;Source;URL статьи;Статус;Итог цена\n"
+    "known.com;Evgeniy;Athena Smith;https://known.com/post;Размещено;311,81\n"
+    "fresh.com;Lilith;Athena Smith;https://fresh.com/x;;120\n"
+).encode()
+
+
+def test_placements_upload_form_and_path(
+    admin_page: Page, live_server: LiveServer, known: Site
+) -> None:
+    """Файл размещений (E1-09): поля по типу файла, колонки, сводка, запись — без перезагрузки."""
+    Product.objects.create(name="Clideo", domain="clideo.com")
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/sites/upload/add/")
+    mark(page)
+    product_row = page.locator(".form-row", has=page.locator("select[name=product]"))
+    employee_row = page.locator(".form-row", has=page.locator("select[name=employee]"))
+    country_row = page.locator(".form-row", has=page.locator("[data-country-picker]"))
+    date_label = page.locator("label[for=id_prices_date]")
+
+    # Прайс — продавец, без продукта и сотрудника.
+    page.locator("input[name=kind][value=price_list]").check()
+    expect(product_row).to_be_hidden()
+    expect(employee_row).to_be_hidden()
+    expect(page.locator("select[name=seller]")).to_be_visible()
+    # Ссылающиеся домены — только продукт, дата — выгрузки.
+    page.locator("input[name=kind][value=ahrefs_refdomains]").check()
+    expect(product_row).to_be_visible()
+    expect(page.locator("select[name=seller]")).to_be_hidden()
+    expect(country_row).to_be_hidden()
+    expect(date_label).to_have_text("Дата выгрузки")
+    # Размещения — продукт, продавец и сотрудник, дата — файла.
+    page.locator("input[name=kind][value=placements]").check()
+    expect(product_row).to_be_visible()
+    expect(employee_row).to_be_visible()
+    expect(date_label).to_have_text("Дата файла")
+
+    page.locator("select[name=product]").select_option(label="Clideo")
+    page.locator("input[name=file]").set_input_files(
+        {"name": "clideo.csv", "mimeType": "text/csv", "buffer": PLACEMENTS_CSV}
+    )
+    with soft_load(page):
+        page.locator("button[type=submit]", has_text="Дальше").click()
+    expect(page.locator("#content")).to_contain_text("Разметка запомнится для файлов размещений")
+    with soft_load(page):
+        page.locator("button[type=submit]", has_text="Дальше: сводка").click()
+    expect(page.locator("#content")).to_contain_text("размещений будет создано")
+    with soft_load(page):
+        page.locator("button[type=submit]", has_text="Записать в базу").click()
+    expect(page.locator("#content")).to_contain_text("размещений создано")
+    assert same_document(page)
+    assert Placement.objects.filter(product__name="Clideo").count() == 2
+
+    # Форма снова — сразу с размещениями и Clideo, как в прошлый раз.
+    page.goto(f"{live_server.url}/admin/sites/upload/add/")
+    expect(page.locator("input[name=kind][value=placements]")).to_be_checked()
+    expect(page.locator("select[name=product] option:checked")).to_have_text("Clideo")
+    expect(employee_row).to_be_visible()

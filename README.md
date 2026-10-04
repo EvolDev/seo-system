@@ -100,8 +100,9 @@ Docker `pgdata`, очередь задач — в томе `redisdata`.
 на новой базе первый раз — вручную:
 `docker compose run --rm app python manage.py exchange_rates`.
 
-Прайсы продавцов, выгрузка каталога Collaborator и выгрузки Ahrefs Batch
-Analysis загружаются в админке (**Работа → Загрузки**); файлы ложатся в папку `uploads/` в корне
+Прайсы продавцов, выгрузка каталога Collaborator, выгрузки Ahrefs (Batch
+Analysis и Referring domains) и файлы размещений загружаются в админке
+(**Работа → Загрузки**); файлы ложатся в папку `uploads/` в корне
 проекта (в git не идёт). Проверка и запись — задачи очереди: после
 обновления кода — `make restart-queue`.
 

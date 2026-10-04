@@ -1,4 +1,15 @@
-{% comment %}Отклоняли, дубли, ошибки, адреса, незнакомые значения — в сводке и во вкладке «Ошибки и дубли».{% endcomment %}
+{% comment %}Отклоняли, дубли, ошибки, адреса, незнакомые значения — в сводке и во вкладке «Ошибки и дубли».
+Уже ссылаются на продукт — по его выгрузке Ahrefs «Referring domains» (ADR-051).{% endcomment %}
+{% for ref in data.ref_domains %}
+  <div class="seo-box">
+    <h3>Уже ссылаются на {{ ref.product }}: {{ ref.total }}</h3>
+    <ul>
+      {% for domain in ref.domains %}<li>{{ domain }}</li>{% endfor %}
+      {% if ref.total > ref.domains|length %}<li class="seo-flat">всего {{ ref.total }}</li>{% endif %}
+    </ul>
+    <p class="seo-hint">Запишутся в базу как обычно, но в «Площадках» {{ ref.product }} по умолчанию скрыты — фильтр «Ссылаются на нас». У других продуктов видны.</p>
+  </div>
+{% endfor %}
 <div class="seo-box">
   <h3>Уже отклоняли</h3>
   <ul>

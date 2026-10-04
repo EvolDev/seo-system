@@ -20,6 +20,9 @@
     <div class="seo-card-status">
       {{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.reject_reason %} — {{ status.row.reject_reason }}{% endif %}
       {% if can_change %}<a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
+      {% if status.ref %}
+        <div class="seo-sub">{% if status.ref.is_linking %}ссылается на {{ status.row.product.name }}{% if status.ref.first_seen_at %} с {{ status.ref.first_seen_at|date:"d.m.Y" }}{% endif %} — по выгрузке Ahrefs от {{ status.ref.seen_on|date:"d.m.Y" }}{% elif status.ref.lost_at %}ссылка на {{ status.row.product.name }} пропала {{ status.ref.lost_at|date:"d.m.Y" }} — по Ahrefs{% else %}ссылки на {{ status.row.product.name }} нет в выгрузке Ahrefs с {{ status.ref.missing_since|date:"d.m.Y" }}{% endif %}</div>
+      {% endif %}
       {% if status.history %}
       <details class="seo-status-history">
         <summary>история ({{ status.history|length }})</summary>

@@ -120,6 +120,7 @@ REQUEST = "Заявка"
 PUBLICATION = "Публикация"
 CHECKS = "Проверки"
 COMMENT = "Комментарий"
+FROM_FILE = "Из файла размещений"
 SERVICE = "Служебное"
 AFTER_LINKS = (CHECKS, COMMENT, SERVICE)
 
@@ -164,6 +165,7 @@ class PlacementAdmin(NoDeleteAdmin):
         "indexation_history",
         "indexation_button",
         "status_history",
+        "extra_data",
     )
     fieldsets = (
         (None, {"fields": ("site", "product")}),
@@ -209,7 +211,8 @@ class PlacementAdmin(NoDeleteAdmin):
     class Media:
         js = (Js("seo/indexation.js"),)
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
-            "all": (Css("seo/indexation.css"), Css("seo/status-history.css"))
+            # offers.css — «прочие данные из файла» в том же виде, что в карточке площадки.
+            "all": (Css("seo/indexation.css"), Css("seo/status-history.css"), Css("seo/offers.css"))
         }
 
     def get_urls(self) -> list[URLPattern]:
@@ -304,6 +307,9 @@ class PlacementAdmin(NoDeleteAdmin):
 
     def get_fieldsets(self, request: HttpRequest, obj: Any = None) -> Any:
         fieldsets = list(super().get_fieldsets(request, obj))
+        if obj is not None and obj.extra:
+            # Прочие данные из файла размещений — перед «Служебным», только если есть.
+            fieldsets.insert(len(fieldsets) - 1, (FROM_FILE, {"fields": ("extra_data",)}))
         if obj is None:
             return [
                 (name, {**options, "fields": _without(options["fields"], "status_history")})
@@ -471,6 +477,17 @@ class PlacementAdmin(NoDeleteAdmin):
             ),
         )
 
+    @admin.display(description="прочие данные из файла")
+    def extra_data(self, obj: Placement) -> SafeString | str:
+        """Колонки файла размещений без своего поля: заголовок → значение (ADR-051)."""
+        if not obj.extra:
+            return "—"
+        # Как прочие данные предложения в карточке площадки.
+        return format_html(
+            '<div class="seo-kv">{}</div>',
+            format_html_join("", "<span>{}: <b>{}</b></span>", obj.extra.items()),
+        )
+
     @admin.display(description="проверки индексации")
     def indexation_history(self, obj: Placement) -> str:
         if obj.pk is None:
@@ -567,6 +584,9 @@ def _history_row(check: Check, current_url: str | None) -> tuple[str, str, str, 
         outcome += f" — по прежнему адресу {result['url']}"
     if check.performed_by == Performer.HUMAN:
         who = "человек"
+        if result.get("source") == "upload":
+            # Отметка из файла размещений (ADR-051): какой файл и какая колонка.
+            who = f"человек, файл «{result.get('file', '')}», «{result.get('column', '')}»"
     else:
         who = "кнопка" if result.get("manual") else "расписание"
     return (_when(check.checked_at), outcome, who, _when(check.next_check_at))

@@ -1,13 +1,14 @@
 """Блок 1 модели данных: продукты, площадки, решения по ним, снапшоты.
 
-Схема — `schema.sql` 1.11, как модели её повторяют — ADR-029: имена
+Схема — `schema.sql` 1.13, как модели её повторяют — ADR-029: имена
 таблиц, индексов и ограничений из схемы, значения по умолчанию в базе
 (`db_default`), `on_delete=PROTECT`. Несколько продуктов — ADR-030:
 площадка хранит только факты о себе, решение по ней — в `ProductSite`.
 Продавцы, предложения, рабочая цена площадки, заметки, курсы — ADR-043.
 Загрузки файлов продавцов и каталога, строки их разбора — ADR-044.
 Выгрузки Ahrefs Batch Analysis и трафик по странам — ADR-045.
-История смены статусов — ADR-049.
+История смены статусов — ADR-049. Загрузки размещений и ссылающиеся
+домены Ahrefs — ADR-051.
 """
 
 from collections.abc import Iterable
@@ -67,6 +68,15 @@ class UploadKind(models.TextChoices):
     PRICE_LIST = "price_list", "Прайс продавца"
     COLLABORATOR_CATALOG = "collaborator_catalog", "Каталог Collaborator"
     AHREFS_BATCH = "ahrefs_batch", "Ahrefs Batch Analysis"
+    PLACEMENTS = "placements", "Размещения продукта"
+    REF_DOMAINS = "ahrefs_refdomains", "Ссылающиеся домены Ahrefs"
+
+
+# Загрузки без продавца: замер Ahrefs наш, у файла размещений продавец — в
+# строках, у загрузки он только «от кого», если файл от продавца (E1-09).
+UPLOADS_WITHOUT_SELLER = (UploadKind.AHREFS_BATCH, UploadKind.PLACEMENTS, UploadKind.REF_DOMAINS)
+# Загрузки под продукт: чьи это размещения и на кого ссылаются домены.
+UPLOADS_FOR_PRODUCT = (UploadKind.PLACEMENTS, UploadKind.REF_DOMAINS)
 
 
 class UploadStatus(models.TextChoices):
@@ -797,14 +807,21 @@ class ExchangeRate(models.Model):
 
 
 class Upload(models.Model):
-    """Загрузка файла продавца, каталога Collaborator или выгрузки Ahrefs (ADR-044, ADR-045).
+    """Загрузка файла: прайс продавца, каталог Collaborator, выгрузки Ahrefs, размещения.
 
     Путь: файл и разметка колонок (`new`) → проверка в фоне (`checking`) →
     сводка до записи (`checked`) → запись в фоне (`writing`) → разбор
     (`done`). Результат — рабочий список. Файл лежит в папке загрузок
-    (`UPLOADS_DIR`), путь в `file_path` — от неё. У выгрузки Ahrefs нет
-    продавца и рабочего списка, `prices_date` — дата замера, `country` —
-    страна выгрузки (пусто — все страны).
+    (`UPLOADS_DIR`), путь в `file_path` — от неё (ADR-044).
+
+    - Выгрузка Ahrefs Batch Analysis (ADR-045) — без продавца и рабочего
+      списка, `prices_date` — дата замера, `country` — страна выгрузки
+      (пусто — все страны).
+    - Размещения продукта (E1-09) — `product`; продавец и сотрудник — «от
+      кого файл», подставляются в строки без своих колонок; `prices_date` —
+      дата файла. Разбора нет, результат — рабочий список.
+    - Ссылающиеся домены Ahrefs (E1-09) — `product`, без продавца и рабочего
+      списка, `prices_date` — дата выгрузки.
     """
 
     kind = PgEnumField("что загружаем", enum_type="upload_kind", choices=UploadKind.choices)
@@ -813,6 +830,24 @@ class Upload(models.Model):
         models.PROTECT,
         verbose_name="продавец",
         related_name="uploads",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    product = models.ForeignKey(
+        Product,
+        models.PROTECT,
+        verbose_name="продукт",
+        related_name="uploads",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="сотрудник",
+        related_name="+",
         null=True,
         blank=True,
         db_index=False,
@@ -863,11 +898,22 @@ class Upload(models.Model):
         verbose_name = "загрузка"
         verbose_name_plural = "загрузки"
         constraints: ClassVar[list[models.BaseConstraint]] = [
-            # Продавца нет только у выгрузки Ahrefs: это наш замер (ADR-045).
+            # Продавец обязателен у прайса и каталога. Выгрузка Ahrefs — наш замер
+            # (ADR-045); у размещений продавец — в строках файла (E1-09).
             models.CheckConstraint(
-                condition=models.Q(seller__isnull=False) | models.Q(kind="ahrefs_batch"),
+                condition=models.Q(seller__isnull=False)
+                | models.Q(kind__in=[kind.value for kind in UPLOADS_WITHOUT_SELLER]),
                 name="uploads_seller_check",
                 violation_error_message="У прайса и каталога должен быть продавец.",
+            ),
+            # Размещения и ссылающиеся домены — всегда чьего-то продукта (E1-09).
+            models.CheckConstraint(
+                condition=models.Q(product__isnull=False)
+                | models.Q(
+                    kind__in=[kind.value for kind in UploadKind if kind not in UPLOADS_FOR_PRODUCT]
+                ),
+                name="uploads_product_check",
+                violation_error_message="У размещений и ссылающихся доменов должен быть продукт.",
             ),
         ]
 
@@ -876,16 +922,31 @@ class Upload(models.Model):
 
     @property
     def source_name(self) -> str:
-        """Чей файл — для экранов: продавец или «Ahrefs · страна»."""
+        """Чей файл — для экранов: продавец, «Ahrefs · страна» или продукт размещений."""
+        if self.kind == UploadKind.PLACEMENTS:
+            source = self.seller.name if self.seller is not None else ""
+            if self.employee is not None:
+                person = self.employee.first_name or self.employee.username
+                source = f"{source}, {person}" if source else person
+            name = f"Размещения {self.product}"
+            return f"{name} · {source}" if source else name
+        if self.kind == UploadKind.REF_DOMAINS:
+            return f"Ahrefs · ссылаются на {self.product}"
         if self.seller is not None:
             return self.seller.name
         return f"Ahrefs · {self.country.upper()}" if self.country else "Ahrefs · все страны"
 
     def get_seller(self) -> Seller:
-        """Продавец прайса или каталога. У выгрузки Ahrefs его нет — значит, ошибка в коде."""
+        """Продавец прайса или каталога. У выгрузок Ahrefs его нет — значит, ошибка в коде."""
         if self.seller is None:
-            raise ValueError(f"У загрузки {self.pk} нет продавца: это выгрузка Ahrefs")
+            raise ValueError(f"У загрузки {self.pk} нет продавца: это не прайс и не каталог")
         return self.seller
+
+    def get_product(self) -> "Product":
+        """Продукт размещений или ссылающихся доменов. У прайса его нет — ошибка в коде."""
+        if self.product is None:
+            raise ValueError(f"У загрузки {self.pk} нет продукта: это не размещения")
+        return self.product
 
 
 class UploadItem(models.Model):
@@ -935,6 +996,64 @@ class UploadItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.upload_id} · {self.site_id} · {self.get_review_group_display()}"
+
+
+class ProductRefDomain(models.Model):
+    """Домен, который ссылается на продукт, — по выгрузке Ahrefs «Referring domains» (E1-09).
+
+    Отдельно от площадок: в выгрузке google.com и тысячи случайных доменов, в
+    «Площадки» они не попадают. Площадка с тем же доменом в «Площадках» этого
+    продукта по умолчанию скрыта — второй ссылкой с того же домена не выиграть;
+    у других продуктов видна. Совпадение — только точное: поддомен из выгрузки
+    (`blog.example.com`) площадку `example.com` не прячет.
+
+    Ссылка пропала — у Ahrefs есть дата Lost (`lost_at`) или домена нет в
+    новой выгрузке продукта (`missing_since` — дата той выгрузки). Строка не
+    удаляется; домен вернулся в выгрузку — пометки снимаются.
+    """
+
+    product = models.ForeignKey(
+        Product, models.PROTECT, verbose_name="продукт", related_name="ref_domains", db_index=False
+    )
+    domain = models.TextField("домен")
+    first_seen_at = models.DateTimeField(
+        "ссылается с", null=True, blank=True, help_text="First seen у Ahrefs."
+    )
+    lost_at = models.DateTimeField(
+        "ссылка пропала", null=True, blank=True, help_text="Lost у Ahrefs."
+    )
+    seen_on = models.DateField("в выгрузке от")
+    missing_since = models.DateField("нет в выгрузках с", null=True, blank=True)
+    upload = models.ForeignKey(
+        Upload,
+        models.PROTECT,
+        verbose_name="выгрузка",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    created_at = models.DateTimeField("добавлен", db_default=PgNow())
+    updated_at = models.DateTimeField("изменён", auto_now=True, db_default=PgNow())
+
+    class Meta:
+        db_table = "product_ref_domains"
+        verbose_name = "ссылающийся домен"
+        verbose_name_plural = "ссылающиеся домены"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            # Один домен у продукта — одна строка; индекс заодно ищет «ссылается ли».
+            models.UniqueConstraint(
+                fields=["product", "domain"], name="product_ref_domains_product_id_domain_key"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.domain} → {self.product}"
+
+    @property
+    def is_linking(self) -> bool:
+        """Ссылается сейчас: Ahrefs не отметил пропажу, и домен есть в последней выгрузке."""
+        return self.lost_at is None and self.missing_since is None
 
 
 def ensure_product_sites(

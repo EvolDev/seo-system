@@ -9,10 +9,12 @@ from apps.content.domain_settings import (
     SETTING_KEYS,
     IndexationSchedule,
     OfferRecheck,
+    UploadPriceCap,
     get_setting,
     indexation_schedule,
     offer_recheck,
     set_product_setting,
+    upload_price_cap,
     validate_setting,
 )
 from apps.content.models import DomainSetting
@@ -198,3 +200,34 @@ class TestOfferRecheck:
         DomainSetting.objects.filter(key="OFFER_RECHECK").delete()
         with pytest.raises(ImproperlyConfigured, match="OFFER_RECHECK"):
             offer_recheck()
+
+
+class TestUploadPriceCap:
+    """Порог «цена из файла похожа на ошибку» — UPLOAD_PRICE_CAP (E1-09, ADR-051)."""
+
+    def test_general_value_comes_from_migration(self) -> None:
+        cap = upload_price_cap()
+        assert cap == UploadPriceCap(eur=5000.0)
+        assert cap.eur_cents == 500_000
+
+    def test_fraction_is_allowed(self) -> None:
+        validate_setting("UPLOAD_PRICE_CAP", {"eur": 1499.99})
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            (5000, "ровно с полем"),
+            ({"eur": 5000, "usd": 1}, "ровно с полем"),
+            ({"eur": "5000"}, "eur"),
+            ({"eur": 0}, "eur"),
+            ({"eur": True}, "eur"),
+        ],
+    )
+    def test_wrong_value_is_rejected(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            validate_setting("UPLOAD_PRICE_CAP", value)
+
+    def test_missing_setting_is_a_configuration_error(self) -> None:
+        DomainSetting.objects.filter(key="UPLOAD_PRICE_CAP").delete()
+        with pytest.raises(ImproperlyConfigured, match="UPLOAD_PRICE_CAP"):
+            upload_price_cap()

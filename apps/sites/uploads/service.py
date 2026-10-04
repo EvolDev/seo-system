@@ -4,6 +4,9 @@
 идут в фоне: каталог Collaborator — 45 000 строк. Запись строит план заново
 внутри своей транзакции — по свежему состоянию базы, а не по сводке, которую
 человек видел минуту назад.
+
+Файл размещений (ADR-051) идёт тем же путём, но со своими полями разметки и
+своей памятью — по прошлым загрузкам размещений, а не у продавца.
 """
 
 import datetime as dt
@@ -17,15 +20,24 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
 
-from apps.content.domain_settings import offer_recheck
-from apps.sites.models import Seller, Upload, UploadKind, UploadStatus
+from apps.content.domain_settings import offer_recheck, upload_price_cap
+from apps.sites.models import Product, Seller, StatusSource, Upload, UploadKind, UploadStatus
 from apps.sites.rates import latest_rates
-from apps.sites.uploads import ahrefs, catalog, filters
+from apps.sites.uploads import (
+    ahrefs,
+    catalog,
+    filters,
+    placement_columns,
+    placements,
+    refdomains,
+)
 from apps.sites.uploads.apply import ALL_PARTS, Part, Writer
 from apps.sites.uploads.columns import (
+    FIELD_LABELS,
     Confidence,
     Field,
     build_mapping,
@@ -34,8 +46,11 @@ from apps.sites.uploads.columns import (
     validate_mapping,
 )
 from apps.sites.uploads.files import Column, FileError, Table, read_table
+from apps.sites.uploads.placement_columns import PField
+from apps.sites.uploads.placement_records import ParsedPlacements, parse_placements
 from apps.sites.uploads.plan import Plan, build_plan, start_of_day
 from apps.sites.uploads.records import Parsed, parse_price_list
+from config.changes import bind_change
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +76,15 @@ def create_upload(
     seller: Seller | None,
     prices_date: dt.date,
     country: str | None = None,
+    product: Product | None = None,
+    employee: User | None = None,
     author: Any = None,
 ) -> Created:
     """Сохраняет файл и читает его колонки. Тот же файл с той же датой — прежняя загрузка.
 
     У выгрузки Ahrefs продавца нет, `country` — страна выгрузки, пусто — все.
+    У размещений и ссылающихся доменов — `product`; у размещений продавец и
+    сотрудник — «от кого файл», оба необязательны.
     """
     name = Path(file.name or "file").name
     relative = Path(f"{prices_date:%Y/%m}") / f"{uuid4().hex}_{name}"
@@ -80,6 +99,7 @@ def create_upload(
     done = Upload.objects.filter(
         kind=kind,
         seller=seller,
+        product=product,
         country=country or None,
         prices_date=prices_date,
         file_sha256=sha,
@@ -91,6 +111,8 @@ def create_upload(
     upload = Upload.objects.create(
         kind=kind,
         seller=seller,
+        product=product,
+        employee=employee,
         country=country or None,
         prices_date=prices_date,
         file_name=name,
@@ -133,6 +155,19 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
         if mismatch:
             _fail(upload, mismatch)
             return
+    elif upload.kind == UploadKind.REF_DOMAINS:
+        upload.columns = [_column_json(c) for c in table.columns]
+        upload.mapping = None
+        upload.currency = None
+        missing = refdomains.missing_columns(table)
+        if missing:
+            _fail(
+                upload,
+                "Не похоже на выгрузку Ahrefs «Referring domains»: нет колонок "
+                + ", ".join(f"«{name}»" for name in missing)
+                + ". Нужен файл кнопки Export на странице Referring domains, как он скачался.",
+            )
+            return
     elif upload.kind == UploadKind.COLLABORATOR_CATALOG:
         missing = catalog.missing_columns(table)
         upload.columns = [_column_json(c) for c in table.columns]
@@ -146,6 +181,19 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
                 + ". Нужна выгрузка в английском интерфейсе.",
             )
             return
+    elif upload.kind == UploadKind.PLACEMENTS:
+        # Память — по прошлым загрузкам размещений, не у продавца (ADR-051).
+        found, questions = placement_columns.build_mapping(
+            table.columns, placement_columns.remembered_mapping()
+        )
+        fields = {key: guess.field for key, guess in found.items()}
+        upload.columns = [
+            _column_json(c, found[c.key].field, found[c.key].confidence, found[c.key].hint)
+            | {"ask": c.key in questions}
+            for c in table.columns
+        ]
+        upload.mapping = {key: field.value for key, field in fields.items()}
+        upload.currency, _ = placement_columns.detect_currency(table.columns, fields)
     else:
         seller = upload.get_seller()
         guesses, questions = build_mapping(table.columns, seller.column_map)
@@ -161,27 +209,47 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
     upload.save()
 
 
+def has_columns_step(upload: Upload) -> bool:
+    """У загрузки есть шаг разметки колонок: прайс и файл размещений."""
+    return upload.kind in (UploadKind.PRICE_LIST, UploadKind.PLACEMENTS)
+
+
 def needs_questions(upload: Upload) -> bool:
     """Есть колонки, про которые надо спросить, или разметка с ошибкой."""
-    if upload.kind in (UploadKind.COLLABORATOR_CATALOG, UploadKind.AHREFS_BATCH):
+    if not has_columns_step(upload):
         return False
     if any(column.get("ask") for column in upload.columns or []):
         return True
-    return bool(mapping_errors(upload, _mapping(upload)))
+    return bool(mapping_errors(upload, upload.mapping or {}))
 
 
-def mapping_errors(upload: Upload, mapping: Mapping[str, Field]) -> list[str]:
+def field_choices(upload: Upload) -> list[tuple[str, str]]:
+    """Поля, из которых выбирают на шаге разметки: у прайса и у файла размещений свои."""
+    if upload.kind == UploadKind.PLACEMENTS:
+        return [(f.value, label) for f, label in placement_columns.FIELD_LABELS.items()]
+    return [(f.value, label) for f, label in FIELD_LABELS.items()]
+
+
+def mapping_errors(upload: Upload, mapping: Mapping[str, str]) -> list[str]:
+    """Ошибки разметки человеческим языком; неизвестное поле — тоже ошибка."""
     columns = [_column(c) for c in upload.columns or []]
-    return validate_mapping(mapping, columns)
-
-
-def confirm_mapping(upload: Upload, mapping: Mapping[str, str], currency: str) -> list[str]:
-    """Разметка от человека: проверка и память у продавца. Ошибки — человеческим языком."""
     try:
+        if upload.kind == UploadKind.PLACEMENTS:
+            placement_fields = {key: PField(value) for key, value in mapping.items()}
+            return placement_columns.validate_mapping(placement_fields, columns)
         fields = {key: Field(value) for key, value in mapping.items()}
     except ValueError:
         return ["Неизвестное поле в разметке — обновите страницу."]
-    errors = mapping_errors(upload, fields)
+    return validate_mapping(fields, columns)
+
+
+def confirm_mapping(upload: Upload, mapping: Mapping[str, str], currency: str) -> list[str]:
+    """Разметка от человека: проверка и память. Ошибки — человеческим языком.
+
+    У прайса разметка запоминается у продавца, у файла размещений — в самой
+    загрузке: память по ним собирается из прошлых загрузок (ADR-051).
+    """
+    errors = mapping_errors(upload, mapping)
     currency = currency.strip().upper()
     if currency not in latest_rates():
         errors.append(
@@ -190,17 +258,18 @@ def confirm_mapping(upload: Upload, mapping: Mapping[str, str], currency: str) -
         )
     if errors:
         return errors
-    upload.mapping = {key: field.value for key, field in fields.items()}
+    upload.mapping = dict(mapping)
     upload.currency = currency
     upload.columns = [
         column | {"field": upload.mapping.get(column["key"], Field.EXTRA.value), "ask": False}
         for column in upload.columns or []
     ]
     upload.save(update_fields=["mapping", "currency", "columns"])
-    # Разметка запоминается у продавца: следующий файл с этими колонками — без вопросов.
-    seller = upload.get_seller()
-    seller.column_map = {**(seller.column_map or {}), **upload.mapping}
-    seller.save(update_fields=["column_map"])
+    if upload.kind == UploadKind.PRICE_LIST:
+        # Разметка запоминается у продавца: следующий файл с этими колонками — без вопросов.
+        seller = upload.get_seller()
+        seller.column_map = {**(seller.column_map or {}), **upload.mapping}
+        seller.save(update_fields=["column_map"])
     return []
 
 
@@ -226,13 +295,32 @@ def plan_for(upload: Upload, parsed: Parsed) -> Plan:
     )
 
 
+def placements_plan(upload: Upload) -> tuple[Table, placements.PlacementPlan]:
+    """Файл размещений → план по свежему состоянию базы: сводка и запись строят его одинаково."""
+    table = _table(upload, header_row=upload.header_row)
+    mapping = {key: PField(value) for key, value in (upload.mapping or {}).items()}
+    parsed: ParsedPlacements = parse_placements(
+        table, mapping, product_domain=upload.get_product().domain
+    )
+    plan = placements.build_plan(
+        parsed, upload=upload, rates=latest_rates(), cap=upload_price_cap()
+    )
+    return table, plan
+
+
 def check(upload_id: int) -> None:
     """Сводка до записи: план без записи. Тело задачи очереди `upload_check`."""
-    upload = Upload.objects.select_related("seller").get(pk=upload_id)
+    upload = Upload.objects.select_related("seller", "product", "employee").get(pk=upload_id)
     if upload.status != UploadStatus.CHECKING:
         return
     if upload.kind == UploadKind.AHREFS_BATCH:
         _check_ahrefs(upload)
+        return
+    if upload.kind == UploadKind.PLACEMENTS:
+        _check_placements(upload)
+        return
+    if upload.kind == UploadKind.REF_DOMAINS:
+        _check_refdomains(upload)
         return
     try:
         table, parsed, unknown = parse(upload)
@@ -240,8 +328,8 @@ def check(upload_id: int) -> None:
         _fail(upload, str(error))
         return
     plan = plan_for(upload, parsed)
-    upload.summary = plan.summary(
-        rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown
+    upload.summary = _with_refs(
+        plan.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown), parsed
     )
     # Пересчёт сводки у загрузки, из которой уже записывали, разбор не закрывает.
     written = bool((upload.result or {}).get("runs"))
@@ -258,17 +346,22 @@ def check(upload_id: int) -> None:
 
 
 class Action(StrEnum):
-    """Что записать: всё (прайс продавца) или одной из кнопок каталога (ADR-044)."""
+    """Что записать: всё (прайс продавца), одной из кнопок каталога (ADR-044) или
+    размещения с заменой расходящихся значений (ADR-051)."""
 
     ALL = "all"
     KNOWN = "known"  # «Обновить в базе» — площадки, которые уже есть
     NEW = "new"  # «Добавить новые» — только новые для базы, по фильтру
+    REPLACE = "replace"  # размещения: значения файла вместо расходящихся в базе
 
     @property
     def label(self) -> str:
-        return {"all": "Записать в базу", "known": "Обновить в базе", "new": "Добавить новые"}[
-            self.value
-        ]
+        return {
+            "all": "Записать в базу",
+            "known": "Обновить в базе",
+            "new": "Добавить новые",
+            "replace": "Записать, заменив расходящиеся",
+        }[self.value]
 
 
 def write(
@@ -298,6 +391,12 @@ def write(
             return
         if upload.kind == UploadKind.AHREFS_BATCH:
             _write_ahrefs(upload)
+            return
+        if upload.kind == UploadKind.PLACEMENTS:
+            _write_placements(upload, replace=action == Action.REPLACE)
+            return
+        if upload.kind == UploadKind.REF_DOMAINS:
+            _write_refdomains(upload)
             return
         try:
             table, parsed, unknown = parse(upload)
@@ -335,8 +434,9 @@ def write(
         else:
             # Сводка — по состоянию после записи: добавленные стали «уже в базе».
             fresh = plan_for(upload, parsed)
-            upload.summary = fresh.summary(
-                rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown
+            upload.summary = _with_refs(
+                fresh.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown),
+                parsed,
             )
             upload.result = {"runs": runs}
         upload.status = UploadStatus.DONE
@@ -400,6 +500,101 @@ def _write_ahrefs(upload: Upload) -> None:
     )
 
 
+def _check_placements(upload: Upload) -> None:
+    try:
+        table, plan = placements_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    upload.summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows)
+    written = bool((upload.result or {}).get("runs"))
+    upload.status = UploadStatus.DONE if written else UploadStatus.CHECKED
+    upload.error = None
+    upload.save(update_fields=["summary", "status", "error"])
+    logger.info(
+        "файл размещений проверен",
+        extra={"upload_id": upload.pk, "summary": _short(upload.summary)},
+    )
+
+
+def _write_placements(upload: Upload, *, replace: bool) -> None:
+    """Запись файла размещений — внутри транзакции и блокировки `write`.
+
+    Статусы площадок и размещений в истории — «загрузка» от того, кто загрузил
+    (ADR-049).
+    """
+    try:
+        table, plan = placements_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows)
+    with bind_change(StatusSource.UPLOAD, upload.author_id):
+        written = placements.Writer(plan, upload, replace=replace).run()
+    action = Action.REPLACE if replace else Action.ALL
+    run = {"action": action.value, "at": timezone.now().isoformat(), **written}
+    upload.summary = summary
+    upload.result = {**summary, **written, "runs": [*(upload.result or {}).get("runs", []), run]}
+    upload.status = UploadStatus.DONE
+    upload.error = None
+    upload.written_at = timezone.now()
+    upload.save()
+    logger.info(
+        "файл размещений записан",
+        extra={"upload_id": upload.pk, "replace": replace, "counts": written["counts"]},
+    )
+
+
+def _with_refs(summary: dict[str, Any], parsed: Parsed) -> dict[str, Any]:
+    """Сводка прайса и каталога + сколько площадок файла уже ссылаются на продукты (ADR-051)."""
+    return {**summary, "ref_domains": refdomains.linking([r.domain for r in parsed.records])}
+
+
+def refdomains_plan(upload: Upload) -> tuple[Table, refdomains.Plan]:
+    """Выгрузка «Referring domains» → план по свежему состоянию базы."""
+    table = _table(upload, header_row=upload.header_row)
+    return table, refdomains.build_plan(refdomains.parse(table), upload)
+
+
+def _check_refdomains(upload: Upload) -> None:
+    try:
+        table, plan = refdomains_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    upload.summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows)
+    written = bool((upload.result or {}).get("runs"))
+    upload.status = UploadStatus.DONE if written else UploadStatus.CHECKED
+    upload.error = None
+    upload.save(update_fields=["summary", "status", "error"])
+    logger.info(
+        "ссылающиеся домены проверены",
+        extra={"upload_id": upload.pk, "domains": upload.summary["domains"]},
+    )
+
+
+def _write_refdomains(upload: Upload) -> None:
+    """Запись выгрузки «Referring domains» — внутри транзакции и блокировки `write`."""
+    try:
+        table, plan = refdomains_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows)
+    written = refdomains.write(plan, upload)
+    run = {"action": Action.ALL.value, "at": timezone.now().isoformat(), **written}
+    upload.summary = summary
+    upload.result = {**written, "runs": [*(upload.result or {}).get("runs", []), run]}
+    upload.status = UploadStatus.DONE
+    upload.error = None
+    upload.written_at = timezone.now()
+    upload.save()
+    logger.info(
+        "ссылающиеся домены записаны",
+        extra={"upload_id": upload.pk, "counts": written["counts"]},
+    )
+
+
 def issues(upload: Upload) -> dict[str, Any]:
     """Отклоняли, дубли, ошибки, адреса — из сводки; что перезаписано в карточке — из записей."""
     data = dict(upload.summary or {})
@@ -439,6 +634,8 @@ def _table(upload: Upload, *, header_row: int | None) -> Table:
     is_header = {
         UploadKind.COLLABORATOR_CATALOG: catalog.looks_like_catalog,
         UploadKind.AHREFS_BATCH: ahrefs.looks_like_batch,
+        UploadKind.PLACEMENTS: placement_columns.looks_like_placements_header,
+        UploadKind.REF_DOMAINS: refdomains.looks_like_refdomains,
     }.get(UploadKind(upload.kind), looks_like_header)
     return read_table(file_path(upload), header_row=header_row, is_header=is_header)
 
@@ -449,7 +646,7 @@ def _mapping(upload: Upload) -> dict[str, Field]:
 
 def _column_json(
     column: Column,
-    field: Field | None = None,
+    field: StrEnum | None = None,
     confidence: Confidence | None = None,
     hint: str = "",
 ) -> dict[str, Any]:

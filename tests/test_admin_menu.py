@@ -49,7 +49,13 @@ def test_groups_follow_the_work(admin_client: Client) -> None:
     menu = _menu(admin_client)
     assert [group["name"] for group in menu] == ["Работа", "Справочники", "Настройки", "Служебное"]
     assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Ключи"]
-    assert _names(menu[1]) == ["Каталог площадок", "Продавцы", "Рабочие списки", "Продукты"]
+    assert _names(menu[1]) == [
+        "Каталог площадок",
+        "Продавцы",
+        "Рабочие списки",
+        "Продукты",
+        "Ссылающиеся домены",
+    ]
 
 
 def test_no_similar_names(admin_client: Client) -> None:

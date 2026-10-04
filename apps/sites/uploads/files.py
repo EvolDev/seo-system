@@ -5,6 +5,10 @@
 Над заголовком бывают заголовок листа и пустые строки — строка заголовков
 ищется сама. Колонка без заголовка, но со значениями получает имя по букве
 («Колонка E»): из файла ничего не теряется (ADR-041).
+
+Список из одних доменов (E1-09) — одна колонка: с заголовком, который узнаётся
+(«Сайт»), или вовсе без него. Тогда строки заголовков нет (`NO_HEADER`), а
+колонка называется «Площадка».
 """
 
 import csv
@@ -15,6 +19,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
@@ -23,12 +28,36 @@ from openpyxl.utils import get_column_letter
 HEADER_SEARCH_ROWS = 20
 # Сколько первых значений колонки показать человеку на шаге разметки.
 SAMPLES = 3
+# Строки заголовков нет: файл — один столбец доменов.
+NO_HEADER = 0
+DOMAIN_HEADER = "Площадка"
 
 _SPACES = re.compile(r"\s+")
+_DOMAIN = re.compile(r"^(?:https?://)?(?:www\.)?[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?$", re.IGNORECASE)
 
 
 class FileError(Exception):
     """Файл не прочитать: формат, кодировка, пустой. Текст — для человека."""
+
+
+# С этого числа целое в формате «#,##0» показывается с разделителем разрядов.
+GROUP = 1000
+
+
+class Grouped(float):
+    """Целое из xlsx в формате с разделителем разрядов («#,##0»): 197 393.
+
+    Для метрик это обычное число. Но в файле размещений так выглядят цены,
+    набранные с точкой и тремя цифрами после неё: таблица приняла точку за
+    разделитель разрядов и вместо 197,393 € сохранила 197 393. Деньги файла
+    размещений читают такое число как 197,39 (ADR-051); в прайсах «1,200» —
+    честные тысяча двести, там оно остаётся числом.
+    """
+
+    @property
+    def shown(self) -> str:
+        """Как его видит человек в таблице: «197.393»."""
+        return f"{int(self):,}".replace(",", ".")
 
 
 @dataclass(frozen=True)
@@ -117,9 +146,11 @@ def read_table(
         raise FileError("Файл пустой.")
     if header_row is None:
         header_row = find_header_row(rows, is_header)
-    elif not 1 <= header_row <= len(rows):
+    elif header_row != NO_HEADER and not 1 <= header_row <= len(rows):
         raise FileError(f"В файле нет строки {header_row}.")
-    header_cells = rows[header_row - 1]
+    header_cells: Sequence[object] = (
+        (DOMAIN_HEADER,) if header_row == NO_HEADER else rows[header_row - 1]
+    )
     data: list[Row] = []
     blank = 0
     for number, cells in enumerate(rows[header_row:], start=header_row + 1):
@@ -136,19 +167,27 @@ def find_header_row(
     rows: Sequence[Sequence[object]], is_header: Callable[[Sequence[str]], bool] | None
 ) -> int:
     candidates: list[int] = []
+    singles: list[tuple[int, str]] = []
     for number, cells in enumerate(rows[:HEADER_SEARCH_ROWS], start=1):
         texts = [show(cell) for cell in cells if not is_blank(cell)]
         # Строка с одной ячейкой — заголовок листа («sites»), а не колонок.
         if len(texts) < 2:
+            if texts:
+                singles.append((number, texts[0]))
             continue
         if is_header is not None and is_header(texts):
             return number
         candidates.append(number)
-    if not candidates:
-        raise FileError(
-            "Не нашлась строка заголовков: в первых строках нет двух заполненных ячеек."
-        )
-    return candidates[0]
+    if candidates:
+        return candidates[0]
+    # Ни одной строки из двух ячеек — список в один столбец: доменов, с заголовком
+    # («Сайт») или без него.
+    for number, text in singles:
+        if is_header is not None and is_header([text]):
+            return number
+    if singles and all(_DOMAIN.match(text) for _, text in singles):
+        return NO_HEADER
+    raise FileError("Не нашлась строка заголовков: в первых строках нет двух заполненных ячеек.")
 
 
 def _used_width(cells: Sequence[object]) -> int:
@@ -202,13 +241,25 @@ def _read_xlsx(path: Path) -> list[tuple[object, ...]]:
     try:
         for sheet in workbook.worksheets:
             rows: list[tuple[object, ...]] = [
-                tuple(row) for row in sheet.iter_rows(values_only=True)
+                tuple(_cell_value(cell) for cell in row) for row in sheet.iter_rows()
             ]
             if any(not is_blank(cell) for row in rows for cell in row):
                 return rows
         return []
     finally:
         workbook.close()
+
+
+def _cell_value(cell: Any) -> object:
+    """Значение ячейки; целое в формате с разделителем разрядов — `Grouped`."""
+    value = cell.value
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return value
+    number_format = str(getattr(cell, "number_format", "") or "").split(";", 1)[0]
+    grouped = "#,##0" in number_format and "." not in number_format
+    if grouped and float(value).is_integer() and abs(value) >= GROUP:
+        return Grouped(value)
+    return value
 
 
 def _read_csv(raw: bytes) -> list[tuple[object, ...]]:

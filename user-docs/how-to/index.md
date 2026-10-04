@@ -3,8 +3,8 @@ title: Инструкции
 description: Как выполнить конкретную задачу в системе — по одной инструкции на действие.
 section: how-to
 status: draft
-tasks: [E1-04, E1-05, E9-01, E9-08, E2-03, E1-08, E1-10, E9-11]
-updated: 2026-10-03
+tasks: [E1-04, E1-05, E9-01, E9-08, E2-03, E1-08, E1-10, E9-11, E1-09]
+updated: 2026-10-04
 ---
 
 # Инструкции
@@ -22,6 +22,8 @@ updated: 2026-10-03
 - [Как загрузить прайс продавца](upload-price-list.md)
 - [Как загрузить каталог Collaborator](upload-collaborator-catalog.md)
 - [Как подтянуть данные Ahrefs через Batch Analysis](ahrefs-batch-analysis.md)
+- [Как загрузить список размещений](upload-placements.md)
+- [Как загрузить ссылающиеся домены из Ahrefs](upload-ahrefs-refdomains.md)
 
 Инструкции появляются вместе с функциями. Ближайшие по плану, в порядке
 появления:

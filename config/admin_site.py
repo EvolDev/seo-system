@@ -35,7 +35,13 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
     (
         "Справочники",
         "reference",
-        [("sites", "site"), ("sites", "seller"), ("sites", "sitelist"), ("sites", "product")],
+        [
+            ("sites", "site"),
+            ("sites", "seller"),
+            ("sites", "sitelist"),
+            ("sites", "product"),
+            ("sites", "productrefdomain"),
+        ],
     ),
     ("Настройки", "settings", [("content", "domainsetting"), ("auth", "user"), ("auth", "group")]),
     (
