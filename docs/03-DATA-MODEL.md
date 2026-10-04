@@ -247,18 +247,18 @@ Ahrefs Batch Analysis под страну, позже — Ahrefs API (E2-07); US
 `eur_rate(currency)`: евро — 1, иначе последний известный курс.
 
 ### `gray_scans`
-Результат проверки на серые тематики.
+Замер серости площадки — снапшот: каждый замер новой строкой (ADR-054).
 
 | Поле | Тип | Описание |
 |---|---|---|
 | id | bigserial PK | |
 | site_id | FK sites | |
-| total_indexed | int | всего страниц в индексе |
-| gray_hits | int | найдено по серым запросам |
-| ratio | numeric(5,2) | доля в процентах |
-| breakdown | jsonb | по категориям из `04-DOMAIN-RULES.md` §1.4, плюс расхождение estimated count и фактической выдачи |
-| sample_urls | jsonb | примеры найденных URL для глазами |
-| method | enum | `serp_api`, `manual` |
+| total_indexed | int | всего страниц в индексе — оценка Google по `site:домен` |
+| gray_hits | int | серых — оценка Google по `site:домен "условие" OR …` |
+| ratio | numeric(5,2) | доля в процентах, два знака; всего 0 — пусто; серых больше, чем всего, — 100 |
+| breakdown | jsonb | `queries` — `total` и `gray`, запросы, по которым искали; `source` — `extension` (числа подставило расширение браузера) или `typed` (вписал человек); `over_total` — серых по оценке больше, чем всего |
+| sample_urls | jsonb | до 10 адресов серых страниц с выдачи — берёт расширение |
+| method | enum | `manual` — числа из браузера человека (E2-06); `serp_api` — запасное значение схемы |
 | checked_at | timestamptz | |
 
 ### `site_audits`

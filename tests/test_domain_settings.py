@@ -7,10 +7,13 @@ from django.db import IntegrityError, transaction
 from apps.content.domain_settings import (
     PRODUCT_KEYS,
     SETTING_KEYS,
+    GrayZones,
     IndexationSchedule,
     OfferRecheck,
     UploadPriceCap,
     get_setting,
+    gray_terms,
+    gray_zones,
     indexation_schedule,
     offer_recheck,
     set_product_setting,
@@ -231,3 +234,61 @@ class TestUploadPriceCap:
         DomainSetting.objects.filter(key="UPLOAD_PRICE_CAP").delete()
         with pytest.raises(ImproperlyConfigured, match="UPLOAD_PRICE_CAP"):
             upload_price_cap()
+
+
+class TestGraySettings:
+    """Условия и зоны серости — GRAY_TERMS и GRAY_ZONES (E2-06)."""
+
+    def test_general_values_come_from_migration(self) -> None:
+        terms = gray_terms()
+        assert len(terms) == 29
+        assert terms[:2] == ("casino", "poker")
+        assert "delta 8" in terms
+        assert terms[-1] == "xanax"
+        assert gray_zones() == GrayZones(green=10.0, yellow=25.0)
+
+    def test_terms_spaces_are_collapsed(self) -> None:
+        DomainSetting.objects.filter(key="GRAY_TERMS").update(value=["  online   casino ", "loan"])
+        assert gray_terms() == ("online casino", "loan")
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            ([], "непустой список"),
+            ("casino", "непустой список"),
+            (["casino", ""], "непустая строка"),
+            (["casino", 1], "непустая строка"),
+            (["Casino", "casino"], "повторяется"),
+        ],
+    )
+    def test_wrong_terms_are_rejected(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            validate_setting("GRAY_TERMS", value)
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            ({"green": 10}, "ровно с полями"),
+            ({"green": "10", "yellow": 25}, "green"),
+            ({"green": 10, "yellow": 101}, "yellow"),
+            ({"green": True, "yellow": 25}, "green"),
+            ({"green": 30, "yellow": 25}, "не больше"),
+        ],
+    )
+    def test_wrong_zones_are_rejected(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            validate_setting("GRAY_ZONES", value)
+
+    def test_missing_terms_are_a_configuration_error(self) -> None:
+        DomainSetting.objects.filter(key="GRAY_TERMS").delete()
+        with pytest.raises(ImproperlyConfigured, match="GRAY_TERMS"):
+            gray_terms()
+
+    def test_without_zones_zone_is_not_counted(self) -> None:
+        DomainSetting.objects.filter(key="GRAY_ZONES").delete()
+        assert gray_zones() is None
+
+    def test_product_value_does_not_change_terms(self, convertio: Product) -> None:
+        # Серость — факт о площадке, а не решение продукта: действует общее значение.
+        set_product_setting(convertio.pk, "GRAY_TERMS", ["forex"])
+        assert gray_terms()[0] == "casino"

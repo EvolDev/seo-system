@@ -4,11 +4,12 @@
 вверху панели (seo/panel.css).
 Контекст: panel_title, panel_sub (строка под заголовком), panel_links
 (ссылки рядом с заголовком: текст, адрес, открыть в панели),
-panel_full_url (полная страница).
+panel_full_url (полная страница); panel_title_url — заголовок ссылкой в
+новую вкладку (сайт площадки), panel_title_tools — значки после заголовка.
 {% endcomment %}
 <header class="seo-panel-head">
   <div class="seo-panel-heading">
-    <h2 class="seo-panel-title">{{ panel_title }}</h2>
+    <h2 class="seo-panel-title">{% if panel_title_url %}<a href="{{ panel_title_url }}" target="_blank" rel="noopener noreferrer" title="Открыть сайт в новой вкладке">{{ panel_title }}</a>{% else %}{{ panel_title }}{% endif %}{% if panel_title_tools %} {{ panel_title_tools }}{% endif %}</h2>
     {% if panel_sub %}<div class="seo-sub">{{ panel_sub }}</div>{% endif %}
   </div>
   <div class="seo-panel-tools">

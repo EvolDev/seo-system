@@ -1,0 +1,30 @@
+/* Серость в Google — раздел карточки площадки и колонка «Площадок» (E2-06).
+   Цвета зон — переменные offers.css: зелёная — как «дешевле», красная — как
+   «дороже», жёлтая — как пометка. Поля узкие: панель — по ширине содержимого. */
+
+.seo-gray-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
+
+.seo-gray-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 8px 0 4px;
+}
+.seo-gray-form label { display: inline-flex; align-items: center; gap: 6px; }
+.seo-gray-form input[type="number"] { width: 9em; }
+.seo-gray-form input.seo-gray-filled { outline: 2px solid var(--seo-down); outline-offset: 1px; }
+.seo-gray-result { min-width: 6em; font-variant-numeric: tabular-nums; }
+.seo-gray-errors, .seo-gray-hint { flex-basis: 100%; }
+.seo-gray-hint.seo-gray-hint-warn { color: var(--seo-mark); }
+
+.seo-gray-latest { margin: 4px 0; }
+.seo-gray-zone { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seo-gray-zone.seo-gray-green { color: var(--seo-down); }
+.seo-gray-zone.seo-gray-yellow { color: var(--seo-mark); }
+.seo-gray-zone.seo-gray-red { color: var(--seo-up); }
+
+.seo-gray-list { margin: 4px 0 0; padding-left: 0; list-style: none; }
+.seo-gray-list li { margin: 2px 0; }
+.seo-gray-samples ul { margin: 2px 0 4px; padding-left: 18px; }
+.seo-gray-samples a { overflow-wrap: anywhere; }

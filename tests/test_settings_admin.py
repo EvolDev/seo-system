@@ -213,9 +213,9 @@ class TestGeneralSettings:
         DomainSetting.objects.create(key="DR_ZONES", value={"green": 50, "yellow": 35})
         DomainSetting.objects.create(key="DR_ZONES", product=product, value={"green": 30})
         response = admin_client.get(reverse("admin:content_domainsetting_changelist"))
-        # Общие: DR_ZONES и из миграций content.0003–0005 — INDEXATION_SCHEDULE,
-        # OFFER_RECHECK, UPLOAD_PRICE_CAP.
-        assert response.context["cl"].result_count == 4
+        # Общие: DR_ZONES и из миграций content.0003–0006 — INDEXATION_SCHEDULE,
+        # OFFER_RECHECK, UPLOAD_PRICE_CAP, GRAY_TERMS, GRAY_ZONES.
+        assert response.context["cl"].result_count == 6
 
     def test_add_general_value(self, admin_client: Client) -> None:
         url = reverse("admin:content_domainsetting_add")
@@ -269,3 +269,36 @@ class TestSettingValueShape:
         response = admin_client.post(_change_url(product), _form(product, **_inline_rows(row)))
         assert response.status_code == 200
         assert not DomainSetting.objects.filter(product=product).exists()
+
+
+class TestGrayTermsEditor:
+    """Условия серости — по одному на строку, а не JSON (E2-06)."""
+
+    @pytest.fixture
+    def url(self) -> str:
+        setting = DomainSetting.objects.get(key="GRAY_TERMS", product=None)
+        return reverse("admin:content_domainsetting_change", args=[setting.pk])
+
+    def test_terms_are_shown_one_per_line(self, admin_client: Client, url: str) -> None:
+        form = admin_client.get(url).context["adminform"].form
+        assert form.initial["value"].splitlines()[:3] == ["casino", "poker", "betting"]
+        assert form.fields["key"].disabled
+
+    def test_lines_are_saved_as_list(self, admin_client: Client, url: str) -> None:
+        text = "casino\n\n  online casino  \ncasino\nforex\n"
+        _post(admin_client, url, {"key": "GRAY_TERMS", "value": text, "description": ""})
+        assert get_setting("GRAY_TERMS", None) == ["casino", "online casino", "forex"]
+
+    def test_key_is_not_changed(self, admin_client: Client, url: str) -> None:
+        _post(admin_client, url, {"key": "DR_ZONES", "value": "casino", "description": ""})
+        assert get_setting("GRAY_TERMS", None) == ["casino"]
+        assert get_setting("DR_ZONES", None) is None
+
+    def test_empty_list_is_rejected(self, admin_client: Client, url: str) -> None:
+        response = admin_client.post(url, {"key": "GRAY_TERMS", "value": " \n", "description": ""})
+        assert response.status_code == 200
+        assert DomainSetting.objects.get(key="GRAY_TERMS", product=None).value[-1] == "xanax"
+
+    def test_list_shows_terms_in_a_row(self, admin_client: Client) -> None:
+        response = admin_client.get(reverse("admin:content_domainsetting_changelist"))
+        assert "casino, poker, betting" in response.content.decode()

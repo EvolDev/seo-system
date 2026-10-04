@@ -2,7 +2,7 @@
 {% comment %}
 Карточка площадки (E1-07, ADR-043): метрики, статусы по продуктам с историей
 смен (E1-13, ADR-049), рабочая цена, предложения продавцов, история цен,
-прочие данные, заметки. Одна и та же разметка — в
+прочие данные, заметки, серость в Google (E2-06). Одна и та же разметка — в
 панели справа (panel — запрос панели, seo/panel.js, E9-11) и на отдельной
 странице card.html. Формы с data-card-form панель отправляет сама и
 показывает обновлённую карточку; без скрипта они уходят обычным путём.
@@ -10,6 +10,7 @@
 запись в той же панели.
 {% endcomment %}{% if panel %}<link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/status-history.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/gray.css' %}">
 {% include "admin/panel_head.html" %}{% endif %}
 <div class="seo-card-content">
   <div class="seo-card-summary">
@@ -35,6 +36,8 @@
     {% endfor %}
     {% if not panel %}<div><a href="{{ change_url }}">Факты о площадке</a></div>{% endif %}
   </div>
+
+  {% include "admin/sites/site/card_gray.html" %}
 
   <section>
     <h3>Рабочая цена</h3>

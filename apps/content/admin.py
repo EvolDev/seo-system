@@ -39,6 +39,14 @@ LIST_FIELDS = {
     "authority_domains": "AUTHORITY_DOMAINS",
 }
 PRODUCT_SETTING_FIELDS = (*PRICE_FIELDS, *LIST_FIELDS)
+# Общие настройки-списки: правятся по одной строке на элемент.
+LINE_LIST_HELP = {
+    "GRAY_TERMS": (
+        "По одному условию на строку. В запрос серости каждое уходит в кавычках через"
+        ' OR: delta 8 → "delta 8". Google учитывает только первые 32 слова запроса.'
+    ),
+}
+LINE_LIST_KEYS = frozenset(LINE_LIST_HELP)
 
 
 def _show(value: Any) -> str:
@@ -244,6 +252,9 @@ class ProductOtherSettingsInline(TabularInline):
 
 
 class GeneralSettingForm(forms.ModelForm):  # type: ignore[type-arg]
+    """Общее значение настройки. Списки строк (`LINE_LIST_KEYS`) — по одной на
+    строку, а не JSON: условия серости дописывают руками (E2-06)."""
+
     value = SettingValueField(label="значение")
     key = forms.ChoiceField(
         label="настройка",
@@ -253,6 +264,26 @@ class GeneralSettingForm(forms.ModelForm):  # type: ignore[type-arg]
     class Meta:
         model = DomainSetting
         fields = ("key", "value", "description")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self._lines_key():
+            self.fields["value"] = forms.CharField(
+                label="значение",
+                widget=forms.Textarea(attrs={"rows": 14}),
+                help_text=LINE_LIST_HELP[self.instance.key],
+            )
+            value = self.instance.value
+            self.initial["value"] = "\n".join(value) if isinstance(value, list) else ""
+            # Ключ у списка не меняют: строки JSON-значением другой настройки не станут.
+            self.fields["key"].disabled = True
+
+    def _lines_key(self) -> bool:
+        return self.instance.pk is not None and self.instance.key in LINE_LIST_KEYS
+
+    def clean_value(self) -> Any:
+        value = self.cleaned_data["value"]
+        return _lines(value) if self._lines_key() else value
 
     def clean_key(self) -> str:
         # Продукта в форме нет, поэтому Django не проверит уникальность сам.
@@ -286,4 +317,6 @@ class DomainSettingAdmin(NoDeleteAdmin):
 
     @admin.display(description="значение")
     def value_text(self, obj: DomainSetting) -> str:
+        if obj.key in LINE_LIST_KEYS and isinstance(obj.value, list):
+            return ", ".join(str(item) for item in obj.value)
         return _show(obj.value)

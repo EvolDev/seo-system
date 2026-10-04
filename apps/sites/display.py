@@ -124,3 +124,55 @@ def seller_mark(seller: str | None) -> SafeString:
     """Пометка «прод.»: доверенных замеров нет, цифры — со слов продавца."""
     title = f"Доверенных замеров нет — по словам продавца {seller or ''}".strip()
     return format_html('<span class="seo-seller-mark" title="{}">прод.</span>', title)
+
+
+# Значки у домена (E2-06, по просьбе пользователя): открыть сайт в новой вкладке
+# и скопировать домен. SVG, а не эмодзи: эмодзи Windows рисует по-своему.
+_OPEN_ICON = mark_safe(
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none"'
+    ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'
+    "</svg>"
+)
+_COPY_ICON = mark_safe(
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none"'
+    ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="9" y="9" width="11" height="11" rx="2"/>'
+    '<path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>'
+)
+
+
+def site_url(domain: str) -> str:
+    """Адрес сайта площадки: домен хранится без схемы и `www.`, сайт сам перенаправит."""
+    return f"https://{domain}/"
+
+
+def open_site_html(domain: str) -> SafeString:
+    """Значок «открыть сайт в новой вкладке»."""
+    return format_html(
+        '<a class="seo-icon-btn" href="{}" target="_blank" rel="noopener noreferrer"'
+        ' title="Открыть сайт в новой вкладке" aria-label="Открыть {} в новой вкладке">{}</a>',
+        site_url(domain),
+        domain,
+        _OPEN_ICON,
+    )
+
+
+def copy_domain_html(domain: str) -> SafeString:
+    """Кнопка «скопировать домен» — копирует seo/domain-tools.js."""
+    return format_html(
+        '<button type="button" class="seo-icon-btn" data-copy="{}" title="Скопировать домен"'
+        ' aria-label="Скопировать {}">{}</button>',
+        domain,
+        domain,
+        _COPY_ICON,
+    )
+
+
+def domain_tools_html(domain: str) -> SafeString:
+    """Оба значка рядом с доменом в списке."""
+    return format_html(
+        '<span class="seo-domain-tools">{}{}</span>',
+        open_site_html(domain),
+        copy_domain_html(domain),
+    )

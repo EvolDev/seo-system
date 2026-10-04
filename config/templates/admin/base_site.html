@@ -16,17 +16,20 @@
 <link rel="stylesheet" href="{% asset 'seo/panel.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/saved-filters.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/export.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/domain-tools.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}
 {# Переходы, фильтры и формы без перезагрузки страницы (E9-09, ADR-046); #}
 {# записи — панелью справа поверх списка (E9-11, ADR-048); «Мои фильтры» #}
 {# над колонкой фильтров списков (E9-10, ADR-050); окно выгрузки в Excel #}
-{# над списками (E1-06, ADR-053). #}
+{# над списками (E1-06, ADR-053); значки «открыть сайт» и «скопировать» у #}
+{# домена (E2-06). #}
 <script src="{% asset 'seo/soft-nav.js' %}" defer></script>
 <script src="{% asset 'seo/panel.js' %}" defer></script>
 <script src="{% asset 'seo/saved-filters.js' %}" defer></script>
 <script src="{% asset 'seo/export.js' %}" defer></script>
+<script src="{% asset 'seo/domain-tools.js' %}" defer></script>
 <script>
   // Расцветку ставим до первой отрисовки, иначе страница мигнёт чужими цветами.
   // Выбор помнит браузер; в первый раз — по настройке системы (светлая / тёмная).

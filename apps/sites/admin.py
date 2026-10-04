@@ -6,7 +6,8 @@
 ещё не работали (ADR-036).
 
 Рабочая цена, предложения продавцов, заметки и карточка площадки —
-ADR-043; правила смены цены — `apps/sites/offers.py`.
+ADR-043; правила смены цены — `apps/sites/offers.py`. Серость в Google в
+карточке — E2-06, `apps/sites/gray_scan.py`.
 """
 
 import datetime as dt
@@ -19,8 +20,11 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.views.main import ChangeList
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
-from django.db.models import Count, Exists, F, Max, OuterRef, Q, Subquery
+from django.db.models import Case, Count, Exists, F, Max, OuterRef, Q, Subquery, Value, When
+from django.db.models.fields.json import KT
+from django.db.models.functions import Cast
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -37,18 +41,23 @@ from apps.content.admin import (
     ProductOtherSettingsInline,
     ProductSettingsForm,
 )
+from apps.content.domain_settings import gray_terms, gray_zones
+from apps.content.models import DomainSetting
 from apps.placements.models import Placement
-from apps.sites import ahrefs_domains, countries, offers
+from apps.sites import ahrefs_domains, countries, gray_scan, offers
 from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
     announce_text,
+    copy_domain_html,
     delta,
     delta_html,
     delta_text,
+    domain_tools_html,
     price_html,
     round_euros,
     seller_mark,
+    site_url,
     writing_html,
 )
 from apps.sites.domains import normalize_domain
@@ -271,11 +280,21 @@ class SiteAdmin(NoDeleteAdmin):
                 self.admin_site.admin_view(require_POST(self.card_note_view)),
                 name="sites_site_card_note",
             ),
+            path(
+                "<int:object_id>/card/gray/",
+                self.admin_site.admin_view(require_POST(self.card_gray_view)),
+                name="sites_site_card_gray",
+            ),
         ]
         return own + super().get_urls()
 
-    def card_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
-        """Карточка: панели (заголовок X-Seo-Partial) — только содержимое, иначе страница."""
+    def card_view(
+        self, request: HttpRequest, object_id: int, gray_form: "GrayReadingForm | None" = None
+    ) -> HttpResponse:
+        """Карточка: панели (заголовок X-Seo-Partial) — только содержимое, иначе страница.
+
+        `gray_form` — форма замера серости с ошибками: карточка покажет их у полей.
+        """
         site = get_object_or_404(Site.all_objects.select_related("price__seller"), pk=object_id)
         if not self.has_view_permission(request, site):
             return HttpResponse(status=403)
@@ -283,12 +302,16 @@ class SiteAdmin(NoDeleteAdmin):
         context = {
             **self.admin_site.each_context(request),
             **_card_context(site),
+            "gray": _gray_context(site, gray_form),
             "title": site.domain,
             "subtitle": "Карточка площадки",
             "opts": self.model._meta,
             "can_change": self.has_change_permission(request, site),
             "panel": partial,
             "panel_title": site.domain,
+            # Название — ссылка на сайт в новой вкладке, рядом — скопировать домен.
+            "panel_title_url": site_url(site.domain),
+            "panel_title_tools": copy_domain_html(site.domain),
             "panel_sub": "Карточка площадки",
             "panel_links": [
                 ("Факты о площадке", reverse("admin:sites_site_change", args=[site.pk]), True)
@@ -317,6 +340,19 @@ class SiteAdmin(NoDeleteAdmin):
         if body and self.has_change_permission(request, site):
             product = Product.objects.filter(pk=_posted_id(request, "product")).first()
             offers.add_note(site, body, product=product, author=request.user)
+        return self._back_to_card(request, object_id)
+
+    def card_gray_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Замер серости из карточки: числа «About N results» двух запросов (E2-06)."""
+        site = get_object_or_404(Site.all_objects, pk=object_id)
+        if not self.has_change_permission(request, site):
+            return self._back_to_card(request, object_id)
+        form = GrayReadingForm(request.POST)
+        if not form.is_valid():
+            if is_partial(request):
+                return self.card_view(request, object_id, gray_form=form)
+            return self._back_to_card(request, object_id)
+        gray_scan.record(site, form.reading())
         return self._back_to_card(request, object_id)
 
     def _back_to_card(self, request: HttpRequest, object_id: int) -> HttpResponse:
@@ -417,6 +453,128 @@ def _card_context(site: Site) -> dict[str, Any]:
         "note_url": reverse("admin:sites_site_card_note", args=[site.pk]),
         "add_offer_url": reverse("admin:sites_siteprice_add") + f"?site={site.pk}",
         "change_url": reverse("admin:sites_site_change", args=[site.pk]),
+    }
+
+
+class GrayReadingForm(forms.Form):
+    """Замер серости из карточки: два числа из Google и запросы, по которым искали."""
+
+    total = forms.IntegerField(
+        label="Всего",
+        min_value=0,
+        error_messages={"required": "Впишите, сколько всего страниц в индексе."},
+    )
+    gray = forms.IntegerField(
+        label="Серых",
+        min_value=0,
+        error_messages={"required": "Впишите, сколько серых страниц."},
+    )
+    total_query = forms.CharField(max_length=4000)
+    gray_query = forms.CharField(max_length=4000, required=False)
+    sample_urls = forms.CharField(required=False)
+    source = forms.ChoiceField(
+        choices=[(gray_scan.SOURCE_TYPED, "вручную"), (gray_scan.SOURCE_EXTENSION, "расширение")],
+        required=False,
+    )
+
+    def clean_sample_urls(self) -> list[str]:
+        # Примеры — по адресу на строку; не адрес страницы — не пример.
+        urls: list[str] = []
+        for line in self.cleaned_data["sample_urls"].splitlines():
+            url = line.strip()
+            if url.startswith(("http://", "https://")) and len(url) <= 2000 and url not in urls:
+                urls.append(url)
+        return urls[: gray_scan.SAMPLE_LIMIT]
+
+    def reading(self) -> gray_scan.Reading:
+        data = self.cleaned_data
+        return gray_scan.Reading(
+            total=data["total"],
+            gray=data["gray"],
+            total_query=data["total_query"],
+            gray_query=data["gray_query"],
+            sample_urls=data["sample_urls"],
+            source=data["source"] or gray_scan.SOURCE_TYPED,
+        )
+
+
+def _with_gray_zone(queryset: models.QuerySet[Any]) -> models.QuerySet[Any]:
+    """Зона последнего замера серости — `gray_zone`, по общей настройке GRAY_ZONES.
+
+    Границы — подзапросом в том же запросе списка, а не отдельным чтением
+    настройки: «Площадки» держат число запросов на страницу. Настройки нет —
+    сравнения дают NULL, и зоны нет. Правило — как `gray_scan.zone_of`.
+    """
+    setting = DomainSetting.objects.filter(key="GRAY_ZONES", product__isnull=True)
+
+    def bound(name: str) -> Subquery:
+        value = Cast(KT(f"value__{name}"), models.DecimalField(max_digits=6, decimal_places=2))
+        return Subquery(setting.annotate(bound=value).values("bound")[:1])
+
+    green, yellow = bound("green"), bound("yellow")
+    annotated: models.QuerySet[Any] = queryset.annotate(
+        gray_zone=Case(
+            When(gray_ratio__lt=green, then=Value("green")),
+            When(gray_ratio__lte=yellow, then=Value("yellow")),
+            When(gray_ratio__gt=yellow, then=Value("red")),
+            default=None,
+            output_field=models.TextField(),
+        )
+    )
+    return annotated
+
+
+# Замеров серости в истории карточки.
+GRAY_HISTORY = 20
+GRAY_SOURCES = {gray_scan.SOURCE_EXTENSION: "расширение", gray_scan.SOURCE_TYPED: "вручную"}
+
+
+def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
+    """Раздел «Серость в Google»: кнопки, форма замера, последний замер и история."""
+    try:
+        terms = gray_terms()
+    except ImproperlyConfigured:
+        # Общее значение стёрли руками: кнопка «всего» работает и без него.
+        terms = ()
+    zones = gray_zones()
+    total_query = gray_scan.total_query(site.domain)
+    gray_query = gray_scan.gray_query(site.domain, terms) if terms else ""
+    rows = []
+    for scan in site.gray_scans.order_by("-checked_at", "-pk")[:GRAY_HISTORY]:
+        zone = gray_scan.zone_of(scan.ratio, zones)
+        source = str((scan.breakdown or {}).get("source") or "")
+        rows.append(
+            {
+                "when": f"{timezone.localtime(scan.checked_at):%d.%m.%Y %H:%M}",
+                "percent": gray_scan.percent_text(scan.ratio),
+                "zone": zone,
+                "zone_title": gray_scan.ZONE_TITLES[zone] if zone else "",
+                "total": gray_scan.count_text(scan.total_indexed),
+                "gray": gray_scan.count_text(scan.gray_hits),
+                "over_total": bool((scan.breakdown or {}).get("over_total")),
+                "source": GRAY_SOURCES.get(source, source or "—"),
+                "samples": scan.sample_urls or [],
+            }
+        )
+    setting = DomainSetting.objects.filter(key="GRAY_TERMS", product__isnull=True).first()
+    words = gray_scan.word_count(gray_query)
+    return {
+        "total_query": total_query,
+        "gray_query": gray_query,
+        "total_url": gray_scan.google_url(total_query),
+        "gray_url": gray_scan.google_url(gray_query) if gray_query else "",
+        "words": words,
+        "word_limit": gray_scan.GOOGLE_WORD_LIMIT,
+        "too_long": words > gray_scan.GOOGLE_WORD_LIMIT,
+        "zones": zones,
+        "terms_count": len(terms),
+        "settings_url": reverse("admin:content_domainsetting_change", args=[setting.pk])
+        if setting is not None
+        else "",
+        "save_url": reverse("admin:sites_site_card_gray", args=[site.pk]),
+        "form": form or GrayReadingForm(),
+        "latest": rows[0] if rows else None,
+        "history": rows,
     }
 
 
@@ -1177,6 +1335,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         "dr_cell",
         "traffic_cell",
         "top_geo_cell",
+        "gray_cell",
         "language",
         "price_cell",
         "offers_cell",
@@ -1216,7 +1375,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     class Media:
         js = (Js("seo/country-picker.js"),)
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
-            "all": (Css("seo/offers.css"), Css("flags/sprite-hq.css"))
+            "all": (Css("seo/offers.css"), Css("seo/gray.css"), Css("flags/sprite-hq.css"))
         }
 
     def has_add_permission(self, request: HttpRequest) -> bool:
@@ -1260,7 +1419,7 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         return export.export_view(self, request, fmt, self.export_choices(request), build)
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Any]:
-        queryset: models.QuerySet[Any] = super().get_queryset(request)
+        queryset: models.QuerySet[Any] = _with_gray_zone(super().get_queryset(request))
         region = _region(request)
         if region is None:
             return queryset
@@ -1308,11 +1467,12 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     @admin.display(description="домен", ordering="domain")
     def domain_link(self, obj: ProductSiteLatest) -> SafeString:
         # Карточка открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
-        # скрипта — отдельной страницей.
+        # скрипта — отдельной страницей. Рядом — открыть сайт и скопировать домен.
         return format_html(
-            '<a href="{}" data-panel title="Карточка площадки">{}</a>',
+            '<a href="{}" data-panel title="Карточка площадки">{}</a>{}',
             card_url(obj.site_id),
             obj.domain,
+            domain_tools_html(obj.domain),
         )
 
     @admin.display(description="статус", ordering="status")
@@ -1348,6 +1508,20 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
             countries.flag_html(obj.top_geo),
             obj.top_geo.upper(),
             "" if obj.top_geo_traffic is None else obj.top_geo_traffic,
+        )
+
+    @admin.display(description="серость", ordering="gray_ratio")
+    def gray_cell(self, obj: ProductSiteLatest) -> SafeString | str:
+        # Последний замер серости в Google (E2-06); зона — из get_queryset.
+        if obj.gray_ratio is None:
+            return ""
+        zone = getattr(obj, "gray_zone", None)
+        return format_html(
+            '<span class="seo-gray-zone seo-gray-{}" title="{}">{}</span>',
+            zone or "none",
+            "Доля серых страниц в Google, последний замер"
+            + (f": {gray_scan.ZONE_TITLES[zone]}" if zone else ""),
+            gray_scan.percent_text(obj.gray_ratio),
         )
 
     @admin.display(description="цена", ordering="placement_eur_cents")

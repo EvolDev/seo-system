@@ -1,0 +1,57 @@
+{% load l10n seo_assets %}
+{% comment %}
+Серость в Google — раздел карточки площадки (E2-06, ADR-054). Кнопки открывают
+Google в новой вкладке; «About N results» в поля подставляет расширение браузера
+(browser-extension/) по запросам из data-total-query и data-gray-query, или
+человек вписывает руками. Доля и зона пересчитываются при вводе
+(seo/gray-scan.js), запись — формой карточки (data-card-form). Контекст — gray
+из _gray_context (apps/sites/admin.py).
+{% endcomment %}
+<section class="seo-gray" data-gray-scan data-total-query="{{ gray.total_query }}" data-gray-query="{{ gray.gray_query }}"{% if gray.zones %} data-green="{{ gray.zones.green|unlocalize }}" data-yellow="{{ gray.zones.yellow|unlocalize }}"{% endif %}>
+  <h3>Серость в Google</h3>
+  <div class="seo-gray-buttons">
+    <a class="seo-btn" href="{{ gray.total_url }}" target="_blank" rel="noopener" title="{{ gray.total_query }}">Google: всего страниц ↗</a>
+    {% if gray.gray_url %}<a class="seo-btn" href="{{ gray.gray_url }}" target="_blank" rel="noopener" title="{{ gray.gray_query }}">Google: серые темы ↗</a>{% endif %}
+  </div>
+  {% if not gray.gray_url %}
+  <div class="seo-warnline">Нет условий запроса серости — заведите общую настройку GRAY_TERMS.</div>
+  {% elif gray.too_long %}
+  <div class="seo-warnline">Слов в запросе серости без OR: {{ gray.words }}. Google учитывает первые {{ gray.word_limit }}, остальные может не учесть.</div>
+  {% endif %}
+  {% if can_change %}
+  <form method="post" action="{{ gray.save_url }}" data-card-form class="seo-gray-form">{% csrf_token %}
+    <input type="hidden" name="total_query" value="{{ gray.total_query }}">
+    <input type="hidden" name="gray_query" value="{{ gray.gray_query }}">
+    <input type="hidden" name="source" value="{{ gray.form.source.value|default:'typed' }}" data-gray-source>
+    <textarea name="sample_urls" hidden data-gray-samples>{{ gray.form.sample_urls.value|default:'' }}</textarea>
+    <label>Всего <input type="number" name="total" min="0" step="1" inputmode="numeric" required value="{{ gray.form.total.value|default_if_none:''|unlocalize }}" data-gray-input="total" aria-label="Всего страниц в индексе"></label>
+    <label>Серых <input type="number" name="gray" min="0" step="1" inputmode="numeric" required value="{{ gray.form.gray.value|default_if_none:''|unlocalize }}" data-gray-input="gray" aria-label="Серых страниц"></label>
+    <output class="seo-gray-result" data-gray-result></output>
+    <button type="submit" class="seo-btn seo-btn-primary">Сохранить</button>
+    {% if gray.form.errors %}<div class="seo-gray-errors">{% for errors in gray.form.errors.values %}{% for error in errors %}<div class="seo-warnline">{{ error }}</div>{% endfor %}{% endfor %}</div>{% endif %}
+    <div class="seo-sub seo-gray-hint" data-gray-hint>«About N results» со страниц Google подставляет расширение браузера; без него впишите числа руками.</div>
+  </form>
+  {% endif %}
+  {% if gray.latest %}
+  <div class="seo-gray-latest">
+    Последний замер {{ gray.latest.when }}: <span class="seo-gray-zone seo-gray-{{ gray.latest.zone|default:'none' }}">{{ gray.latest.percent }}</span>
+    ({{ gray.latest.gray }} из {{ gray.latest.total }}){% if gray.latest.zone %} · {{ gray.latest.zone_title }}{% endif %}{% if gray.latest.over_total %} · <span class="seo-sub">серых по оценке Google больше, чем всего</span>{% endif %}
+  </div>
+  {% else %}
+  <p class="seo-sub">Замеров нет.</p>
+  {% endif %}
+  {% if gray.history %}
+  <details class="seo-gray-history">
+    <summary>история ({{ gray.history|length }})</summary>
+    <ul class="seo-gray-list">
+      {% for row in gray.history %}
+      <li><span class="seo-sub">{{ row.when }}</span> <span class="seo-gray-zone seo-gray-{{ row.zone|default:'none' }}">{{ row.percent }}</span> ({{ row.gray }} из {{ row.total }}) <span class="seo-sub">· {{ row.source }}</span>
+        {% if row.samples %}<details class="seo-gray-samples"><summary>примеры ({{ row.samples|length }})</summary><ul>{% for url in row.samples %}<li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></li>{% endfor %}</ul></details>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  <p class="seo-sub">Условия запроса серости: {{ gray.terms_count }}{% if gray.settings_url %} — <a href="{{ gray.settings_url }}" data-panel>править в «Настройках»</a>{% endif %}.</p>
+  <script src="{% asset 'seo/gray-scan.js' %}"></script>
+</section>

@@ -62,6 +62,7 @@ nav:
       - how-to/upload-placements.md
       - how-to/upload-ahrefs-refdomains.md
       - how-to/export-to-excel.md
+      - how-to/check-gray-share.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

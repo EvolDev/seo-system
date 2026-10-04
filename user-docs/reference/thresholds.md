@@ -3,7 +3,7 @@ title: Пороги и ориентиры
 description: Текущие числа, на которые опирается система, — зоны метрик, ценовой ориентир, лимиты проверок.
 section: reference
 status: draft
-tasks: [E1-01, E1-02, E1-05, E5-02, E2-03, E1-08, E1-09]
+tasks: [E1-01, E1-02, E1-05, E5-02, E2-03, E1-08, E1-09, E2-06]
 updated: 2026-10-04
 screens: [site_card, audit_queue, product_card, settings, upload_review, upload_new]
 tags: [пороги, настройки]
@@ -33,6 +33,21 @@ tags: [пороги, настройки]
 
 Границы трафика 3 000 и падения трафика — стартовые, их уточнят по
 результатам сверки аудита с вашими прошлыми решениями.
+
+### Серость {#gray}
+
+Зоны доли серых страниц — настройка **GRAY_ZONES** в разделе **Настройки**:
+`green` — граница зелёной зоны, `yellow` — жёлтой (доля ровно на границе —
+в более тёмной зоне: 10% — уже жёлтая, 25% — ещё жёлтая). По ним
+раскрашены доля в карточке площадки и колонка **Серость** в **Площадках**.
+
+Условия запроса серых тем — **GRAY_TERMS**, по одному на строку, в запрос —
+в кавычках через OR. Стартовый список повторяет запрос ручной проверки:
+casino, poker, betting, bookmaker, roulette, blackjack, slots, jackpot,
+gambling, spins, porn, escort, nude, sex, cbd, weed, marijuana, cannabis,
+hemp, delta 8, delta 9, loan, payday, essay, viagra, cialis, levitra, ed
+pills, xanax. Google читает только первые 32 слова запроса. Как
+пользоваться — [Как проверить серость площадки](../how-to/check-gray-share.md).
 
 ## Цена
 

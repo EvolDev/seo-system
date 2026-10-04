@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "SEO-система: серость из Google",
+  "version": "1.0.0",
+  "description": "Подставляет «About N results» со страницы Google в карточку площадки SEO-системы (E2-06).",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/search*"],
+      "js": ["count.js", "google.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["relay.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

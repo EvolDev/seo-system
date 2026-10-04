@@ -24,7 +24,7 @@ SETTING_KEYS: dict[str, str] = {
     "PRICE_REFERENCE": "Ценовой ориентир, EUR: total_eur, writing_eur, announce_eur",
     "PROJECT_TOPICS": "Тематики продукта — в написании Collaborator",
     "SPECIAL_TOPICS": "Особые тематики Collaborator",
-    "GRAY_TERMS": "Категории и термины серости",
+    "GRAY_TERMS": "Условия запроса серости — через OR, по одному",
     # Контент — 13-CONFIG.md §2.3
     "SIMILARITY_THRESHOLD": "Порог близости статей: max_cosine",
     "FACT_ROTATION_WINDOW": "Окно ротации фактов: last_n_articles",
@@ -126,12 +126,57 @@ class UploadPriceCap:
         return round(self.eur * 100)
 
 
+@dataclass(frozen=True)
+class GrayZones:
+    """Зоны доли серых страниц в индексе, % — `GRAY_ZONES` (04-DOMAIN-RULES.md §1.2).
+
+    Меньше `green` — зелёная, от `green` до `yellow` включительно — жёлтая,
+    больше `yellow` — красная: серость за `yellow` фактически стоп.
+    """
+
+    green: float
+    yellow: float
+
+    @classmethod
+    def parse(cls, value: Any) -> "GrayZones":
+        if not isinstance(value, dict) or set(value) != {"green", "yellow"}:
+            raise ValueError("Нужен объект ровно с полями green, yellow.")
+        for name in ("green", "yellow"):
+            number = value[name]
+            if (
+                not isinstance(number, int | float)
+                or isinstance(number, bool)
+                or not 0 <= number <= 100
+            ):
+                raise ValueError(f"{name} — процент от 0 до 100.")
+        if value["green"] > value["yellow"]:
+            raise ValueError("green — не больше yellow.")
+        return cls(float(value["green"]), float(value["yellow"]))
+
+
+def parse_gray_terms(value: Any) -> tuple[str, ...]:
+    """Условия запроса серости — `GRAY_TERMS`: непустой список строк без повторов (E2-06)."""
+    if not isinstance(value, list) or not value:
+        raise ValueError("Нужен непустой список условий.")
+    terms: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("Каждое условие — непустая строка.")
+        term = " ".join(item.split())
+        if term.casefold() in (seen.casefold() for seen in terms):
+            raise ValueError(f"Условие «{term}» повторяется.")
+        terms.append(term)
+    return tuple(terms)
+
+
 # Настройки с проверкой формы значения: ошибку видно в админке при вводе,
 # а не в упавшей ночью задаче.
 SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "INDEXATION_SCHEDULE": IndexationSchedule.parse,
     "OFFER_RECHECK": OfferRecheck.parse,
     "UPLOAD_PRICE_CAP": UploadPriceCap.parse,
+    "GRAY_ZONES": GrayZones.parse,
+    "GRAY_TERMS": parse_gray_terms,
 }
 
 
@@ -176,6 +221,29 @@ def upload_price_cap() -> UploadPriceCap:
         return UploadPriceCap.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"UPLOAD_PRICE_CAP: {error}") from error
+
+
+def gray_terms() -> tuple[str, ...]:
+    """Действующие условия запроса серости: общее значение — серость у площадки, не у продукта."""
+    value = get_setting("GRAY_TERMS", None)
+    if value is None:
+        # Общее значение заводит миграция content.0006 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки GRAY_TERMS — заведите общее значение.")
+    try:
+        return parse_gray_terms(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"GRAY_TERMS: {error}") from error
+
+
+def gray_zones() -> GrayZones | None:
+    """Действующие зоны серости: общее значение; нет его — зона не считается."""
+    value = get_setting("GRAY_ZONES", None)
+    if value is None:
+        return None
+    try:
+        return GrayZones.parse(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"GRAY_ZONES: {error}") from error
 
 
 def set_product_setting(product_id: int, key: str, value: Any | None) -> None:
