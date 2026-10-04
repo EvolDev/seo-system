@@ -1,0 +1,7 @@
+{% extends "admin/change_list.html" %}
+{% load seo_export %}
+{% comment %}«Размещения»: над таблицей — окно выгрузки в Excel и CSV, отчёт за месяц (E1-06).{% endcomment %}
+{% block object-tools-items %}
+  {{ block.super }}
+  {% export_tools cl %}
+{% endblock %}

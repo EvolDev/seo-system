@@ -40,7 +40,9 @@ LINK_TYPE = "Тип ссылки статья"
 PRICE_PLACEMENT = "Цена размещения статья, EUR"
 PRICE_ANNOUNCE = "Цена анонса статья, EUR"
 PRICE_WRITING = "Цена написания статья, EUR"
-TOTAL_PRICE = "Итог цена"  # не импортируется, только счётчик в отчёт
+# Сколько заплатили — вписывают при закрытии заявки (пользователь 04.10.2026):
+# у строк «Размещено» → «заплачено» размещения, у остальных 0 или пусто.
+TOTAL_PRICE = "Итог цена"
 LINKS_ALLOWED = "Количество ссылок статья"
 MARKS_AS_AD = "Пометка о рекламе статья"
 DECLARED_TOPICS = "Особые тематики"
@@ -176,6 +178,8 @@ class PlacementData:
     placement_type: PlacementType | None
     comment: str | None
     links: tuple[Link, ...]
+    seller: str | None = None  # «Источник» — через кого куплено
+    price_paid_cents: int | None = None  # «Итог цена» строки «Размещено», евро
 
 
 @dataclass(frozen=True)
@@ -320,13 +324,18 @@ def _parse_site(row: SheetRow, domain: str, report: Report) -> SiteData:
         clideo_url=cells.text(CLIDEO),
         placement_cells=_copy_view(row, domain),
     )
-    if not values.is_blank(row.get(PRICE_PLACEMENT)) and _is_zero(row.get(TOTAL_PRICE)):
-        report.issue(Section.TOTAL_PRICE_ZERO, where)
     return site
 
 
-def _is_zero(value: object) -> bool:
-    return isinstance(value, int | float) and value == 0
+def _paid(cells: _Cells, status: PlacementStatus, where: str, report: Report) -> int | None:
+    """«Итог цена» — заплачено, только у опубликованного. 0 и пусто — ещё не вписали."""
+    if status != PlacementStatus.PUBLISHED:
+        return None
+    paid = cells.cents(TOTAL_PRICE)
+    if not paid:
+        report.issue(Section.NO_TOTAL_PRICE, where)
+        return None
+    return paid
 
 
 def _parse_card(cells: _Cells, domain: str, report: Report) -> Card:
@@ -411,6 +420,8 @@ def _parse_placement(cells: _Cells, where: str, report: Report) -> PlacementData
         placement_type=placement_type,
         comment=cells.text(PLACEMENT_COMMENT),
         links=tuple(links),
+        seller=cells.text(SOURCE),
+        price_paid_cents=_paid(cells, status, where, report),
     )
     site_comment = cells.text(SITE_COMMENT)
     for comment in (site_comment, placement.comment):

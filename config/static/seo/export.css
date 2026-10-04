@@ -1,0 +1,68 @@
+/* Окно выгрузки над списком (E1-06, ADR-053) — как меню «Оформление»: под
+   кнопкой, у правого края. Галочки — разделами в колонки, кнопки — .seo-btn,
+   внизу окна и видны при прокрутке. */
+.object-tools li.seo-export { position: relative; }
+.seo-export-menu {
+  position: absolute;
+  top: 2.4rem;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(72vh, 680px);
+  overflow: auto;
+  padding: 14px 16px 0;
+  border: 1px solid var(--hairline-color);
+  border-radius: 10px;
+  background: var(--body-bg);
+  color: var(--body-fg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+  font-size: 13px;
+  font-weight: normal;
+  line-height: 1.4;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.seo-export-menu[hidden] { display: none; }
+.seo-export-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.seo-export-head strong { font-size: 14px; }
+.seo-export-rows { color: var(--body-quiet-color); }
+.seo-export-menu label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--body-fg);
+  font-size: 13px;
+  font-weight: normal;
+  cursor: pointer;
+}
+.seo-export-menu input[type="checkbox"] { margin: 0; }
+.seo-export-menu .seo-export-all { font-weight: 600; }
+.seo-export-groups { columns: 3 210px; column-gap: 24px; }
+.seo-export-group { break-inside: avoid; margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.seo-export-group legend {
+  padding: 0 0 4px;
+  color: var(--body-quiet-color);
+  font-size: 12px;
+  font-weight: 600;
+}
+.seo-export-error { margin: 0; color: var(--error-fg); }
+.seo-export-error[hidden] { display: none; }
+.seo-export-buttons {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -16px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--hairline-color);
+  background: var(--body-bg);
+}
+.seo-export-note { margin-left: auto; color: var(--body-quiet-color); font-size: 12px; }

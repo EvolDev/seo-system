@@ -10,31 +10,41 @@
 Размещение открывается панелью справа поверх списка (E9-11): щелчок по
 площадке или статусу. Форма — `apps/placements/forms.py`: статус кнопками,
 поля группами, даты без времени, «Заплачено» в валюте.
+
+Отчёт за месяц (E1-06): фильтр «опубликовано» по месяцам и кнопки «Выгрузить
+в Excel» и «CSV» — лист «Размещения» таблицы и «Итого» (`export.py`).
 """
 
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from collections.abc import Set as AbstractSet
+from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 
 from django.contrib import admin, messages
 from django.contrib.admin.utils import display_for_value
+from django.contrib.admin.views.main import ChangeList
 from django.db.models import QuerySet
+from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import URLPattern, path, reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
+from apps.placements import export as placement_export
 from apps.placements.forms import PlacementForm
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE
 from apps.placements.models import Placement, PlacementLink
 from apps.placements.tasks import check_indexation
+from apps.sites.models import Product
 from apps.sites.status_history import placement_history
+from config import export
 from config.admin import NoDeleteAdmin, StackedInline
 from config.assets import Css, Js
+from config.export import month_name
 from config.queue import MAX_ATTEMPTS
 from config.run_id import bind_run_id, new_run_id
 
@@ -44,6 +54,56 @@ QUEUED = "Проверка индексации поставлена в очер
 # Строку запуска проверки ищем среди запусков за это время: кнопку жмут
 # и смотрят на результат сразу, повторы идут минуты.
 STATUS_LOOKBACK = timedelta(days=1)
+
+
+class PublishedMonthFilter(admin.SimpleListFilter):
+    """Месяц публикации — отчёт за месяц (E1-06). Месяц — по времени проекта.
+
+    В списке — месяцы, в которые что-то опубликовано, свежие первыми, и
+    «без даты».
+    """
+
+    title = "опубликовано"
+    parameter_name = "month"
+    NO_DATE = "none"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        # TruncMonth — первое число месяца по времени проекта, а не по UTC.
+        months = (
+            Placement.objects.filter(published_at__isnull=False)
+            .annotate(month=TruncMonth("published_at"))
+            .order_by("-month")
+            .values_list("month", flat=True)
+            .distinct()
+        )
+        choices = [(f"{month:%Y-%m}", month_name(month.date())) for month in months]
+        return [*choices, (self.NO_DATE, "без даты")]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Placement]) -> Any:
+        value = self.value()
+        if not value:
+            return queryset
+        if value == self.NO_DATE:
+            return queryset.filter(published_at__isnull=True)
+        start = parse_month(value)
+        if start is None:
+            return queryset.none()
+        end = date(start.year + start.month // 12, start.month % 12 + 1, 1)
+        return queryset.filter(
+            published_at__gte=_local_midnight(start), published_at__lt=_local_midnight(end)
+        )
+
+
+def parse_month(value: str | None) -> date | None:
+    """«2026-09» → 1 сентября 2026; не месяц — None."""
+    try:
+        return datetime.strptime(value or "", "%Y-%m").date()
+    except ValueError:
+        return None
+
+
+def _local_midnight(day: date) -> datetime:
+    return timezone.make_aware(datetime(day.year, day.month, day.day))
 
 
 class PlacementLinkInline(StackedInline):
@@ -150,7 +210,14 @@ class PlacementAdmin(NoDeleteAdmin):
         "indexed_at_cell",
         "skip_checks",
     )
-    list_filter = ("product", "status", "placement_type", "is_indexed", "skip_checks")
+    list_filter = (
+        "product",
+        PublishedMonthFilter,
+        "status",
+        "placement_type",
+        "is_indexed",
+        "skip_checks",
+    )
     search_fields = ("site__domain", "article_url", "collaborator_order_id")
     list_select_related = ("site", "product")
     autocomplete_fields = ("site", "seller")
@@ -215,8 +282,18 @@ class PlacementAdmin(NoDeleteAdmin):
             "all": (Css("seo/indexation.css"), Css("seo/status-history.css"), Css("seo/offers.css"))
         }
 
+    def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
+        if export.is_export(request):
+            return export.ExportChangeList
+        return super().get_changelist(request, **kwargs)
+
     def get_urls(self) -> list[URLPattern]:
         own = [
+            path(
+                "export/<str:fmt>/",
+                self.admin_site.admin_view(require_http_methods(["GET", "POST"])(self.export_view)),
+                name=export.url_name(self),
+            ),
             path(
                 "check-indexation/",
                 self.admin_site.admin_view(require_POST(self.check_indexation_batch_view)),
@@ -234,6 +311,20 @@ class PlacementAdmin(NoDeleteAdmin):
             ),
         ]
         return own + super().get_urls()
+
+    def export_choices(self, request: HttpRequest) -> list[export.Choice]:
+        """Галочки окна выгрузки (тег `export_tools`) — колонки листа «Размещения»."""
+        return placement_export.choices()
+
+    def export_view(self, request: HttpRequest, fmt: str) -> HttpResponse:
+        """Отчёт: окно «Выгрузить» — отобранное в списке или отмеченные строки (E1-06)."""
+
+        def build(
+            changelist: ChangeList, queryset: QuerySet[Any], wanted: AbstractSet[str]
+        ) -> tuple[list[export.Sheet], str]:
+            return placement_export.sheets(queryset, wanted), _export_name(request)
+
+        return export.export_view(self, request, fmt, self.export_choices(request), build)
 
     def check_indexation_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         """Кнопка в карточке без скрипта: ставит проверку и возвращает в карточку."""
@@ -503,6 +594,25 @@ class PlacementAdmin(NoDeleteAdmin):
             "<th>Следующая</th></tr></thead><tbody>{}</tbody></table>",
             format_html_join("", "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", rows),
         )
+
+
+def _export_name(request: HttpRequest) -> str:
+    """«Размещения Convertio сентябрь 2026»: продукт и месяц из фильтров, без месяца — дата."""
+    parts = ["Размещения"]
+    product_id = request.GET.get("product__id__exact") or ""
+    if product_id.isdigit():
+        name = Product.objects.filter(pk=int(product_id)).values_list("name", flat=True).first()
+        if name:
+            parts.append(name)
+    value = request.GET.get(PublishedMonthFilter.parameter_name)
+    month = parse_month(value)
+    if month is not None:
+        parts.append(month_name(month))
+    elif value == PublishedMonthFilter.NO_DATE:
+        parts.append("без даты")
+    else:
+        parts.append(f"{timezone.localdate():%d.%m.%Y}")
+    return " ".join(parts)
 
 
 def _without(fields: Sequence[Any], name: str) -> tuple[Any, ...]:

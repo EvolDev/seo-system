@@ -61,6 +61,7 @@ nav:
       - how-to/ahrefs-batch-analysis.md
       - how-to/upload-placements.md
       - how-to/upload-ahrefs-refdomains.md
+      - how-to/export-to-excel.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

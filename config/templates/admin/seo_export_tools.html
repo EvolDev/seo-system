@@ -1,0 +1,32 @@
+{% comment %}
+Окно выгрузки над списком (E1-06, ADR-053; тег export_tools — config/export_tags.py,
+поведение — seo/export.js). Без скрипта кнопка — обычная ссылка: Excel со всеми
+отобранными строками и колонками, как запомнила сессия.
+{% endcomment %}
+<li class="seo-export" data-export>
+  <a href="{{ xlsx_url }}" class="seo-export-toggle" data-export-toggle aria-haspopup="true" aria-expanded="false" title="Выгрузить в Excel или CSV: выбрать колонки и строки">Выгрузить ▾</a>
+  <form class="seo-export-menu" method="post" action="{{ xlsx_url }}" data-export-form data-xlsx="{{ xlsx_url }}" data-csv="{{ csv_url }}" data-total="{{ total }}" hidden>
+    {% csrf_token %}
+    <div class="seo-export-head">
+      <strong>Выгрузка</strong>
+      <span class="seo-export-rows" data-export-rows>Строки: все отобранные — {{ total }}</span>
+    </div>
+    <label class="seo-export-all"><input type="checkbox" data-export-all{% if all_checked %} checked{% endif %}> Все колонки</label>
+    <div class="seo-export-groups">
+      {% for group, items in groups %}
+      <fieldset class="seo-export-group">
+        <legend>{{ group }}</legend>
+        {% for choice, checked in items %}
+        <label><input type="checkbox" name="columns" value="{{ choice.key }}"{% if checked %} checked{% endif %}> {{ choice.title }}</label>
+        {% endfor %}
+      </fieldset>
+      {% endfor %}
+    </div>
+    <p class="seo-export-error" data-export-error hidden>Отметьте хотя бы одну колонку.</p>
+    <div class="seo-export-buttons">
+      <button type="submit" class="seo-btn seo-btn-primary" data-format="xlsx">Excel</button>
+      <button type="submit" class="seo-btn" data-format="csv">CSV</button>
+      <span class="seo-export-note">Выбор колонок запоминается</span>
+    </div>
+  </form>
+</li>

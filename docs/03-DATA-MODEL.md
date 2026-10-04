@@ -433,7 +433,7 @@ Clideo) сюда не входит — его показывают ссылко�
 | placement_type | enum | `guest_post`, `link_insertion` — колонка «Тип ссылки» из Excel |
 | ad_label_requested | bool | пометку «реклама» заказали мы сознательно (`flow.txt`) — тогда `AD_LABEL` не нарушение |
 | ordered_at / published_at | timestamptz | |
-| price_paid_cents | int | фактически заплачено |
+| price_paid_cents | int | фактически заплачено; из таблицы — «Итог цена» строки «Размещено» (ADR-053) |
 | currency | char(3) | |
 | is_indexed | bool | null = не проверялось |
 | indexed_checked_at | timestamptz | |
@@ -442,7 +442,7 @@ Clideo) сюда не входит — его показывают ссылко�
 | clicks_from_homepage | smallint | сколько кликов до статьи |
 | comment | text | что не так с полученной статьёй |
 | extra | jsonb | прочие данные строки файла размещений: колонки без своего поля, заголовок → значение (ADR-051) |
-| seller_id | FK sellers | через кого куплено (ADR-041) |
+| seller_id | FK sellers | через кого куплено (ADR-041); из таблицы — «Источник» |
 | employee_id | FK auth_user | кто из сотрудников вёл; сотрудник — пользователь, можно без права входа |
 | run_id | uuid | по умолчанию из текущей цепочки (ADR-031): импорт или задача проставляют сами, ручной ввод — пусто |
 | created_at / updated_at | timestamptz | |

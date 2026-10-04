@@ -28,7 +28,7 @@ class Section(StrEnum):
     CLIDEO_BAD = "Битые ячейки «Пример статьи на Clideo» — размещение не создано"
     NO_AHREFS = "Строки без данных Ahrefs: US Traff 0 записан как пусто"
     US_EQUALS_GEO = "US Traff = Top Geo Traff при не-US гео"
-    TOTAL_PRICE_ZERO = "«Итог цена» = 0 при заполненной цене размещения"
+    NO_TOTAL_PRICE = "«Размещено», а «Итог цена» пустая или 0 — сколько заплатили, неизвестно"
     LINK_COUNTS = "Links Placed / Links Waiting: расчёт по базе не сходится с таблицей"
     COPY_MISMATCH = "Сверка с вкладкой «Размещения»"
 

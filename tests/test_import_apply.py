@@ -487,6 +487,62 @@ class TestRepeatedImport:
             "a.com (строка 2): «в индексе» в базе да, в таблице нет"
         ]
 
+    def test_paid_and_seller_from_table(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        """«Итог цена» строки «Размещено» — заплачено в евро, «Источник» — продавец;
+        незнакомый продавец заводится (E1-06)."""
+        star = {**PUBLISHED, "URL статьи": "https://dev.to/post", "Источник": "StarMedia"}
+        report = run(
+            make_workbook(
+                base=[
+                    ("a.com", PUBLISHED),
+                    ("dev.to", {**star, "Итог цена": 181}),
+                    ("b.com", ORDERED),
+                ]
+            )
+        )
+        placements = {p.site.domain: p for p in Placement.objects.select_related("site", "seller")}
+        a, dev, b = placements["a.com"], placements["dev.to"], placements["b.com"]
+        assert (a.price_paid_cents, a.currency, a.seller) == (58182, "EUR", Seller.collaborator())
+        assert dev.price_paid_cents == 18100
+        assert dev.seller is not None and dev.seller.name == "StarMedia"
+        assert dev.seller.currency == "EUR"
+        assert report.counts["sellers"][Outcome.CREATED] == 1
+        # Заявка: «Итог цена» ещё не вписана по-настоящему — не читается.
+        assert (b.price_paid_cents, b.seller) == (None, Seller.collaborator())
+
+    def test_paid_filled_later_and_kept(
+        self,
+        make_workbook: MakeWorkbook,
+        products: tuple[Product, Product],
+        run: Callable[..., Report],
+    ) -> None:
+        first = run(make_workbook(base=[("a.com", {**PUBLISHED, "Итог цена": ""})], name="1.xlsx"))
+        assert first.issues[Section.NO_TOTAL_PRICE] == ["a.com (строка 2)"]
+        placement = Placement.objects.get(site__domain="a.com")
+        assert placement.price_paid_cents is None
+        # Купили через другого продавца — поправили в админке; таблица не перепишет.
+        linkhub = Seller.objects.create(name="LinkHub Media", currency="USD")
+        Placement.objects.filter(pk=placement.pk).update(seller=linkhub, currency="USD")
+
+        run(make_workbook(base=[("a.com", PUBLISHED)], name="2.xlsx"))
+        placement = Placement.objects.get(pk=placement.pk)
+        assert (placement.price_paid_cents, placement.currency) == (58182, "EUR")
+        assert placement.seller == linkhub
+
+        changed = {**PUBLISHED, "Итог цена": 600}
+        report = run(make_workbook(base=[("a.com", changed)], name="3.xlsx"))
+        placement.refresh_from_db()
+        assert placement.price_paid_cents == 58182
+        assert report.issues[Section.PLACEMENT_CONFLICTS] == [
+            "a.com (строка 2): «продавец» в базе LinkHub Media, в таблице Collaborator",
+            "a.com (строка 2): «заплачено» в базе €581.82, в таблице «Итог цена» €600",
+        ]
+
     def test_snapshot_same_date_updated_new_date_added(
         self,
         make_workbook: MakeWorkbook,

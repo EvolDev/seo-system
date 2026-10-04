@@ -11,6 +11,7 @@ ADR-043; правила смены цены — `apps/sites/offers.py`.
 
 import datetime as dt
 from collections.abc import Iterator
+from collections.abc import Set as AbstractSet
 from contextlib import suppress
 from typing import Any, ClassVar
 
@@ -27,9 +28,8 @@ from django.template.response import TemplateResponse
 from django.urls import URLPattern, path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
-from django.utils.http import content_disposition_header
 from django.utils.safestring import SafeString
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from rangefilter.filters import NumericRangeFilter
 
 from apps.content.admin import (
@@ -39,6 +39,7 @@ from apps.content.admin import (
 )
 from apps.placements.models import Placement
 from apps.sites import ahrefs_domains, countries, offers
+from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
     announce_text,
@@ -51,6 +52,7 @@ from apps.sites.display import (
     writing_html,
 )
 from apps.sites.domains import normalize_domain
+from apps.sites.export import REGION_AT, REGION_KEYWORDS, REGION_TRAFFIC
 from apps.sites.models import (
     ExchangeRate,
     GrayScan,
@@ -72,8 +74,10 @@ from apps.sites.models import (
     SiteStatus,
 )
 from apps.sites.status_history import site_history
+from config import export
 from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline, is_partial
 from config.assets import Css, Js
+from config.export import attachment
 from config.forms import ChoiceButtons
 
 
@@ -685,10 +689,10 @@ class SiteListAdmin(NoDeleteAdmin):
             chosen = next((p for p in all_parts if str(p.number) == part), None)
             if chosen is None:
                 return HttpResponseRedirect(request.path)
-            return _attachment(chosen.text().encode(), chosen.file_name(site_list), "text/plain")
+            return attachment(chosen.text().encode(), chosen.file_name(site_list), "text/plain")
         if request.GET.get("zip") and all_parts:
             name, content = ahrefs_domains.archive(site_list, all_parts)
-            return _attachment(content, name, "application/zip")
+            return attachment(content, name, "application/zip")
         context = {
             **self.admin_site.each_context(request),
             "title": f"Домены для Ahrefs: {site_list.name}",
@@ -726,13 +730,6 @@ class SiteListAdmin(NoDeleteAdmin):
     def ahrefs_link(self, obj: Any) -> SafeString:
         url = reverse("admin:sites_sitelist_ahrefs", args=[obj.pk])
         return format_html('<a href="{}">{}</a>', url, "Домены для Ahrefs")
-
-
-def _attachment(content: bytes, file_name: str, content_type: str) -> HttpResponse:
-    response = HttpResponse(content, content_type=content_type)
-    # Имя файла бывает с кириллицей — заголовок по RFC 6266 собирает Django.
-    response["Content-Disposition"] = content_disposition_header(True, file_name)
-    return response
 
 
 @admin.register(SiteListItem)
@@ -1013,8 +1010,6 @@ class PublishedFilter(admin.SimpleListFilter):
 
 
 # Колонки региона (ADR-045): их нет в представлении, их добавляет get_queryset.
-REGION_TRAFFIC = "region_traffic"
-REGION_KEYWORDS = "region_keywords"
 REGION_PARAMS = [
     f"{field}__range__{edge}"
     for field in (REGION_TRAFFIC, REGION_KEYWORDS)
@@ -1104,11 +1099,11 @@ def _region_columns(code: str) -> list[Any]:
 
     @admin.display(description=f"трафик {label}", ordering=REGION_TRAFFIC)
     def region_traffic(obj: ProductSiteLatest) -> SafeString | str:
-        return cell(getattr(obj, REGION_TRAFFIC, None), getattr(obj, "region_at", None))
+        return cell(getattr(obj, REGION_TRAFFIC, None), getattr(obj, REGION_AT, None))
 
     @admin.display(description=f"ключи {label}", ordering=REGION_KEYWORDS)
     def region_keywords(obj: ProductSiteLatest) -> SafeString | str:
-        return cell(getattr(obj, REGION_KEYWORDS, None), getattr(obj, "region_at", None))
+        return cell(getattr(obj, REGION_KEYWORDS, None), getattr(obj, REGION_AT, None))
 
     return [region_traffic, region_keywords]
 
@@ -1235,7 +1230,34 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         return bool(request.user.has_perm("sites.change_site"))
 
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
-        return OffersChangeList
+        return export.ExportChangeList if export.is_export(request) else OffersChangeList
+
+    def get_urls(self) -> list[URLPattern]:
+        view = self.admin_site.admin_view
+        own = [
+            path(
+                "export/<str:fmt>/",
+                view(require_http_methods(["GET", "POST"])(self.export_view)),
+                name=export.url_name(self),
+            ),
+        ]
+        return own + super().get_urls()
+
+    def export_choices(self, request: HttpRequest) -> list[export.Choice]:
+        """Галочки окна выгрузки (тег `export_tools`); колонки региона — если он выбран."""
+        return site_export.choices(_region(request))
+
+    def export_view(self, request: HttpRequest, fmt: str) -> HttpResponse:
+        """Окно «Выгрузить»: отобранное на экране или отмеченные строки (E1-06)."""
+        region = _region(request)
+
+        def build(
+            changelist: ChangeList, queryset: models.QuerySet[Any], wanted: AbstractSet[str]
+        ) -> tuple[list[export.Sheet], str]:
+            name = f"Площадки {_chosen_product(changelist)} {timezone.localdate():%d.%m.%Y}"
+            return [site_export.sheet(queryset, region, wanted)], name
+
+        return export.export_view(self, request, fmt, self.export_choices(request), build)
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Any]:
         queryset: models.QuerySet[Any] = super().get_queryset(request)
@@ -1245,9 +1267,11 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         # Последний замер страны — из v_site_country_latest; по одному значению на строку.
         latest = SiteCountryLatest.objects.filter(site_id=OuterRef("site_id"), country=region)
         annotated: models.QuerySet[Any] = queryset.annotate(
-            region_traffic=Subquery(latest.values("organic_traffic")[:1]),
-            region_keywords=Subquery(latest.values("total_keywords")[:1]),
-            region_at=Subquery(latest.values("checked_at")[:1]),
+            **{
+                REGION_TRAFFIC: Subquery(latest.values("organic_traffic")[:1]),
+                REGION_KEYWORDS: Subquery(latest.values("total_keywords")[:1]),
+                REGION_AT: Subquery(latest.values("checked_at")[:1]),
+            }
         )
         return annotated
 
@@ -1456,6 +1480,16 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
         if result.skipped:
             text += f" Пропущено: {result.skipped} — {skip_reason}."
         self.message_user(request, text, messages.SUCCESS if result.changed else messages.WARNING)
+
+
+def _chosen_product(changelist: ChangeList) -> str:
+    """Название продукта, выбранного в фильтре списка (без выбора — первый активный)."""
+    for spec in changelist.filter_specs:
+        if isinstance(spec, ProductFilter):
+            value = spec.value()
+            names = dict(spec.lookup_choices)
+            return str(names.get(value, "")) if value else ""
+    return ""
 
 
 def _posted_id(request: HttpRequest, name: str) -> int:

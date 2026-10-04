@@ -9,7 +9,9 @@
   рабочую цену импорт не меняет — другая цена ждёт решения человека;
 - решения и работа — статус по продукту, причина отказа, размещения,
   ссылки — только дополняются: недостающее создаётся, пустое
-  заполняется, статусы двигаются вперёд. Расхождение — в отчёт.
+  заполняется, статусы двигаются вперёд. Расхождение — в отчёт. У
+  размещения «Источник» — продавец (нет такого — заводится), «Итог цена»
+  строки «Размещено» — сколько заплатили, в евро (E1-06).
 - комментарий к площадке — в историю заметок с источником «таблица
   линкбилдинга»; тот же текст второй раз не пишется.
 
@@ -55,7 +57,7 @@ from apps.sites.models import (
     SiteStatus,
     ensure_product_sites,
 )
-from apps.sites.offers import TABLE_SOURCE
+from apps.sites.offers import TABLE_SOURCE, money
 
 CONVERTIO_DOMAIN = "convertio.co"
 CLIDEO_DOMAIN = "clideo.com"
@@ -64,6 +66,8 @@ POSITIONS_COUNTRY = "US"
 # US Traff — страна снимка трафика по странам, код строчными, как у Ahrefs (маппинг §1.3).
 US = "us"
 
+# Цены таблицы — в евро: «Цена размещения статья, EUR», «Итог цена».
+TABLE_CURRENCY = "EUR"
 # Статус размещения — только вперёд, цепочка общая с загрузкой размещений.
 PLACEMENT_LADDER = LADDER
 WAITING = PLACEMENT_LADDER[:-1]
@@ -118,6 +122,8 @@ class Importer:
         self.clideo = find_product(CLIDEO_DOMAIN)
         # Цены таблицы — предложения каталога Collaborator (ADR-043); его заводит миграция.
         self.collaborator = Seller.collaborator()
+        # Продавцы размещений по имени без регистра, как `sellers_name_key`.
+        self.sellers = {seller.name.lower(): seller for seller in Seller.objects.all()}
         self.as_of = as_of
         self.checked_at = start_of_day(as_of)
         self.report = report
@@ -573,6 +579,9 @@ class Importer:
                 is_indexed=wanted.is_indexed,
                 placement_type=wanted.placement_type,
                 comment=wanted.comment,
+                seller=self._seller(wanted.seller),
+                price_paid_cents=wanted.price_paid_cents,
+                currency=TABLE_CURRENCY,
             )
             candidates.append(placement)
             self.report.count("placements", Outcome.CREATED)
@@ -624,8 +633,61 @@ class Importer:
                 Section.PLACEMENT_CONFLICTS,
                 changed,
             )
+        self._fill_seller(placement, wanted.seller, where, changed)
+        self._fill_paid(placement, wanted.price_paid_cents, where, changed)
         self._save(placement, changed, "placements")
         return "status" in changed
+
+    def _seller(self, name: str | None) -> Seller | None:
+        """Продавец по «Источнику»; нового заводим с валютой таблицы, как загрузка размещений."""
+        if not name:
+            return None
+        seller = self.sellers.get(name.lower())
+        if seller is None:
+            seller = Seller.objects.create(name=name, currency=TABLE_CURRENCY)
+            self.sellers[name.lower()] = seller
+            self.report.count("sellers", Outcome.CREATED)
+        return seller
+
+    def _fill_seller(
+        self, placement: Placement, name: str | None, where: str, changed: list[str]
+    ) -> None:
+        if not name:
+            return
+        if placement.seller_id is None:
+            placement.seller = self._seller(name)
+            changed.append("seller")
+            return
+        known = self.sellers.get(name.lower())
+        if known is None or known.pk != placement.seller_id:
+            # Имя — из уже загруженных продавцов, без запроса на размещение.
+            current = next(
+                (s.name for s in self.sellers.values() if s.pk == placement.seller_id), "?"
+            )
+            self.report.issue(
+                Section.PLACEMENT_CONFLICTS,
+                f"{where}: «продавец» в базе {current}, в таблице {name}",
+            )
+
+    def _fill_paid(
+        self, placement: Placement, cents: int | None, where: str, changed: list[str]
+    ) -> None:
+        """«Итог цена» — в евро; заплаченное в базе не переписывается."""
+        if cents is None:
+            return
+        if placement.price_paid_cents is None:
+            placement.price_paid_cents = cents
+            changed.append("price_paid_cents")
+            if placement.currency != TABLE_CURRENCY:
+                placement.currency = TABLE_CURRENCY
+                changed.append("currency")
+        elif (placement.price_paid_cents, placement.currency) != (cents, TABLE_CURRENCY):
+            paid = money(placement.price_paid_cents, placement.currency or TABLE_CURRENCY)
+            self.report.issue(
+                Section.PLACEMENT_CONFLICTS,
+                f"{where}: «заплачено» в базе {paid}, в таблице «Итог цена» "
+                f"{money(cents, TABLE_CURRENCY)}",
+            )
 
     def _import_link(
         self,

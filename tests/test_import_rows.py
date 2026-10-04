@@ -165,9 +165,30 @@ class TestSiteCard:
         assert len(report.issues[Section.US_EQUALS_GEO]) == 1
         assert report.issues[Section.US_EQUALS_GEO][0].startswith("same.com")
 
-    def test_total_price_zero(self, make_workbook: MakeWorkbook) -> None:
-        path = make_workbook(base=[("zero.com", {"Итог цена": 0}), ("ok.com", {})])
-        assert _base(path)[1].issues[Section.TOTAL_PRICE_ZERO] == ["zero.com (строка 2)"]
+    def test_total_price_is_paid_only_when_placed(self, make_workbook: MakeWorkbook) -> None:
+        """«Итог цена» вписывают при закрытии заявки: у «Размещено» — заплачено, у
+        заявки и строки без размещения — не читается, 0 там нормален (E1-06)."""
+        placed = {"Статус": "Размещено", "URL статьи": "https://placed.com/a"}
+        path = make_workbook(
+            base=[
+                ("placed.com", {**placed, "Итог цена": 581.82, "Источник": "StarMedia"}),
+                ("zero.com", {**placed, "URL статьи": "https://zero.com/a", "Итог цена": 0}),
+                ("ordered.com", {"Статус": "Заявка отправлена", "Итог цена": 336.46}),
+                ("plain.com", {"Итог цена": 0}),
+            ]
+        )
+        sites, report = _base(path)
+        by_domain = {site.domain: site.placement for site in sites}
+        placed_data = by_domain["placed.com"]
+        assert placed_data is not None
+        assert (placed_data.price_paid_cents, placed_data.seller) == (58182, "StarMedia")
+        zero = by_domain["zero.com"]
+        assert zero is not None and zero.price_paid_cents is None
+        ordered = by_domain["ordered.com"]
+        assert ordered is not None
+        assert (ordered.price_paid_cents, ordered.seller) == (None, "Collaborator")
+        assert by_domain["plain.com"] is None
+        assert report.issues[Section.NO_TOTAL_PRICE] == ["zero.com (строка 3)"]
 
 
 class TestDuplicatesAndSkips:

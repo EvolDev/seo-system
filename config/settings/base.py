@@ -80,7 +80,8 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
             ],
             # {% asset %} — адрес нашей статики с версией (config/assets.py).
-            "libraries": {"seo_assets": "config.assets"},
+            # {% export_tools cl %} — окно выгрузки над списком (config/export_tags.py).
+            "libraries": {"seo_assets": "config.assets", "seo_export": "config.export_tags"},
         },
     },
 ]
