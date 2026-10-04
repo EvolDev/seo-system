@@ -31,6 +31,7 @@ class Section(StrEnum):
     NO_TOTAL_PRICE = "«Размещено», а «Итог цена» пустая или 0 — сколько заплатили, неизвестно"
     LINK_COUNTS = "Links Placed / Links Waiting: расчёт по базе не сходится с таблицей"
     COPY_MISMATCH = "Сверка с вкладкой «Размещения»"
+    INVOICES = "Вкладка «Счета»: что не записано или расходится с базой"
 
 
 class Outcome(StrEnum):

@@ -28,6 +28,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.keywords.models import Keyword, KeywordPosition
+from apps.placements import invoices
 from apps.placements.matching import LADDER, match_placement
 from apps.placements.models import (
     SITE_STATUS_BY_PLACEMENT,
@@ -683,6 +684,9 @@ class Importer:
                 changed.append("currency")
         elif (placement.price_paid_cents, placement.currency) != (cents, TABLE_CURRENCY):
             paid = money(placement.price_paid_cents, placement.currency or TABLE_CURRENCY)
+            # Сумму из счёта пишет только счёт (ADR-055); расхождение — в отчёт с пометкой.
+            if placement.pk is not None and invoices.invoiced([placement.pk]):
+                paid += " (из счёта)"
             self.report.issue(
                 Section.PLACEMENT_CONFLICTS,
                 f"{where}: «заплачено» в базе {paid}, в таблице «Итог цена» "

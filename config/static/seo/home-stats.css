@@ -1,0 +1,91 @@
+/* Статистика на главной (E1-14): выбор продукта и года, плитки, графики по месяцам.
+   Цвета рядов — переменные --seo-chart-* расцветок (seo/admin-palettes.css,
+   ADR-038), проверены валидатором dataviz против фона карточек (--darkened-bg).
+   Столбики — не толще 24px, верх скруглён 4px, у основания прямой; части стопки
+   разделяет зазор 2px; сетка — волосяные линии. Текст — цветами текста, не рядов. */
+.seo-stats { display: flex; flex-direction: column; gap: 12px; }
+/* Шапка блока: заголовок, продукт и год — выбор задаёт всё, что ниже. */
+.seo-stats-head { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; }
+.seo-stats-head h2 { margin: 0; padding: 0; background: none; font-size: 16px; font-weight: 600; color: var(--body-fg); }
+.seo-stats-products, .seo-stats-year { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+body.admin-interface .seo-stats-head .seo-btn { min-height: 28px; padding: 4px 12px; font-size: 0.75rem; }
+.seo-stats-year b { min-width: 3em; text-align: center; font-size: 14px; }
+.seo-stats .seo-btn.is-off { opacity: 0.35; pointer-events: none; }
+
+/* Плитки колонкой слева и два графика рядом — одной строкой на широком экране;
+   уже — плитки в ряд над графиками; совсем узко — всё друг под другом. */
+.seo-stats-grid { display: grid; grid-template-columns: minmax(190px, 230px) repeat(2, minmax(0, 1fr)); gap: 12px;
+  align-items: stretch; }
+.seo-tiles { display: grid; grid-template-rows: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 1280px) {
+  .seo-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .seo-tiles { grid-column: 1 / -1; grid-template-rows: none; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .seo-stats-grid, .seo-tiles { grid-template-columns: minmax(0, 1fr); }
+}
+.seo-tile { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 10px 16px;
+  border-radius: 10px; border: 1px solid var(--hairline-color); background: var(--darkened-bg); color: var(--body-fg);
+  min-width: 0; }
+.seo-tile:hover, .seo-tile:focus-visible { border-color: var(--admin-interface-generic-link-color); text-decoration: none; }
+.seo-tile-label { font-size: 12px; color: var(--body-quiet-color); }
+.seo-tile-value { font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--body-fg); }
+.seo-tile-note { font-size: 12px; color: var(--body-quiet-color); }
+
+.seo-chart { display: flex; flex-direction: column; margin: 0; padding: 12px 16px 8px; border-radius: 10px; border: 1px solid var(--hairline-color);
+  background: var(--darkened-bg); color: var(--body-fg); min-width: 0; }
+.seo-chart figcaption { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; margin-bottom: 4px; }
+.seo-chart-title { font-size: 14px; font-weight: 600; }
+.seo-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 8px; padding: 0; list-style: none;
+  font-size: 12px; color: var(--body-quiet-color); }
+.seo-legend li { display: flex; align-items: center; gap: 6px; padding: 0; list-style: none; }
+.seo-legend-total b { color: var(--body-fg); font-weight: 600; }
+.seo-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+/* Высота графика — область столбиков (150px) и полоса подписей месяцев под ней. */
+.seo-chart-plot { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding-top: 18px; margin-top: auto; }
+.seo-chart-axis, .seo-chart-area { position: relative; height: 150px; margin-bottom: 22px; }
+.seo-chart-axis { min-width: 2ch; }
+/* Ширина колонки оси — по самой длинной подписи (верхней): подписи стоят
+   поверх колонки и сами её не раздвигают. */
+.seo-tick-size { display: block; height: 0; overflow: hidden; visibility: hidden; font-size: 11px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seo-tick { position: absolute; right: 0; transform: translateY(50%); font-size: 11px; line-height: 1;
+  color: var(--body-quiet-color); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seo-chart-area { display: flex; align-items: stretch; gap: 2px; border-bottom: 1px solid var(--hairline-color); }
+.seo-chart-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--body-quiet-color); pointer-events: none; }
+.seo-grid { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--hairline-color); }
+.seo-col { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center;
+  color: var(--body-fg); text-decoration: none; border-radius: 4px 4px 0 0; }
+.seo-col:hover, .seo-col:focus-visible { background: color-mix(in srgb, var(--hairline-color) 45%, transparent); text-decoration: none; }
+.seo-col.is-current { background: color-mix(in srgb, var(--hairline-color) 30%, transparent); }
+.seo-col-stack { position: relative; display: flex; flex-direction: column-reverse; gap: 2px; width: 100%; max-width: 24px; }
+.seo-seg { display: block; width: 100%; flex: 0 1 auto; min-height: 1px; }
+.seo-col-stack > .seo-seg:last-child { border-radius: 4px 4px 0 0; }
+.seo-col:hover .seo-seg, .seo-col:focus-visible .seo-seg { filter: brightness(1.12); }
+.seo-seg-placed, .seo-key-placed { background: var(--seo-chart-placed); }
+.seo-seg-invoiced, .seo-key-invoiced { background: var(--seo-chart-invoiced); }
+.seo-seg-other, .seo-key-other { background: var(--seo-chart-other); }
+.seo-col-value { position: absolute; left: 50%; transform: translate(-50%, -4px); font-size: 11px; font-weight: 600;
+  white-space: nowrap; color: var(--body-fg); pointer-events: none; }
+.seo-col-label { position: absolute; top: 100%; left: 0; right: 0; margin-top: 5px; text-align: center; font-size: 11px;
+  color: var(--body-quiet-color); }
+.seo-col.is-current .seo-col-label { color: var(--body-fg); font-weight: 600; }
+
+/* Подсказка столбика — при наведении и фокусе с клавиатуры; значение первым. */
+.seo-col-tip { display: none; position: absolute; z-index: 5; bottom: 100%; left: 50%; transform: translate(-50%, -6px);
+  flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 6px; white-space: nowrap; font-size: 12px;
+  background: var(--body-bg); color: var(--body-fg); border: 1px solid var(--hairline-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); pointer-events: none; }
+.seo-col:hover .seo-col-tip, .seo-col:focus-visible .seo-col-tip { display: flex; }
+.seo-tip-row { display: flex; align-items: center; gap: 6px; }
+.seo-line { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+.seo-line-invoiced { background: var(--seo-chart-invoiced); }
+.seo-line-other { background: var(--seo-chart-other); }
+
+.seo-stats-foot { display: flex; flex-wrap: wrap; gap: 4px 20px; align-items: baseline; }
+.seo-stats-table summary { cursor: pointer; color: var(--admin-interface-generic-link-color); font-size: 13px; }
+.seo-stats-table[open] { flex-basis: 100%; }
+.seo-stats-table table { margin-top: 8px; font-variant-numeric: tabular-nums; }
+.seo-stats-table td:not(:first-child), .seo-stats-table th:not(:first-child) { text-align: right; }

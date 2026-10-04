@@ -220,7 +220,9 @@ class TestList:
     def test_status_and_day_columns(self, admin_client: Client, placement: Placement) -> None:
         response = admin_client.get(reverse("admin:placements_placement_changelist"))
         page = response.content.decode()
-        assert f'<a href="{_url(placement)}" title="Сменить статус">Запланировано</a>' in page
+        # data-seo-field — статус в строке меняется сразу после записи в панели.
+        link = f'<a href="{_url(placement)}" title="Сменить статус" data-seo-field="status">'
+        assert f"{link}Запланировано</a>" in page
         assert "01.10.2026" in page
         assert "15:30" not in page
 

@@ -1,0 +1,29 @@
+/* Главная (E9-08, E1-14): обзор на одном экране, на всю ширину.
+   Сверху вниз — по важности (перевёрнутая пирамида): карточки «Работы» одной
+   строкой, статистика (плитки и графики рядом), внизу — остальные разделы и
+   последние действия компактными списками. Штатный Django держит главную
+   колонкой 600px (.dashboard #content) — здесь она во всю ширину. */
+body.admin-interface.dashboard #content { width: auto; max-width: 1680px; }
+.seo-home { display: flex; flex-direction: column; gap: 20px; }
+
+/* Карточки экранов «Работы» — одной строкой, пока помещаются. */
+.home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 0; }
+.home-card { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: 10px;
+  border: 1px solid var(--hairline-color); background: var(--darkened-bg); color: var(--body-fg); min-width: 0; }
+.home-card:hover, .home-card:focus-visible { border-color: var(--admin-interface-generic-link-color);
+  text-decoration: none; }
+.home-card-title { font-size: 14px; font-weight: 600; color: var(--admin-interface-generic-link-color); }
+.home-card-value { font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--body-fg); }
+.home-card-note { font-size: 12px; line-height: 1.35; color: var(--body-quiet-color); }
+
+/* Остальные разделы меню и последние действия — колонками ссылок. */
+.home-more { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 24px;
+  padding-top: 16px; border-top: 1px solid var(--hairline-color); }
+.home-group h2 { margin: 0 0 6px; padding: 0; background: none; font-size: 12px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--body-quiet-color); }
+.home-group ul { margin: 0; padding: 0; list-style: none; }
+.home-group li { margin: 0; padding: 3px 0; list-style: none; font-size: 13px; line-height: 1.35; }
+.home-recent li { display: flex; flex-direction: column; }
+
+/* Мелкие пояснения — приглушённым цветом, как в списках. */
+.seo-home .seo-sub { color: var(--body-quiet-color); font-size: 12px; }

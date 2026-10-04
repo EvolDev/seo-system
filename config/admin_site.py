@@ -14,7 +14,7 @@ from typing import Any
 
 from django.contrib import admin
 from django.contrib.admin.apps import AdminConfig
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, URLResolver, path
@@ -29,6 +29,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "productsitelatest"),
             ("sites", "upload"),
             ("placements", "placement"),
+            ("placements", "invoice"),
             ("keywords", "keyword"),
         ],
     ),
@@ -138,9 +139,14 @@ class SeoAdminSite(admin.AdminSite):
         # группы «Работа» с парой чисел, ниже — остальные группы меню.
         groups = self.get_app_list(request)
         work = next((group for group in groups if group["app_label"] == WORK), None)
+        # Статистика размещений и трат по месяцам (E1-14): модуль — внутри функции,
+        # этот читается до того, как готовы модели.
+        from apps.placements import home
+
         context = {
             "home_cards": _home_cards(work["models"]) if work else [],
             "home_app_list": [group for group in groups if group["app_label"] != WORK],
+            **home.context(request),
             **(extra_context or {}),
         }
         return super().index(request, context)
@@ -153,6 +159,9 @@ def _number(value: int) -> str:
 
 def _home_cards(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Карточки главной — по пунктам группы «Работа», в том же порядке."""
+    # Внутри функции: модуль читается до того, как готовы модели (см. _home_numbers).
+    from apps.sites.offers import money
+
     numbers = _home_numbers()
     product, site_list = numbers.get("product"), numbers.get("site_list")
     notes: dict[str, tuple[str, str]] = {}
@@ -173,6 +182,14 @@ def _home_cards(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _number(numbers.get("review_pending", 0)),
         "предложений ждут разбора",
     )
+    # Счета от продукта не зависят: к оплате — выставленные, суммы по валютам (E1-14).
+    due = numbers.get("invoices_due", {})
+    notes["invoice"] = (
+        _number(sum(count for count, _cents in due.values())),
+        " + ".join(money(cents, currency) for currency, (_count, cents) in sorted(due.items()))
+        + (" " if due else "")
+        + "к оплате",
+    )
     cards = []
     for model in models:
         value, note = notes.get(model["object_name"].lower(), ("", ""))
@@ -186,7 +203,7 @@ def _home_numbers() -> dict[str, Any]:
     # Модели — внутри функции: этот модуль читается при загрузке приложений,
     # до того как модели готовы.
     from apps.keywords.models import Keyword
-    from apps.placements.models import Placement, PlacementStatus
+    from apps.placements.models import Invoice, InvoiceStatus, Placement, PlacementStatus
     from apps.sites.models import Product, ProductSite, SiteList, SiteStatus, UploadItem
 
     product = Product.objects.filter(is_active=True).order_by("pk").first()
@@ -195,6 +212,13 @@ def _home_numbers() -> dict[str, Any]:
     numbers["review_pending"] = UploadItem.objects.filter(
         needs_decision=True, price__reviewed_at__isnull=True
     ).count()
+    due = (
+        Invoice.objects.filter(status=InvoiceStatus.ISSUED)
+        .values("currency")
+        .annotate(count=Count("pk"), cents=Sum("amount_cents"))
+        .order_by("currency")
+    )
+    numbers["invoices_due"] = {row["currency"]: (row["count"], row["cents"]) for row in due}
     if product is None:
         return numbers
     # Строки «Площадок» — это строки product_sites у неудалённых площадок; считать

@@ -21,7 +21,15 @@ from typing import Any
 from django.db import connection
 from django.db.models import F, QuerySet
 
-from apps.placements.models import Placement, PlacementLink, PlacementStatus
+from apps.placements import invoices
+from apps.placements.models import (
+    Invoice,
+    InvoiceItem,
+    InvoiceStatus,
+    Placement,
+    PlacementLink,
+    PlacementStatus,
+)
 from apps.sites.models import PlacementType, Product
 from apps.sites.rates import latest_rates, to_eur_cents
 from config.export import Choice, Column, Kind, Sheet, Value, narrow
@@ -35,6 +43,7 @@ SHEET_LINKS = 2
 PLACEMENT = "Размещение"
 SITE = "Площадка на сегодня"
 EXTRA = "Сверх листа таблицы"
+INVOICE = "Счёт"
 # Галочки на группу колонок: все пары «Анкор / Ссылка», все «Пример статьи на …».
 LINKS = "links"
 EXAMPLES = "examples"
@@ -83,6 +92,11 @@ _SPEC: tuple[tuple[str, Column | None, str], ...] = (
     ("paid_eur", Column("Итог цена, EUR", Kind.MONEY, 11), EXTRA),
     ("indexed_at", Column("Индексация проверена", Kind.DATE, 12), EXTRA),
     ("homepage", Column("Анонс на главной", width=9), EXTRA),
+    # Счёт продавца (E1-14, ADR-055); счетов у размещения два — через «;».
+    ("invoice", Column("Счёт", width=30), INVOICE),
+    ("invoice_status", Column("Счёт: статус", width=12), INVOICE),
+    ("invoice_paid", Column("Счёт оплачен", Kind.DATE, 12), INVOICE),
+    ("invoice_url", Column("Счёт: ссылка на оплату", width=40), INVOICE),
 )
 
 _FIELDS = (
@@ -175,6 +189,7 @@ def sheets(queryset: QuerySet[Placement], wanted: Set[str]) -> list[Sheet]:
     ids = [row["pk"] for row in rows]
     site_ids = sorted({row["site_id"] for row in rows})
     links = _links(ids)
+    bills = _invoices(ids)
     sites = _sites_today(site_ids)
     articles = _published_articles(site_ids)
     rates = latest_rates()
@@ -207,9 +222,9 @@ def sheets(queryset: QuerySet[Placement], wanted: Set[str]) -> list[Sheet]:
             _other_article(articles, row["site_id"], product_id, row["pk"])
             for product_id, _ in others
         ]
-        table.append(
-            _row(row, site, links.get(row["pk"], []), pairs, examples, status, service, paid_eur)
-        )
+        found = links.get(row["pk"], [])
+        cells = _row(row, site, found, pairs, examples, status, service, paid_eur)
+        table.append(cells + _invoice_values(bills.get(row["pk"], [])))
     columns, values = narrow(layout, table, wanted)
     return [Sheet("Размещения", columns, list(values)), _totals_sheet(totals)]
 
@@ -305,6 +320,34 @@ def _employee(row: dict[str, Any]) -> str | None:
         return None
     name = f"{row['employee__first_name'] or ''} {row['employee__last_name'] or ''}".strip()
     return name or row["employee__username"]
+
+
+def _invoices(ids: list[int]) -> dict[int, list[Invoice]]:
+    """Неотменённые счета размещений, старые первыми, — одним запросом."""
+    found: dict[int, list[Invoice]] = defaultdict(list)
+    items = (
+        InvoiceItem.objects.filter(placement_id__in=ids)
+        .exclude(invoice__status=InvoiceStatus.CANCELLED)
+        .select_related("invoice__seller")
+        .order_by("invoice__issued_on", "invoice_id")
+    )
+    for item in items:
+        found[item.placement_id].append(item.invoice)
+    return found
+
+
+def _invoice_values(bills: list[Invoice]) -> list[Value]:
+    """Счёт, статус, дата оплаты (если оплачены все), ссылки на оплату."""
+    if not bills:
+        return [None, None, None, None]
+    paid = [bill.paid_on for bill in bills if bill.status == InvoiceStatus.PAID]
+    all_paid = len(paid) == len(bills) and None not in paid
+    return [
+        "; ".join(invoices.label(bill) for bill in bills),
+        "; ".join(bill.get_status_display() for bill in bills),
+        max(day for day in paid if day is not None) if all_paid else None,
+        "; ".join(bill.pay_url for bill in bills if bill.pay_url) or None,
+    ]
 
 
 def _links(ids: list[int]) -> dict[int, list[tuple[str, str]]]:

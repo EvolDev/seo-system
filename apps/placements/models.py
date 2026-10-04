@@ -22,7 +22,7 @@ from apps.sites import statuses
 # Формат размещения — колонка «Тип ссылки» Excel; общий с ценами площадки (ADR-043).
 from apps.sites.models import PlacementType, SiteStatus, StatusSource
 from config.changes import stamped
-from config.db import PgEnumField, PgNow
+from config.db import PgCurrentDate, PgEnumField, PgNow
 from config.run_id import current_run_id
 
 
@@ -233,6 +233,129 @@ class PlacementStatusChange(models.Model):
 
     def __str__(self) -> str:
         return f"{self.placement_id}: {self.from_status} → {self.to_status}"
+
+
+class InvoiceStatus(models.TextChoices):
+    ISSUED = "issued", "Выставлен"
+    PAID = "paid", "Оплачен"
+    CANCELLED = "cancelled", "Отменён"
+
+
+class Invoice(models.Model):
+    """Счёт продавца: одно размещение или пачка (ADR-055).
+
+    Сделка напрямую — заявки с продавцом, деньги по ним — счёт. Что он
+    закрывает и за сколько — строки `InvoiceItem`. «Заплачено» размещения
+    пересчитывает `apps.placements.invoices` при записи счёта. Отменённый счёт
+    не считается. Счета не удаляются.
+    """
+
+    seller = models.ForeignKey(
+        "sites.Seller",
+        models.PROTECT,
+        verbose_name="продавец",
+        related_name="invoices",
+        db_index=False,
+    )
+    number = models.TextField(
+        "номер счёта", null=True, blank=True, help_text="Как у продавца, если есть."
+    )
+    amount_cents = models.IntegerField("сумма, центы")
+    currency = models.CharField("валюта", max_length=3, default="EUR", db_default="EUR")
+    pay_url = models.TextField(
+        "ссылка на оплату",
+        null=True,
+        blank=True,
+        help_text="Счёт PayPal или другая страница оплаты.",
+    )
+    issued_on = models.DateField("выставлен", db_default=PgCurrentDate())
+    status = PgEnumField(
+        "статус",
+        enum_type="invoice_status",
+        choices=InvoiceStatus.choices,
+        default=InvoiceStatus.ISSUED,
+        db_default=InvoiceStatus.ISSUED,
+    )
+    paid_on = models.DateField("оплачен", null=True, blank=True)
+    paid_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        verbose_name="оплатил",
+        related_name="+",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    comment = models.TextField("комментарий", null=True, blank=True)
+    created_at = models.DateTimeField("заведён", db_default=PgNow())
+    updated_at = models.DateTimeField("изменён", auto_now=True, db_default=PgNow())
+
+    class Meta:
+        db_table = "invoices"
+        verbose_name = "счёт"
+        verbose_name_plural = "счета"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(amount_cents__gt=0),
+                name="invoices_amount_cents_check",
+                violation_error_message="Сумма счёта — больше нуля.",
+            ),
+            models.UniqueConstraint(
+                fields=["pay_url"],
+                condition=models.Q(pay_url__isnull=False),
+                name="invoices_pay_url_key",
+                violation_error_message="Счёт с этой ссылкой на оплату уже есть.",
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["seller", "status"], name="idx_invoices_seller"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Счёт {self.number or self.pk or 'новый'} · {self.seller}"
+
+
+class InvoiceItem(models.Model):
+    """Строка счёта: размещение и его доля в валюте счёта (ADR-055).
+
+    Сумма долей — сумма счёта, это проверяет форма. Строку убирают из счёта,
+    пока он не оплачен.
+    """
+
+    invoice = models.ForeignKey(
+        Invoice, models.PROTECT, verbose_name="счёт", related_name="items", db_index=False
+    )
+    placement = models.ForeignKey(
+        Placement,
+        models.PROTECT,
+        verbose_name="размещение",
+        related_name="invoice_items",
+        db_index=False,
+    )
+    amount_cents = models.IntegerField("доля, центы")
+
+    class Meta:
+        db_table = "invoice_items"
+        verbose_name = "строка счёта"
+        verbose_name_plural = "строки счёта"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(amount_cents__gte=0),
+                name="invoice_items_amount_cents_check",
+                violation_error_message="Доля не может быть меньше нуля.",
+            ),
+            models.UniqueConstraint(
+                fields=["invoice", "placement"],
+                name="invoice_items_invoice_id_placement_id_key",
+                violation_error_message="Это размещение уже в счёте.",
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["placement"], name="idx_invoice_items_placement"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.invoice_id}: {self.placement_id}"
 
 
 class PlacementLink(models.Model):

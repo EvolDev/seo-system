@@ -36,7 +36,11 @@ def test_sites_list_status_opens_decision_panel(admin_client: Client, row: Produ
     page = admin_client.get(reverse("admin:sites_productsitelatest_changelist")).content.decode()
     # Щелчок — панель с решением, Ctrl и без скрипта — полная форма.
     full = reverse("admin:sites_productsite_change", args=[row.pk])
-    assert f'<a href="{full}" data-panel="{_url(row)}" title="Сменить статус">Новая</a>' in page
+    # data-seo-field — статус в строке меняется сразу после записи в панели.
+    link = (
+        f'<a href="{full}" data-panel="{_url(row)}" title="Сменить статус" data-seo-field="status">'
+    )
+    assert f"{link}Новая</a>" in page
     assert "seo/panel.js" in page
 
 

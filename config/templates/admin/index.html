@@ -1,27 +1,25 @@
 {% extends "admin/index.html" %}
 {% comment %}
-Главная (E9-08): вход в работу, а не список всех таблиц. Сверху — карточки
-экранов группы «Работа» с парой чисел, ниже — остальные группы меню.
-Данные — config/admin_site.py (SeoAdminSite.index). Шаблон с тем же именем,
-что у Django: extends продолжает штатный.
+Главная (E9-08, E1-14): вход в работу и обзор на одном экране, на всю ширину.
+Сверху — карточки экранов «Работы» одной строкой; под ними — статистика:
+плитки «этот месяц» колонкой слева и два графика рядом (admin/home_stats.html);
+внизу — остальные группы меню и последние действия компактными списками.
+Штатная колонка Django шириной 600px и правая колонка «Последние действия»
+выключены (coltype, sidebar): из-за них всё вытягивалось вниз.
+Данные — config/admin_site.py (SeoAdminSite.index), вид — seo/home.css.
+Шаблон с тем же именем, что у Django: extends продолжает штатный.
 {% endcomment %}
+{% load seo_assets log i18n %}
 
 {% block extrastyle %}{{ block.super }}
-<style>
-  .home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;
-    margin: 0 0 28px; }
-  .home-card { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border-radius: 10px;
-    border: 1px solid var(--hairline-color); background: var(--darkened-bg); color: var(--body-fg); }
-  .home-card:hover, .home-card:focus-visible { border-color: var(--admin-interface-generic-link-color);
-    text-decoration: none; }
-  .home-card-title { font-size: 15px; font-weight: 600; color: var(--admin-interface-generic-link-color); }
-  .home-card-value { font-size: 28px; font-weight: 600; line-height: 1.2; color: var(--body-fg); }
-  .home-card-note { font-size: 13px; color: var(--body-quiet-color); }
-</style>
+<link rel="stylesheet" href="{% asset 'seo/home.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/home-stats.css' %}">
 {% endblock %}
 
+{% block coltype %}colM{% endblock %}
+
 {% block content %}
-<div id="content-main">
+<div id="content-main" class="seo-home">
   {% if home_cards %}
   <section class="home-cards" aria-label="Работа">
     {% for card in home_cards %}
@@ -33,6 +31,38 @@
     {% endfor %}
   </section>
   {% endif %}
-  {% include "admin/app_list.html" with app_list=home_app_list show_changelinks=True %}
+
+  {% if home_stats %}{% include "admin/home_stats.html" %}{% endif %}
+
+  <section class="home-more" aria-label="Разделы">
+    {% for app in home_app_list %}
+    <nav class="home-group" aria-label="{{ app.name }}">
+      <h2>{{ app.name }}</h2>
+      <ul>
+        {% for model in app.models %}
+        <li><a href="{% firstof model.admin_url model.view_only_url %}">{{ model.name }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+    {% endfor %}
+    <div class="home-group home-recent">
+      <h2>{% translate 'Recent actions' %}</h2>
+      {% get_admin_log 6 as admin_log for_user user %}
+      {% if not admin_log %}
+      <p class="seo-sub">{% translate 'None available' %}</p>
+      {% else %}
+      <ul>
+        {% for entry in admin_log %}
+        <li>
+          {% if entry.is_deletion or not entry.get_admin_url %}{{ entry.object_repr }}{% else %}<a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>{% endif %}
+          <span class="seo-sub">{% if entry.content_type %}{{ entry.content_type.name|capfirst }}{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </section>
 </div>
 {% endblock %}
+
+{% block sidebar %}{% endblock %}

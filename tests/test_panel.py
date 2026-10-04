@@ -186,3 +186,51 @@ class TestSave:
         page = client.get(_change_url("sites_seller", seller), headers=PARTIAL).content.decode()
         assert "data-panel-save" not in page
         assert ">Закрыть</button>" in page
+
+
+class TestRowOutsideFilters:
+    """Запись перестала подходить под фильтры — список отдаёт её строку одну (_seo_row)."""
+
+    def test_placement_row_ignores_filters(self, admin_client: Client) -> None:
+        placement = Placement.objects.create(site=_site(), product=_product())
+        Placement.objects.create(site=Site.objects.create(domain="other.com"), product=_product())
+        Placement.objects.filter(pk=placement.pk).update(status="published")
+        url = reverse("admin:placements_placement_changelist")
+        response = admin_client.get(
+            url, {"status__exact": "planned", "_seo_row": str(placement.pk)}
+        )
+        assert response.status_code == 200
+        results = response.context["cl"].result_list
+        assert [row.pk for row in results] == [placement.pk]
+        assert "Опубликовано" in response.content.decode()
+        # Фильтры остались прежними: параметр строки не считается условием отбора.
+        assert response.context["cl"].get_filters_params() == {"status__exact": ["planned"]}
+        # Под фильтр «Запланировано» запись больше не подходит — строка блёклая.
+        assert response["X-Seo-Row-Match"] == "0"
+        matching = admin_client.get(
+            url, {"status__exact": "published", "_seo_row": str(placement.pk)}
+        )
+        assert matching["X-Seo-Row-Match"] == "1"
+
+    def test_row_does_not_count_whole_list(
+        self, admin_client: Client, django_assert_max_num_queries: Any
+    ) -> None:
+        placement = Placement.objects.create(site=_site(), product=_product())
+        url = reverse("admin:placements_placement_changelist")
+        # Запросы — как у обычной страницы списка (сессия, фильтры, «Мои фильтры»),
+        # а «всего N» — по одной строке.
+        with django_assert_max_num_queries(20):
+            response = admin_client.get(url, {"_seo_row": str(placement.pk)})
+        assert response.context["cl"].full_result_count == 1
+
+    def test_without_param_list_as_usual(self, admin_client: Client) -> None:
+        placement = Placement.objects.create(site=_site(), product=_product())
+        url = reverse("admin:placements_placement_changelist")
+        response = admin_client.get(url, {"status__exact": "published"})
+        assert placement not in response.context["cl"].result_list
+
+    def test_bad_row_is_empty(self, admin_client: Client) -> None:
+        url = reverse("admin:placements_placement_changelist")
+        response = admin_client.get(url, {"_seo_row": "x"})
+        assert response.status_code == 200
+        assert list(response.context["cl"].result_list) == []

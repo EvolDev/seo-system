@@ -46,7 +46,7 @@ from django.utils import timezone
 from apps.content.domain_settings import UploadPriceCap, indexation_schedule
 from apps.keywords.models import Keyword
 from apps.observability.models import Check, CheckStatus, Performer
-from apps.placements import indexation
+from apps.placements import indexation, invoices
 from apps.placements.matching import match_placement, match_without_url, moves_forward
 from apps.placements.models import Placement, PlacementLink, PlacementStatus
 from apps.sites.models import (
@@ -416,12 +416,16 @@ class _Planner:
             if target.price_paid_cents is None:
                 row.fill["price_paid"] = row.paid_cents
             elif paid != (row.paid_cents, self.plan.currency):
+                # «Заплачено» из счёта пишет только счёт (ADR-055): видно, не заменяется.
+                from_invoice = target.pk is not None and bool(invoices.invoiced([target.pk]))
                 self._conflict(
                     row,
                     "price_paid",
-                    _money(target.price_paid_cents, target.currency),
+                    _money(target.price_paid_cents, target.currency)
+                    + (" — из счёта" if from_invoice else ""),
                     _money(row.paid_cents, self.plan.currency),
                     value=row.paid_cents,
+                    replaceable=not from_invoice,
                 )
         known_seller = target.seller.name if target.seller_id and target.seller else None
         known_employee = (

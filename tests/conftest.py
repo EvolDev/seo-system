@@ -128,6 +128,17 @@ BASE_HEADERS = [
     "Тип ссылки статья",
 ]
 
+# Вкладка «Счета» таблицы (E1-14), как в выгрузке от 04.10.2026.
+INVOICE_HEADERS = [
+    "Площадка",
+    "Ссылка на статью",
+    "Цена EUR",
+    "Цена за пачку EUR",
+    "Ссылка на оплату",
+    "Вебмастер\\агентство",
+    "Средняя цена за сайт",
+]
+
 KEYWORD_HEADERS = [
     "Keyword",
     "URL",
@@ -213,6 +224,7 @@ def make_workbook(tmp_path: Path) -> Callable[..., Path]:
         copy: list[RowSpec] | None = None,
         base_headers: list[str] | None = None,
         name: str = "book.xlsx",
+        invoices: list[Row] | None = None,
     ) -> Path:
         workbook = Workbook()
         workbook.remove(workbook.active)  # type: ignore[arg-type]
@@ -222,6 +234,9 @@ def make_workbook(tmp_path: Path) -> Callable[..., Path]:
         ]
         if copy is not None:
             sheets.append(("Размещения", BASE_HEADERS, _rows(copy, site_row)))
+        if invoices is not None:
+            # Вкладка «Счета» (E1-14): строки — как есть, без типовой строки.
+            sheets.append(("Счета", INVOICE_HEADERS, invoices))
         for title, headers, rows in sheets:
             sheet = workbook.create_sheet(title)
             sheet.append(headers)

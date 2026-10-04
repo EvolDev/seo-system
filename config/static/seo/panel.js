@@ -18,7 +18,10 @@
  * сервер отвечает JSON: панель закрывается, строка списка обновляется на
  * месте — экран перечитывается, но меняются только ячейки этой строки,
  * галочки остаются; перестала подходить под фильтры — строка блёклая до
- * обновления списка. Ошибка в форме — форма с подсказками остаётся в панели.
+ * обновления списка, но со свежими ячейками. Статус и другой выбор кнопками
+ * меняются в строке сразу (ячейки с data-seo-field), остальное приходит в фоне
+ * одной строкой списка (_seo_row).
+ * Ошибка в форме — форма с подсказками остаётся в панели.
  * Формы карточки («Сделать рабочей», заметка) отвечают новой карточкой, а
  * строка обновится, когда с карточки уйдут.
  *
@@ -315,6 +318,10 @@
     }
     var next = afterSave;
     afterSave = null;
+    // Выбор кнопками (статус) — в строку сразу, не дожидаясь ответа списка.
+    var instant = was && !was.add && was.row && was.row.isConnected
+      && patchRow(was.row, choicesOf(mainForm()));
+    if (instant) flash(was.row);
     if (was && was.add) {
       // Новой строки на экране нет — перечитать список и показать её.
       close({ force: true });
@@ -322,9 +329,35 @@
       return;
     }
     changed = false;
-    refreshRow(was);
+    refreshRow(was, instant);
     if (next) next();
     else close({ force: true });
+  }
+
+  // Выбранное кнопками в главной форме (seo-choice, статус): имя поля и подпись.
+  function choicesOf(form) {
+    var found = [];
+    if (!form) return found;
+    form.querySelectorAll(".seo-choice input[type=radio]:checked").forEach(function (input) {
+      var label = input.closest("label");
+      var text = label ? label.textContent.trim() : "";
+      if (text) found.push({ name: input.name, text: text });
+    });
+    return found;
+  }
+
+  // Ячейки строки с data-seo-field=<имя поля> получают подпись выбранного —
+  // сразу после записи; свежие ячейки целиком придут следом (refreshRow).
+  function patchRow(row, choices) {
+    var patched = false;
+    choices.forEach(function (choice) {
+      var selector = '[data-seo-field="' + CSS.escape(choice.name) + '"]';
+      row.querySelectorAll(selector).forEach(function (cell) {
+        cell.textContent = choice.text;
+        patched = true;
+      });
+    });
+    return patched;
   }
 
   // ---------- Закрыть ----------
@@ -597,7 +630,11 @@
 
   // ---------- Строка списка на месте ----------
 
-  async function refreshRow(was) {
+  // Свежие ячейки строки после записи — в фоне, экран не ждёт. Строку с галочкой
+  // список отдаёт одну, мимо фильтров (_seo_row, config/admin.py), и говорит
+  // заголовком, подходит ли она ещё под фильтры; без галочки — весь экран.
+  // flashed — строку уже подсветили при мгновенной правке, второй раз не надо.
+  async function refreshRow(was, flashed) {
     var row = was && was.row;
     var nav = seoNav();
     if (!was || !nav) return;
@@ -614,9 +651,13 @@
       nav.reload();
       return;
     }
+    var url = new URL(window.location.href);
+    var box = row.querySelector("input.action-select");
+    var single = Boolean(box && /^\d+$/.test(box.value));
+    if (single) url.searchParams.set("_seo_row", box.value);
     var response;
     try {
-      response = await fetch(window.location.href, { credentials: "same-origin" });
+      response = await fetch(url.href, { credentials: "same-origin" });
     } catch (error) {
       return;
     }
@@ -625,11 +666,15 @@
     if (!row.isConnected) return;
     toastMessages(doc);
     var fresh = findRow(doc, was.key);
-    if (!fresh) {
+    var stale = single ? response.headers.get("X-Seo-Row-Match") === "0" : !fresh;
+    if (stale) {
       row.classList.add("seo-row-stale");
       row.title = STALE;
-      return;
+    } else {
+      row.classList.remove("seo-row-stale");
+      if (row.title === STALE) row.removeAttribute("title");
     }
+    if (!fresh) return;
     if (fresh.cells.length !== row.cells.length) {
       nav.reload();
       return;
@@ -640,9 +685,7 @@
       if (row.cells[i].querySelector("input.action-select")) continue;
       row.cells[i].replaceWith(document.importNode(fresh.cells[i], true));
     }
-    row.classList.remove("seo-row-stale");
-    if (row.title === STALE) row.removeAttribute("title");
-    flash(row);
+    if (!flashed) flash(row);
   }
 
   function findRow(doc, key) {
@@ -696,5 +739,10 @@
     event.returnValue = "";
   });
 
-  window.seoPanel = { isOpen: isOpen };
+  // open(url) — панель с записью по адресу не из ссылки списка: форма нового
+  // счёта на отмеченные размещения (seo/invoices.js).
+  window.seoPanel = {
+    isOpen: isOpen,
+    open: function (url) { open(document.body, url, false); },
+  };
 })();

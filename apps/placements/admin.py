@@ -13,6 +13,10 @@
 
 Отчёт за месяц (E1-06): фильтр «опубликовано» по месяцам и кнопки «Выгрузить
 в Excel» и «CSV» — лист «Размещения» таблицы и «Итого» (`export.py`).
+
+Счета (E1-14, ADR-055): действие «Счёт на отмеченные» открывает форму нового
+счёта с ними (`invoice_admin.py`), фильтр и колонка «счёт». «Заплачено»
+размещения в счёте — из счёта: в форме оно текстом со ссылкой на счёт.
 """
 
 from collections.abc import Sequence
@@ -23,7 +27,7 @@ from typing import Any, ClassVar
 from django.contrib import admin, messages
 from django.contrib.admin.utils import display_for_value
 from django.contrib.admin.views.main import ChangeList
-from django.db.models import QuerySet
+from django.db.models import Exists, OuterRef, QuerySet
 from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -35,11 +39,13 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
 from apps.placements import export as placement_export
+from apps.placements import invoices
 from apps.placements.forms import PlacementForm
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE
-from apps.placements.models import Placement, PlacementLink
+from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
 from apps.placements.tasks import check_indexation
 from apps.sites.models import Product
+from apps.sites.offers import money
 from apps.sites.status_history import placement_history
 from config import export
 from config.admin import NoDeleteAdmin, StackedInline
@@ -54,6 +60,41 @@ QUEUED = "Проверка индексации поставлена в очер
 # Строку запуска проверки ищем среди запусков за это время: кнопку жмут
 # и смотрят на результат сразу, повторы идут минуты.
 STATUS_LOOKBACK = timedelta(days=1)
+# Больше размещений в одном счёте не бывает: отмечено больше — скорее ошибка.
+INVOICE_MAX_PLACEMENTS = 100
+
+
+def _in_invoice(status: str | None = None) -> Exists:
+    """Размещение в неотменённом счёте; status — только в счёте с этим статусом."""
+    items = InvoiceItem.objects.filter(placement=OuterRef("pk"))
+    if status is None:
+        items = items.exclude(invoice__status=InvoiceStatus.CANCELLED)
+    else:
+        items = items.filter(invoice__status=status)
+    return Exists(items)
+
+
+class InvoiceFilter(admin.SimpleListFilter):
+    """Счёт размещения (E1-14): нет счёта, выставлен — ждёт оплаты, оплачен."""
+
+    title = "счёт"
+    parameter_name = "invoice"
+    NONE = "none"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            (self.NONE, "нет счёта"),
+            (InvoiceStatus.ISSUED, "выставлен, не оплачен"),
+            (InvoiceStatus.PAID, "оплачен"),
+        ]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Placement]) -> Any:
+        value = self.value()
+        if value == self.NONE:
+            return queryset.filter(~_in_invoice())
+        if value in (InvoiceStatus.ISSUED, InvoiceStatus.PAID):
+            return queryset.filter(_in_invoice(value))
+        return queryset
 
 
 class PublishedMonthFilter(admin.SimpleListFilter):
@@ -206,6 +247,7 @@ class PlacementAdmin(NoDeleteAdmin):
         "status_link",
         "placement_type",
         "published_day",
+        "paid_cell",
         "indexed_cell",
         "indexed_at_cell",
         "skip_checks",
@@ -214,6 +256,7 @@ class PlacementAdmin(NoDeleteAdmin):
         "product",
         PublishedMonthFilter,
         "status",
+        InvoiceFilter,
         "placement_type",
         "is_indexed",
         "skip_checks",
@@ -233,6 +276,7 @@ class PlacementAdmin(NoDeleteAdmin):
         "indexation_button",
         "status_history",
         "extra_data",
+        "paid_from_invoice",
     )
     fieldsets = (
         (None, {"fields": ("site", "product")}),
@@ -273,14 +317,32 @@ class PlacementAdmin(NoDeleteAdmin):
         (SERVICE, {"classes": ("collapse",), "fields": ("run_id", "created_at", "updated_at")}),
     )
     inlines = (PlacementLinkInline,)
-    actions = ("check_indexation_action", "skip_checks_action", "resume_checks_action")
+    actions = (
+        "check_indexation_action",
+        "skip_checks_action",
+        "resume_checks_action",
+        "invoice_for_selected_action",
+    )
 
     class Media:
-        js = (Js("seo/indexation.js"),)
+        js = (Js("seo/indexation.js"), Js("seo/invoices.js"))
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             # offers.css — «прочие данные из файла» в том же виде, что в карточке площадки.
-            "all": (Css("seo/indexation.css"), Css("seo/status-history.css"), Css("seo/offers.css"))
+            "all": (
+                Css("seo/indexation.css"),
+                Css("seo/status-history.css"),
+                Css("seo/offers.css"),
+                Css("seo/invoices.css"),
+            )
         }
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Placement]:
+        # Колонка «заплачено»: из счёта ли сумма и оплачен ли он — без запроса на строку.
+        queryset: QuerySet[Placement] = super().get_queryset(request)
+        return queryset.annotate(
+            invoice_issued=_in_invoice(InvoiceStatus.ISSUED),
+            invoice_paid=_in_invoice(InvoiceStatus.PAID),
+        )
 
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
         if export.is_export(request):
@@ -398,6 +460,22 @@ class PlacementAdmin(NoDeleteAdmin):
 
     def get_fieldsets(self, request: HttpRequest, obj: Any = None) -> Any:
         fieldsets = list(super().get_fieldsets(request, obj))
+        if obj is not None and invoices.invoiced([obj.pk]):
+            # «Заплачено» из счёта — текстом со ссылкой на счёт, руками не правится.
+            paid = ("price_paid_cents", "currency")
+            fieldsets = [
+                (
+                    name,
+                    {
+                        **options,
+                        "fields": tuple(
+                            "paid_from_invoice" if field == paid else field
+                            for field in options["fields"]
+                        ),
+                    },
+                )
+                for name, options in fieldsets
+            ]
         if obj is not None and obj.extra:
             # Прочие данные из файла размещений — перед «Служебным», только если есть.
             fieldsets.insert(len(fieldsets) - 1, (FROM_FILE, {"fields": ("extra_data",)}))
@@ -460,8 +538,11 @@ class PlacementAdmin(NoDeleteAdmin):
         # Щелчок — панель с формой размещения, статус в ней первым (seo/panel.js);
         # с Ctrl и без скрипта — полная страница.
         url = reverse("admin:placements_placement_change", args=[obj.pk])
+        # data-seo-field — после записи в панели статус меняется здесь сразу.
         return format_html(
-            '<a href="{}" title="Сменить статус">{}</a>', url, obj.get_status_display()
+            '<a href="{}" title="Сменить статус" data-seo-field="status">{}</a>',
+            url,
+            obj.get_status_display(),
         )
 
     @admin.display(description="опубликовано", ordering="published_at")
@@ -552,6 +633,55 @@ class PlacementAdmin(NoDeleteAdmin):
             skip_checks=False, updated_at=timezone.now()
         )
         self.message_user(request, f"Снова проверяется по расписанию: {count}.")
+
+    @admin.display(description="заплачено", ordering="price_paid_cents")
+    def paid_cell(self, obj: Placement) -> SafeString | str:
+        amount = money(obj.price_paid_cents, obj.currency or "EUR")
+        if getattr(obj, "invoice_issued", False):
+            note = "счёт не оплачен"
+        elif getattr(obj, "invoice_paid", False):
+            note = "счёт оплачен"
+        else:
+            return amount
+        return format_html('{}<div class="seo-sub">{}</div>', amount, note)
+
+    @admin.display(description="заплачено")
+    def paid_from_invoice(self, obj: Placement) -> SafeString | str:
+        """Сумма из счетов размещения и сами счета — ссылками, открываются в панели."""
+        if obj.pk is None:
+            return "—"
+        others = invoices.invoice_refs([obj.pk])
+        rows = [
+            (
+                reverse("admin:placements_invoice_change", args=[other.invoice_id]),
+                other.label,
+                InvoiceStatus(other.status).label.lower(),
+            )
+            for other in others
+        ]
+        return format_html(
+            '<div class="seo-paid-invoice"><b>{}</b> — из счёта, руками не правится{}</div>',
+            money(obj.price_paid_cents, obj.currency or "EUR"),
+            format_html_join("", '<div><a href="{}" data-panel>{}</a> · {}</div>', rows),
+        )
+
+    @admin.action(description="Счёт на отмеченные")
+    def invoice_for_selected_action(
+        self, request: HttpRequest, queryset: QuerySet[Placement]
+    ) -> HttpResponse | None:
+        """Форма нового счёта с отмеченными размещениями (со скриптом — панелью)."""
+        limit = INVOICE_MAX_PLACEMENTS + 1
+        ids = list(queryset.order_by("pk").values_list("pk", flat=True)[:limit])
+        if len(ids) > INVOICE_MAX_PLACEMENTS:
+            self.message_user(
+                request,
+                f"В одном счёте — не больше {INVOICE_MAX_PLACEMENTS} размещений:"
+                " отметьте только те, что закрывает счёт.",
+                messages.WARNING,
+            )
+            return None
+        url = reverse("admin:placements_invoice_add")
+        return HttpResponseRedirect(f"{url}?placements={','.join(map(str, ids))}")
 
     @admin.display(description="история статуса")
     def status_history(self, obj: Placement) -> SafeString | str:
@@ -700,3 +830,7 @@ def _history_row(check: Check, current_url: str | None) -> tuple[str, str, str, 
     else:
         who = "кнопка" if result.get("manual") else "расписание"
     return (_when(check.checked_at), outcome, who, _when(check.next_check_at))
+
+
+# Админка счетов — своим модулем; регистрируется при загрузке этого.
+from apps.placements import invoice_admin  # noqa: E402, F401

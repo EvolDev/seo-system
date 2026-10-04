@@ -1,0 +1,52 @@
+{% comment %}
+Статистика на главной (E1-14, ADR-055). Шапка блока — заголовок и выбор
+продукта и года (ссылками, без перезагрузки — seo/soft-nav.js): он задаёт всё,
+что ниже. Под ней одной строкой — плитки «этот месяц» колонкой слева и два
+графика рядом; на узком экране плитки встают в ряд над графиками. «Таблицей» —
+те же числа строками. Данные — apps/placements/home.py, вид — seo/home-stats.css.
+{% endcomment %}
+{% with s=home_stats %}
+<section class="seo-stats" aria-label="Статистика размещений">
+  <header class="seo-stats-head">
+    <h2>Статистика</h2>
+    <div class="seo-stats-products" role="group" aria-label="Продукт">
+      {% for pk, name, url, active in s.products %}
+      <a class="seo-btn{% if active %} seo-btn-primary{% endif %}" href="{{ url }}"{% if active %} aria-current="true"{% endif %}>{{ name }}</a>
+      {% endfor %}
+    </div>
+    <div class="seo-stats-year" role="group" aria-label="Год">
+      {% if s.prev_year_url %}<a class="seo-btn" href="{{ s.prev_year_url }}" aria-label="Прошлый год">‹</a>{% else %}<span class="seo-btn is-off" aria-hidden="true">‹</span>{% endif %}
+      <b>{{ s.year }}</b>
+      {% if s.next_year_url %}<a class="seo-btn" href="{{ s.next_year_url }}" aria-label="Следующий год">›</a>{% else %}<span class="seo-btn is-off" aria-hidden="true">›</span>{% endif %}
+    </div>
+  </header>
+  <div class="seo-stats-grid">
+    <div class="seo-tiles">
+      {% for tile in s.tiles %}
+      <a class="seo-tile" href="{{ tile.url }}">
+        <span class="seo-tile-label">{{ tile.label }}</span>
+        <span class="seo-tile-value">{{ tile.value }}</span>
+        <span class="seo-tile-note">{{ tile.note }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% include "admin/home_chart.html" with chart=s.placed kind="placed" title="Размещено по месяцам" sub=s.placed_sub total=s.placed_total empty="За этот год опубликованных нет" %}
+    {% include "admin/home_chart.html" with chart=s.spent kind="spent" title="Потрачено по месяцам" sub="«Заплачено» по месяцу публикации, €" total=s.spent_total empty="За этот год сумм нет — «Заплачено» не вписано" %}
+  </div>
+  <div class="seo-stats-foot">
+    <details class="seo-stats-table">
+      <summary>Таблицей</summary>
+      <table>
+        <thead><tr><th>Месяц</th><th>Размещено</th><th>Потрачено</th><th>по счетам</th><th>без счёта</th></tr></thead>
+        <tbody>
+          {% for month, placed, spent, invoiced, other in s.rows %}
+          <tr><td>{{ month }}</td><td>{{ placed }}</td><td>{{ spent }}</td><td>{{ invoiced }}</td><td>{{ other }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% if s.no_date %}<span class="seo-sub">Опубликовано без даты: {{ s.no_date }} — в месяцы не попали.</span>{% endif %}
+    {% if s.approx %}<span class="seo-sub">≈ — суммы не в евро пересчитаны по последнему курсу ЕЦБ.</span>{% endif %}
+  </div>
+</section>
+{% endwith %}

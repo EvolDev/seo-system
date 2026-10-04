@@ -73,6 +73,38 @@ def _short_text_input(db_field: "models.Field[Any, Any]", kwargs: dict[str, Any]
 
 # Панель записи и окна просят у сервера только содержимое — этим заголовком.
 PARTIAL_HEADER = "X-Seo-Partial"
+# Строка одной записи (seo/panel.js): запись в панели сохранили — строке списка
+# нужны свежие ячейки, и быстро. Список с этим параметром отдаёт только её, мимо
+# фильтров и поиска, с теми же колонками, а заголовком ROW_MATCH_HEADER — подходит
+# ли она ещё под фильтры (нет — строка остаётся блёклой).
+ROW_PARAM = "_seo_row"
+ROW_MATCH_HEADER = "X-Seo-Row-Match"
+_ROW_ATTR = "seo_row"
+
+
+def _row_changelist(base: Any, row: int) -> Any:
+    """Список одной записи на основе класса списка админки (свои колонки и итоги).
+
+    Класс списка у каждой админки свой (ChangeList и наследники), поэтому
+    подкласс строится на лету, а типы — Any.
+    """
+
+    class RowChangeList(base):  # type: ignore[misc]
+        seo_row_matches: bool | None = None
+
+        def get_queryset(self, request: HttpRequest, exclude_parameters: Any = None) -> Any:
+            # Отбор списка — только чтобы узнать, подходит ли запись под фильтры.
+            filtered = super().get_queryset(request, exclude_parameters)
+            self.seo_row_matches = filtered.filter(pk=row).exists()
+            # getattr: тип атрибута у класса на лету mypy не выводит.
+            root: Any = getattr(self, "root_queryset")  # noqa: B009
+            one = self.apply_select_related(root.filter(pk=row).order_by("pk"))
+            # «Всего N» список считает по root_queryset — пусть считает одну строку,
+            # а не всю таблицу: ответ нужен быстрый.
+            self.root_queryset = one
+            return one
+
+    return RowChangeList
 
 
 def is_partial(request: HttpRequest) -> bool:
@@ -92,6 +124,55 @@ class ModelAdmin(_ModelAdmin):
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     # ---------- Панель записи ----------
+
+    def changelist_view(
+        self, request: HttpRequest, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        # Параметр строки — не фильтр: убираем его до списка, иначе Django
+        # принял бы его за условие отбора и сбросил фильтры с ?e=1.
+        row = request.GET.get(ROW_PARAM)
+        if row is None:
+            return super().changelist_view(request, extra_context)
+        query = request.GET.copy()
+        del query[ROW_PARAM]
+        query._mutable = False
+        request.GET = query  # type: ignore[assignment]
+        setattr(request, _ROW_ATTR, int(row) if row.isdigit() else 0)
+        response = super().changelist_view(request, extra_context)
+        changelist = (getattr(response, "context_data", None) or {}).get("cl")
+        matches = getattr(changelist, "seo_row_matches", None)
+        if matches is not None:
+            response[ROW_MATCH_HEADER] = "1" if matches else "0"
+        return response
+
+    def get_changelist_instance(self, request: HttpRequest) -> Any:
+        row = getattr(request, _ROW_ATTR, None)
+        if row is None:
+            return super().get_changelist_instance(request)
+        # Как штатный ModelAdmin.get_changelist_instance (Django 5.2), но класс
+        # списка — одной записи: та же выборка админки (аннотации колонок), без
+        # фильтров и поиска, без подсчёта всей таблицы.
+        list_display = self.get_list_display(request)
+        list_display_links = self.get_list_display_links(request, list_display)
+        if self.get_actions(request):
+            list_display = ["action_checkbox", *list_display]
+        changelist_class = _row_changelist(self.get_changelist(request), row)
+        return changelist_class(
+            request,
+            self.model,
+            list_display,
+            list_display_links,
+            self.get_list_filter(request),
+            self.date_hierarchy,
+            self.get_search_fields(request),
+            self.get_list_select_related(request),
+            self.list_per_page,
+            self.list_max_show_all,
+            self.list_editable,
+            self,
+            self.get_sortable_by(request),
+            self.search_help_text,
+        )
 
     def in_panel(self, request: HttpRequest) -> bool:
         return self.panel and is_partial(request)

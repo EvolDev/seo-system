@@ -345,6 +345,8 @@ body.admin-interface .seo-run-btn:disabled { opacity: 0.5; cursor: not-allowed; 
 /* Главное действие — заливка. */
 body.admin-interface .seo-run-btn:not(.seo-btn),
 body.admin-interface .seo-btn.seo-btn-primary,
+body.admin-interface a.seo-btn.seo-btn-primary:link,
+body.admin-interface a.seo-btn.seo-btn-primary:visited,
 body.admin-interface .numericrangefilter .seo-btn.seo-btn-primary {
   border-color: var(--seo-accent);
   background: var(--seo-accent);
@@ -429,4 +431,25 @@ body.admin-interface .submit-row .seo-run-btn + .seo-btn { margin-left: 8px; }
   height: 14px;
   border-radius: 50%;
   border: 1px solid rgb(0 0 0 / 20%);
+}
+
+/* Цвета графиков (ADR-038, E1-14): размещения — фиолетовый; траты по счетам и без
+   счёта — пара «две группы». Проверены валидатором dataviz против фона карточек
+   (--darkened-bg); «Ahrefs — тёмная» — цвета «Google — тёмной», проверены на #323335. */
+body.admin-interface,
+html[data-palette="emerald"] body.admin-interface {
+  --seo-chart-placed: #4a3aa7;
+  --seo-chart-invoiced: #2a78d6;
+  --seo-chart-other: #1baf7a;
+}
+html[data-palette="apple-light"] body.admin-interface {
+  --seo-chart-placed: #b154e0;
+  --seo-chart-invoiced: #2281fd;
+  --seo-chart-other: #1aa3ba;
+}
+html[data-palette="google-dark"] body.admin-interface,
+html[data-palette="ahrefs"] body.admin-interface {
+  --seo-chart-placed: #ad5ffe;
+  --seo-chart-invoiced: #2178ee;
+  --seo-chart-other: #0ea1b5;
 }

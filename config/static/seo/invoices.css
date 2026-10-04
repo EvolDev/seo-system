@@ -1,0 +1,11 @@
+/* Счета продавцов (E1-14, ADR-055): размещения счёта в строке списка и
+   «Поделить поровну» под строками счёта. Пометки статуса — seo/offers.css. */
+.seo-invoice-site { white-space: nowrap; line-height: 1.6; }
+.seo-invoice-site .seo-sub { margin-left: 4px; }
+.seo-invoice-split { margin: 6px 0 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* «Заплачено» из счёта в форме размещения: сумма текстом и откуда она. */
+.seo-paid-invoice { line-height: 1.6; }
+/* Счета в карточке продавца: к оплате списком, заплачено, ссылки. */
+.seo-seller-invoices { line-height: 1.6; }
+.seo-seller-invoices ul.seo-status-list { margin: 2px 0 8px; }
+.seo-seller-invoice-links { margin-top: 6px; }

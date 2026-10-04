@@ -17,7 +17,14 @@ from django.utils import timezone
 
 from apps.keywords.models import Keyword
 from apps.observability.models import Check, CheckStatus, Performer
-from apps.placements.models import Placement, PlacementLink, PlacementStatus, PlacementStatusChange
+from apps.placements.models import (
+    Invoice,
+    InvoiceItem,
+    Placement,
+    PlacementLink,
+    PlacementStatus,
+    PlacementStatusChange,
+)
 from apps.sites.models import (
     ExchangeRate,
     MetricSource,
@@ -410,6 +417,24 @@ class TestWrite:
         placement.refresh_from_db()
         assert placement.price_paid_cents == 30000
         assert third.result is not None and third.result["runs"][0]["action"] == "replace"
+
+    def test_paid_from_invoice_not_replaced(self, clideo: Product) -> None:
+        # «Заплачено» из счёта пишет только счёт (E1-14, ADR-055): расхождение видно,
+        # «Заменить расходящиеся» его не трогает.
+        _write(_check(_upload(clideo, [TOMSGUIDE])))
+        placement = Placement.objects.get(site__domain="tomsguide.com")
+        assert placement.seller is not None
+        invoice = Invoice.objects.create(seller=placement.seller, amount_cents=31181)
+        InvoiceItem.objects.create(invoice=invoice, placement=placement, amount_cents=31181)
+        changed = {**TOMSGUIDE, "Итог цена": "300"}
+        upload = _check(_upload(clideo, [changed], name="clideo-2.csv"))
+        assert upload.summary is not None
+        conflict = upload.summary["conflicts"][0]
+        assert conflict["what"] == "заплачено"
+        assert conflict["base"].endswith("— из счёта")
+        _write(upload, "replace")
+        placement.refresh_from_db()
+        assert placement.price_paid_cents == 31181
 
 
 class TestOffers:

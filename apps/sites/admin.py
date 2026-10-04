@@ -31,7 +31,7 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, path, reverse
 from django.utils import timezone
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from rangefilter.filters import NumericRangeFilter
@@ -43,7 +43,8 @@ from apps.content.admin import (
 )
 from apps.content.domain_settings import gray_terms, gray_zones
 from apps.content.models import DomainSetting
-from apps.placements.models import Placement
+from apps.placements import invoices
+from apps.placements.models import Invoice, InvoiceStatus, Placement
 from apps.sites import ahrefs_domains, countries, gray_scan, offers
 from apps.sites import export as site_export
 from apps.sites.display import (
@@ -671,7 +672,11 @@ class ProductSiteAdmin(NoDeleteAdmin):
 
 @admin.register(Seller)
 class SellerAdmin(NoDeleteAdmin):
-    """Продавцы (ADR-041, ADR-043). Collaborator — тоже продавец, его заводит миграция."""
+    """Продавцы (ADR-041, ADR-043). Collaborator — тоже продавец, его заводит миграция.
+
+    Счета продавца (E1-14, ADR-055): в списке — к оплате и заплачено, в карточке —
+    неоплаченные счета и ссылки на все счета и на новый.
+    """
 
     panel = True
     list_display = (
@@ -680,13 +685,25 @@ class SellerAdmin(NoDeleteAdmin):
         "sites_count",
         "working_count",
         "last_price",
+        "due_cell",
+        "paid_cell",
         "metrics_trusted",
         "contacts",
     )
     list_editable = ("metrics_trusted",)
     search_fields = ("name",)
     fields = ("name", "currency", "contacts", "notes", "metrics_trusted", "is_collaborator")
-    readonly_fields = ("is_collaborator",)
+    readonly_fields = ("is_collaborator", "invoices_block")
+
+    class Media:
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {
+            "all": (Css("seo/offers.css"), Css("seo/status-history.css"), Css("seo/invoices.css"))
+        }
+
+    def get_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+        fields = tuple(super().get_fields(request, obj))
+        fields = tuple(field for field in fields if field != "invoices_block")
+        return (*fields, "invoices_block") if obj is not None else fields
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Seller]:
         # Счётчики одним запросом на весь список, а не запросом на строку.
@@ -698,10 +715,75 @@ class SellerAdmin(NoDeleteAdmin):
             .values("total")
         )
         queryset: models.QuerySet[Seller] = super().get_queryset(request)
+        # Счета — одним запросом на страницу, суммы по валютам считает Python.
+        live = Invoice.objects.exclude(status=InvoiceStatus.CANCELLED).only(
+            "seller_id", "status", "amount_cents", "currency"
+        )
         return queryset.annotate(
             sites_total=Count("prices__site", distinct=True),
             working_total=Subquery(working),
             last_price_at=Max("prices__checked_at"),
+        ).prefetch_related(models.Prefetch("invoices", queryset=live, to_attr="live_invoices"))
+
+    @admin.display(description="к оплате")
+    def due_cell(self, obj: Any) -> str:
+        summary = invoices.seller_money(obj.live_invoices)
+        if not summary.due_count:
+            return ""
+        return f"{invoices.sums_text(summary.due)} · счетов: {summary.due_count}"
+
+    @admin.display(description="заплачено по счетам")
+    def paid_cell(self, obj: Any) -> str:
+        return invoices.sums_text(invoices.seller_money(obj.live_invoices).paid)
+
+    @admin.display(description="счета")
+    def invoices_block(self, obj: Any) -> SafeString | str:
+        """Неоплаченные счета, сколько заплачено; ссылки на все счета и на новый (E1-14)."""
+        if obj is None or obj.pk is None:
+            return "—"
+        rows = list(
+            Invoice.objects.filter(seller=obj)
+            .exclude(status=InvoiceStatus.CANCELLED)
+            .order_by("issued_on", "pk")
+            .prefetch_related("items__placement__site")
+        )
+        summary = invoices.seller_money(rows)
+        due = [
+            (
+                reverse("admin:placements_invoice_change", args=[invoice.pk]),
+                f"{invoice.issued_on:%d.%m.%Y}",
+                offers.money(invoice.amount_cents, invoice.currency),
+                ", ".join(item.placement.site.domain for item in invoice.items.all()) or "—",
+            )
+            for invoice in rows
+            if invoice.status == InvoiceStatus.ISSUED
+        ]
+        all_url = reverse("admin:placements_invoice_changelist") + f"?seller__id__exact={obj.pk}"
+        new_url = reverse("admin:placements_invoice_add") + f"?seller={obj.pk}"
+        paid = invoices.sums_text(summary.paid) or "—"
+        return format_html(
+            '<div class="seo-seller-invoices">'
+            "<div>К оплате: <b>{}</b></div>{}"
+            "<div>Заплачено по счетам: <b>{}</b>{}</div>"
+            '<div class="seo-seller-invoice-links"><a href="{}">Все счета продавца</a>'
+            ' · <a href="{}" data-panel>Новый счёт</a></div></div>',
+            invoices.sums_text(summary.due) or "ничего",
+            format_html(
+                '<ul class="seo-status-list">{}</ul>',
+                format_html_join(
+                    "",
+                    '<li><a href="{}" data-panel>{} · {}</a> <span class="seo-sub">{}</span></li>',
+                    due,
+                ),
+            )
+            if due
+            else "",
+            paid,
+            format_html(' <span class="seo-sub">счетов: {}</span>', summary.paid_count)
+            if summary.paid_count
+            else "",
+            all_url,
+            new_url,
         )
 
     @admin.display(description="площадок с ценами", ordering="sites_total")
@@ -1479,8 +1561,9 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     def status_link(self, obj: ProductSiteLatest) -> SafeString:
         # Решение открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
         # скрипта — полной формой.
+        # data-seo-field — после записи в панели статус меняется здесь сразу.
         return format_html(
-            '<a href="{}" data-panel="{}" title="Сменить статус">{}</a>',
+            '<a href="{}" data-panel="{}" title="Сменить статус" data-seo-field="status">{}</a>',
             reverse("admin:sites_productsite_change", args=[obj.pk]),
             reverse("admin:sites_productsite_decision", args=[obj.pk]),
             obj.get_status_display(),

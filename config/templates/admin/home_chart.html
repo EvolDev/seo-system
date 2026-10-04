@@ -1,0 +1,52 @@
+{% comment %}
+График по месяцам года на главной (E1-14): столбики — ссылки на «Размещения» за
+месяц, подсказка — при наведении и фокусе, подписи значений — выборочно
+(apps/placements/home.py). Высоты — проценты от верха оси, без локализации:
+«33,3%» CSS не поймёт.
+{% endcomment %}
+{% load l10n %}
+{% localize off %}
+<figure class="seo-chart seo-chart-{{ kind }}">
+  <figcaption>
+    <span class="seo-chart-title">{{ title }}</span>
+    <span class="seo-sub">{{ sub }}</span>
+  </figcaption>
+  {# Строка под заголовком у обоих графиков: итог года и, у трат, легенда — оси на одной высоте. #}
+  <ul class="seo-legend">
+    {% if kind == "spent" %}
+    <li><span class="seo-key seo-key-invoiced"></span>по счетам — прямые продавцы</li>
+    <li><span class="seo-key seo-key-other"></span>без счёта — Collaborator и другие</li>
+    {% endif %}
+    <li class="seo-legend-total">за год: <b>{{ total }}</b></li>
+  </ul>
+  <div class="seo-chart-plot">
+    <div class="seo-chart-axis" aria-hidden="true">
+      {% with top=chart.ticks|last %}<span class="seo-tick-size">{{ top.0 }}</span>{% endwith %}
+      {% for label, pct in chart.ticks %}<span class="seo-tick" style="bottom: {{ pct }}%">{{ label }}</span>{% endfor %}
+    </div>
+    <div class="seo-chart-area">
+      {% for label, pct in chart.ticks %}<span class="seo-grid" style="bottom: {{ pct }}%"></span>{% endfor %}
+      {% if chart.empty %}<span class="seo-chart-empty">{{ empty }}</span>{% endif %}
+      {% for bar in chart.bars %}
+      <a class="seo-col{% if bar.current %} is-current{% endif %}" href="{{ bar.url }}"
+         aria-label="{{ bar.title }}: {{ bar.text }}">
+        <span class="seo-col-stack" style="height: {{ bar.pct }}%">
+          {% if kind == "spent" %}
+            {% for key, share, text in bar.parts %}<span class="seo-seg seo-seg-{{ key }}" style="height: {{ share }}%"></span>{% endfor %}
+          {% elif bar.value %}<span class="seo-seg seo-seg-placed" style="height: 100%"></span>{% endif %}
+        </span>
+        {% if bar.labeled %}<span class="seo-col-value" style="bottom: {{ bar.pct }}%">{{ bar.text }}</span>{% endif %}
+        <span class="seo-col-tip" role="tooltip">
+          <b>{{ bar.text }}</b> <span class="seo-sub">{{ bar.title }}</span>
+          {% for key, share, text in bar.parts %}
+          <span class="seo-tip-row"><span class="seo-line seo-line-{{ key }}"></span><b>{{ text }}</b>
+            {% if key == "invoiced" %}по счетам{% else %}без счёта{% endif %}</span>
+          {% endfor %}
+        </span>
+        <span class="seo-col-label">{{ bar.short }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</figure>
+{% endlocalize %}

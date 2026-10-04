@@ -340,10 +340,33 @@ def test_add_in_panel(admin_page: Page, live_server: LiveServer) -> None:
     assert same_document(page)
 
 
+def test_status_in_row_at_once(admin_page: Page, live_server: LiveServer, known: Site) -> None:
+    """Статус в строке меняется сразу после «Сохранить», не дожидаясь списка.
+
+    Фоновый запрос строки (_seo_row) подменён пустым ответом — ячеек из списка не
+    будет, а новый статус всё равно виден. Обрыв запроса не годится: браузер
+    пишет его в консоль ошибкой.
+    """
+    page = admin_page
+    page.route(
+        re.compile(r".*_seo_row=.*"),
+        lambda route: route.fulfill(status=200, content_type="application/json", body="{}"),
+    )
+    page.goto(f"{live_server.url}/admin/sites/productsitelatest/")
+    status = page.locator("#result_list a[title='Сменить статус']")
+    status.click()
+    panel = page.locator(PANEL)
+    panel.locator(".seo-choice-item", has_text="Просмотрено").click()
+    panel.locator("[data-panel-save]").click()
+    expect(panel).to_be_hidden()
+    expect(status).to_have_text("Просмотрено")
+
+
 def test_row_out_of_filter_stays_faded(
     admin_page: Page, live_server: LiveServer, known: Site
 ) -> None:
-    """Фильтр «Новая», поставили «Отбрасываю» — строка остаётся, блёклая (решение 03.10)."""
+    """Фильтр «Новая», поставили «Отбрасываю» — строка остаётся, блёклая (решение 03.10),
+    и статус в ней новый (просьба пользователя 04.10)."""
     page = admin_page
     page.goto(f"{live_server.url}/admin/sites/productsitelatest/?status__exact=new")
     mark(page)
@@ -356,6 +379,8 @@ def test_row_out_of_filter_stays_faded(
     row = page.locator("#result_list tbody tr", has_text="known.com")
     expect(row).to_have_class(re.compile(r"\bseo-row-stale\b"))
     expect(row).to_have_attribute("title", re.compile("не подходит под фильтры"))
+    # Блёклая, но со свежим статусом: строка пришла мимо фильтров (_seo_row).
+    expect(row.locator("a[title='Сменить статус']")).to_have_text("Отбрасываю")
     assert same_document(page)
 
 

@@ -1,0 +1,28 @@
+{% extends "admin/change_form.html" %}
+{% comment %}
+Счёт (E1-14, ADR-055): строки счёта — сразу после группы «Счёт». Django
+рисует строки после всех групп, поэтому группы after_items («Оплата»,
+«Комментарий») рисуются здесь после них. «Поделить поровну» очищает доли
+строк (seo/invoices.js): при записи сумма поделится поровну до цента.
+{% endcomment %}
+{% block field_sets %}
+{% for fieldset in adminform %}{% if fieldset.name not in after_items %}
+  {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
+{% endif %}{% endfor %}
+{% endblock %}
+
+{% block inline_field_sets %}
+{{ block.super }}
+{% if can_split %}
+<p class="seo-invoice-split">
+  <button type="button" class="seo-btn" data-split-evenly>Поделить поровну</button>
+  <span class="seo-sub">пустая доля — сумма счёта делится поровну между такими строками</span>
+</p>
+{% endif %}
+{% endblock %}
+
+{% block after_related_objects %}
+{% for fieldset in adminform %}{% if fieldset.name in after_items %}
+  {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
+{% endif %}{% endfor %}
+{% endblock %}

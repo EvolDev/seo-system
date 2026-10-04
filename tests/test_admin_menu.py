@@ -48,7 +48,7 @@ def test_admin_site_is_ours() -> None:
 def test_groups_follow_the_work(admin_client: Client) -> None:
     menu = _menu(admin_client)
     assert [group["name"] for group in menu] == ["Работа", "Справочники", "Настройки", "Служебное"]
-    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Ключи"]
+    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Счета", "Ключи"]
     assert _names(menu[1]) == [
         "Каталог площадок",
         "Продавцы",
@@ -99,7 +99,13 @@ def test_home_starts_with_work(admin_client: Client) -> None:
     SiteList.objects.create(name="Сентябрь 2026")
     response = admin_client.get(reverse("admin:index"))
     cards = response.context["home_cards"]
-    assert [card["name"] for card in cards] == ["Площадки", "Загрузки", "Размещения", "Ключи"]
+    assert [card["name"] for card in cards] == [
+        "Площадки",
+        "Загрузки",
+        "Размещения",
+        "Счета",
+        "Ключи",
+    ]
     assert cards[0]["url"] == reverse("admin:sites_productsitelatest_changelist")
     assert "Convertio, список «Сентябрь 2026»" in cards[0]["note"]
     # «Работа» — карточками; ниже — остальные группы, без повтора.
@@ -114,6 +120,7 @@ def test_home_without_products(admin_client: Client) -> None:
         ("", ""),
         ("0", "предложений ждут разбора"),
         ("", ""),
+        ("0", "к оплате"),
         ("", ""),
     ]
 

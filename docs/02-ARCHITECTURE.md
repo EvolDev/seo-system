@@ -70,6 +70,17 @@ Go остаётся в резерве ровно для одной задачи:
 на запрос, без очереди; `seo/soft-nav.js` сохраняет его, не уходя со
 страницы.
 
+Счета продавцов (E1-14, ADR-055) — `apps/placements`: модели `Invoice` и
+`InvoiceItem`, доли и «Заплачено» из счёта — `invoices.py` (единственный
+писатель суммы у размещения в счёте), экран — `invoice_admin.py`, выгрузка —
+`invoice_export.py`. «Счёт на
+отмеченные» в «Размещениях» открывает форму панелью через `seoPanel.open(url)`
+(`seo/invoices.js`). Лист «Счета» таблицы читает
+`apps/sites/importing/invoice_sheet.py`. Статистика на главной — сырой запрос
+`apps/placements/stats.py`, подписи и высоты столбиков — `home.py`, графики —
+HTML и CSS (`admin/home_chart.html`, `seo/home-stats.css`), цвета —
+переменные `--seo-chart-*` расцветок.
+
 Расширение браузера (`browser-extension/`, ADR-054) — единственный наш код
 вне сервера: Manifest V3 для Opera, Edge и Chrome, без разрешений. На странице
 Google, которую открыла кнопка карточки площадки, оно читает оценку «About N

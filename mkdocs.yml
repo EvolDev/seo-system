@@ -63,6 +63,8 @@ nav:
       - how-to/upload-ahrefs-refdomains.md
       - how-to/export-to-excel.md
       - how-to/check-gray-share.md
+      - how-to/invoices.md
+      - how-to/home-stats.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

@@ -18,6 +18,12 @@ from django.utils import timezone
 
 from apps.observability.models import TaskRun, TaskStatus
 from apps.sites.importing.apply import Importer, compare_copy
+from apps.sites.importing.invoice_sheet import (
+    INVOICES_REQUIRED,
+    INVOICES_SHEET,
+    import_invoices,
+    parse_invoices,
+)
 from apps.sites.importing.report import Report
 from apps.sites.importing.rows import (
     BASE_REQUIRED,
@@ -97,11 +103,17 @@ def _import(options: ImportOptions, report: Report) -> None:
         copy_sheet = None
         if COPY_SHEET in workbook.sheetnames:
             copy_sheet = read_sheet(workbook, COPY_SHEET, COPY_REQUIRED)
+        invoices_sheet = None
+        if INVOICES_SHEET in workbook.sheetnames:
+            invoices_sheet = read_sheet(workbook, INVOICES_SHEET, INVOICES_REQUIRED)
     sites = parse_base(base_sheet, report)
     keywords = parse_keywords(keywords_sheet, report)
     copy = parse_copy(copy_sheet, report) if copy_sheet else None
     if copy is None:
         report.note(f"Вкладки «{COPY_SHEET}» нет — сверка с ней не делалась")
+    invoice_rows = parse_invoices(invoices_sheet, report) if invoices_sheet else None
+    if invoice_rows is None:
+        report.note(f"Вкладки «{INVOICES_SHEET}» нет — счета не загружались")
 
     # transaction.atomic — всё внутри блока применяется целиком или никак:
     # исключение откатывает все записи, как BEGIN … ROLLBACK в SQL.
@@ -119,6 +131,11 @@ def _import(options: ImportOptions, report: Report) -> None:
             importer.compare_link_counts(keywords, saved_keywords)
         if copy is not None:
             compare_copy(copy, sites, report)
+        # Счета — после размещений: строка счёта ищет размещение по ссылке на статью.
+        if invoice_rows is not None:
+            import_invoices(
+                invoice_rows, product=importer.convertio, as_of=options.as_of, report=report
+            )
         if options.dry_run:
             transaction.set_rollback(True)
 

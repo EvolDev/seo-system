@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.14 от 04.10.2026 — счета продавцов (ADR-055)
 -- Версия 1.13 от 04.10.2026 — загрузки размещений и ссылающиеся домены Ahrefs (ADR-051)
 -- Версия 1.12 от 03.10.2026 — сохранённые наборы фильтров списков (ADR-050)
 -- Версия 1.11 от 03.10.2026 — история смены статусов площадки и размещения (ADR-049)
@@ -12,7 +13,7 @@
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 41 таблица и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
+-- (проверена применением на PostgreSQL 16: 43 таблицы и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -75,6 +76,8 @@ CREATE TYPE review_group AS ENUM
 -- не отметил, откуда.
 CREATE TYPE status_source AS ENUM
     ('panel','form','placement','import','upload','migration');
+-- Счёт продавца (ADR-055): выставлен, оплачен, отменён. Отменённый не считается.
+CREATE TYPE invoice_status AS ENUM ('issued','paid','cancelled');
 
 -- ---------- Блок 1. Площадки ----------
 
@@ -408,6 +411,41 @@ CREATE TABLE placement_status_changes (
     changed_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_placement_status_changes ON placement_status_changes(placement_id, changed_at DESC);
+
+-- Счета продавцов (ADR-055). Сделка напрямую — заявки с продавцом (placements),
+-- деньги по ним — счёт: одно размещение или пачка. Счета не удаляются: ошибка
+-- исправляется статусом «Отменён».
+CREATE TABLE invoices (
+    id            bigserial PRIMARY KEY,
+    seller_id     bigint NOT NULL REFERENCES sellers(id),
+    number        text,                                -- номер счёта у продавца
+    amount_cents  integer NOT NULL CHECK (amount_cents > 0),
+    currency      char(3) NOT NULL DEFAULT 'EUR',
+    pay_url       text,                                -- ссылка на оплату: счёт PayPal и т. п.
+    issued_on     date NOT NULL DEFAULT current_date,
+    status        invoice_status NOT NULL DEFAULT 'issued',
+    paid_on       date,                                -- у оплаченного из листа «Счета» может быть пусто
+    paid_by_id    integer REFERENCES auth_user(id),    -- кто оплатил
+    comment       text,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+-- Одна ссылка на оплату — один счёт; по ней импорт листа «Счета» находит счёт.
+CREATE UNIQUE INDEX invoices_pay_url_key ON invoices (pay_url) WHERE pay_url IS NOT NULL;
+CREATE INDEX idx_invoices_seller ON invoices(seller_id, status);
+
+-- Строка счёта: размещение и его доля в валюте счёта. Сумма долей — сумма
+-- счёта (проверяет форма). «Заплачено» размещения (price_paid_cents) — сумма
+-- его долей в неотменённых счетах, пишет только код счёта; в форме размещения
+-- оно тогда не правится. Строку убирают из счёта, пока он не оплачен.
+CREATE TABLE invoice_items (
+    id            bigserial PRIMARY KEY,
+    invoice_id    bigint NOT NULL REFERENCES invoices(id),
+    placement_id  bigint NOT NULL REFERENCES placements(id),
+    amount_cents  integer NOT NULL CHECK (amount_cents >= 0),
+    UNIQUE (invoice_id, placement_id)
+);
+CREATE INDEX idx_invoice_items_placement ON invoice_items(placement_id);
 
 CREATE TABLE keywords (
     id           bigserial PRIMARY KEY,

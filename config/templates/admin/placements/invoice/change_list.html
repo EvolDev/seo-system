@@ -1,0 +1,7 @@
+{% extends "admin/change_list.html" %}
+{% load seo_export %}
+{% comment %}«Счета»: над таблицей — окно выгрузки в Excel и CSV в виде листа «Счета» (E1-14).{% endcomment %}
+{% block object-tools-items %}
+  {{ block.super }}
+  {% export_tools cl %}
+{% endblock %}
