@@ -29,6 +29,7 @@ from apps.sites.models import Product, Seller, StatusSource, Upload, UploadKind,
 from apps.sites.rates import latest_rates
 from apps.sites.uploads import (
     ahrefs,
+    anchors,
     catalog,
     filters,
     placement_columns,
@@ -181,6 +182,16 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
                 + ". Нужна выгрузка в английском интерфейсе.",
             )
             return
+    elif upload.kind == UploadKind.ANCHORS:
+        # Память — по прошлым загрузкам анкоров (E3-05), как у размещений.
+        marks, questions = anchors.build_mapping(table.columns, anchors.remembered_mapping())
+        upload.columns = [
+            _column_json(c, marks[c.key].field, marks[c.key].confidence, marks[c.key].hint)
+            | {"ask": c.key in questions}
+            for c in table.columns
+        ]
+        upload.mapping = {key: guess.field.value for key, guess in marks.items()}
+        upload.currency = None
     elif upload.kind == UploadKind.PLACEMENTS:
         # Память — по прошлым загрузкам размещений, не у продавца (ADR-051).
         found, questions = placement_columns.build_mapping(
@@ -210,8 +221,8 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
 
 
 def has_columns_step(upload: Upload) -> bool:
-    """У загрузки есть шаг разметки колонок: прайс и файл размещений."""
-    return upload.kind in (UploadKind.PRICE_LIST, UploadKind.PLACEMENTS)
+    """У загрузки есть шаг разметки колонок: прайс, файл размещений и анкоров."""
+    return upload.kind in (UploadKind.PRICE_LIST, UploadKind.PLACEMENTS, UploadKind.ANCHORS)
 
 
 def needs_questions(upload: Upload) -> bool:
@@ -227,6 +238,8 @@ def field_choices(upload: Upload) -> list[tuple[str, str]]:
     """Поля, из которых выбирают на шаге разметки: у прайса и у файла размещений свои."""
     if upload.kind == UploadKind.PLACEMENTS:
         return [(f.value, label) for f, label in placement_columns.FIELD_LABELS.items()]
+    if upload.kind == UploadKind.ANCHORS:
+        return [(f.value, label) for f, label in anchors.FIELD_LABELS.items()]
     return [(f.value, label) for f, label in FIELD_LABELS.items()]
 
 
@@ -237,6 +250,9 @@ def mapping_errors(upload: Upload, mapping: Mapping[str, str]) -> list[str]:
         if upload.kind == UploadKind.PLACEMENTS:
             placement_fields = {key: PField(value) for key, value in mapping.items()}
             return placement_columns.validate_mapping(placement_fields, columns)
+        if upload.kind == UploadKind.ANCHORS:
+            anchor_fields = {key: anchors.AField(value) for key, value in _skip(mapping).items()}
+            return anchors.validate_mapping(anchor_fields, columns)
         fields = {key: Field(value) for key, value in mapping.items()}
     except ValueError:
         return ["Неизвестное поле в разметке — обновите страницу."]
@@ -250,6 +266,18 @@ def confirm_mapping(upload: Upload, mapping: Mapping[str, str], currency: str) -
     загрузке: память по ним собирается из прошлых загрузок (ADR-051).
     """
     errors = mapping_errors(upload, mapping)
+    if upload.kind == UploadKind.ANCHORS:
+        # Денег в файле анкоров нет — валюта не нужна.
+        if errors:
+            return errors
+        upload.mapping = _skip(mapping)
+        upload.columns = [
+            column
+            | {"field": upload.mapping.get(column["key"], anchors.AField.SKIP.value), "ask": False}
+            for column in upload.columns or []
+        ]
+        upload.save(update_fields=["mapping", "columns"])
+        return []
     currency = currency.strip().upper()
     if currency not in latest_rates():
         errors.append(
@@ -321,6 +349,9 @@ def check(upload_id: int) -> None:
         return
     if upload.kind == UploadKind.REF_DOMAINS:
         _check_refdomains(upload)
+        return
+    if upload.kind == UploadKind.ANCHORS:
+        _check_anchors(upload)
         return
     try:
         table, parsed, unknown = parse(upload)
@@ -397,6 +428,9 @@ def write(
             return
         if upload.kind == UploadKind.REF_DOMAINS:
             _write_refdomains(upload)
+            return
+        if upload.kind == UploadKind.ANCHORS:
+            _write_anchors(upload)
             return
         try:
             table, parsed, unknown = parse(upload)
@@ -595,6 +629,60 @@ def _write_refdomains(upload: Upload) -> None:
     )
 
 
+def _skip(mapping: Mapping[str, str]) -> dict[str, str]:
+    """У анкоров «прочих данных» нет: колонка без поля — «не загружать»."""
+    return {
+        key: anchors.AField.SKIP.value if value == "extra" else value
+        for key, value in mapping.items()
+    }
+
+
+def anchors_plan(upload: Upload) -> anchors.AnchorPlan:
+    """Файл анкоров → план по свежему состоянию базы: сводка и запись строят его одинаково."""
+    table = _table(upload, header_row=upload.header_row)
+    mapping = {key: anchors.AField(value) for key, value in (upload.mapping or {}).items()}
+    parsed = anchors.Parsed()
+    anchors.parse_anchors(table, mapping, parsed)
+    anchors.read_shares(file_path(upload), parsed)
+    return anchors.build_plan(parsed, upload.get_product())
+
+
+def _check_anchors(upload: Upload) -> None:
+    try:
+        plan = anchors_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    upload.summary = plan.summary()
+    written = bool((upload.result or {}).get("runs"))
+    upload.status = UploadStatus.DONE if written else UploadStatus.CHECKED
+    upload.error = None
+    upload.save(update_fields=["summary", "status", "error"])
+    logger.info(
+        "анкоры проверены",
+        extra={"upload_id": upload.pk, "anchors": upload.summary["anchors"]},
+    )
+
+
+def _write_anchors(upload: Upload) -> None:
+    """Запись файла анкоров — внутри транзакции и блокировки `write`."""
+    try:
+        plan = anchors_plan(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    summary = plan.summary()
+    counts = anchors.write(plan)
+    run = {"action": Action.ALL.value, "at": timezone.now().isoformat(), "counts": counts}
+    upload.summary = summary
+    upload.result = {"counts": counts, "runs": [*(upload.result or {}).get("runs", []), run]}
+    upload.status = UploadStatus.DONE
+    upload.error = None
+    upload.written_at = timezone.now()
+    upload.save()
+    logger.info("анкоры записаны", extra={"upload_id": upload.pk, "counts": counts})
+
+
 def issues(upload: Upload) -> dict[str, Any]:
     """Отклоняли, дубли, ошибки, адреса — из сводки; что перезаписано в карточке — из записей."""
     data = dict(upload.summary or {})
@@ -636,8 +724,15 @@ def _table(upload: Upload, *, header_row: int | None) -> Table:
         UploadKind.AHREFS_BATCH: ahrefs.looks_like_batch,
         UploadKind.PLACEMENTS: placement_columns.looks_like_placements_header,
         UploadKind.REF_DOMAINS: refdomains.looks_like_refdomains,
+        UploadKind.ANCHORS: anchors.looks_like_anchors_header,
     }.get(UploadKind(upload.kind), looks_like_header)
-    return read_table(file_path(upload), header_row=header_row, is_header=is_header)
+    # В книге анкоров нужный лист — не первый: берём тот, где узнаётся заголовок.
+    return read_table(
+        file_path(upload),
+        header_row=header_row,
+        is_header=is_header,
+        pick_sheet=upload.kind == UploadKind.ANCHORS,
+    )
 
 
 def _mapping(upload: Upload) -> dict[str, Field]:

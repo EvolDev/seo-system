@@ -3,9 +3,9 @@ title: Пороги и ориентиры
 description: Текущие числа, на которые опирается система, — зоны метрик, ценовой ориентир, лимиты проверок.
 section: reference
 status: draft
-tasks: [E1-01, E1-02, E1-05, E5-02, E2-03, E1-08, E1-09, E2-06]
-updated: 2026-10-04
-screens: [site_card, audit_queue, product_card, settings, upload_review, upload_new]
+tasks: [E1-01, E1-02, E1-05, E5-02, E2-03, E1-08, E1-09, E2-06, E3-05]
+updated: 2026-10-05
+screens: [site_card, audit_queue, product_card, settings, upload_review, upload_new, placement_card, anchors]
 tags: [пороги, настройки]
 ---
 
@@ -120,7 +120,17 @@ pills, xanax. Google читает только первые 32 слова зап
 раньше, чем в 06:00 следующего срока. Как пользоваться —
 [Как проверить индексацию статьи](../how-to/check-indexation.md).
 
-## Анкоры
+## Анкоры {#anchors}
+
+Рекомендации анкоров в размещении — настройка **ANCHOR_RECOMMEND** в разделе
+**Настройки** ([Анкоры продукта и доли](anchors.md#recommendations)):
+
+| Что | Значение | Поле настройки |
+|---|---|---|
+| Анкоров в списке «Рекомендуем» | 10 | `limit` |
+| Ключ «уже в топе» — не предлагается | позиции 1–3 | `skip_top` |
+
+Подбор под площадку (будет позже):
 
 | Что | Значение |
 |---|---|

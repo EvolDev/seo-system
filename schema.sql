@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.17 от 05.10.2026 — анкоры продукта: доли типов страниц и стран, безанкорка (ADR-059)
 -- Версия 1.16 от 05.10.2026 — свёрнутые разделы карточки площадки у пользователя (ADR-058)
 -- Версия 1.15 от 05.10.2026 — рабочий продукт пользователя (ADR-057)
 -- Версия 1.14 от 04.10.2026 — счета продавцов (ADR-055)
@@ -15,7 +16,7 @@
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 43 таблицы и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
+-- (проверена применением на PostgreSQL 16: 46 таблиц и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -69,7 +70,7 @@ CREATE TYPE placement_type AS ENUM ('guest_post','link_insertion');
 CREATE TYPE review_verdict AS ENUM ('accepted','needs_revision','rejected');
 -- Загрузка файла (ADR-044): что за файл, где он в работе, вкладка разбора.
 CREATE TYPE upload_kind AS ENUM
-    ('price_list','collaborator_catalog','ahrefs_batch','placements','ahrefs_refdomains');
+    ('price_list','collaborator_catalog','ahrefs_batch','placements','ahrefs_refdomains','anchors');
 CREATE TYPE upload_status AS ENUM ('new','checking','checked','writing','done','failed');
 CREATE TYPE review_group AS ENUM
     ('cheaper','changed','new','rejected','pricier','other_service','same');
@@ -308,7 +309,7 @@ CREATE TABLE uploads (
     created_at    timestamptz NOT NULL DEFAULT now(),
     written_at    timestamptz,
     CONSTRAINT uploads_seller_check
-        CHECK (seller_id IS NOT NULL OR kind IN ('ahrefs_batch','placements','ahrefs_refdomains')),
+        CHECK (seller_id IS NOT NULL OR kind IN ('ahrefs_batch','placements','ahrefs_refdomains','anchors')),
     CONSTRAINT uploads_product_check
         CHECK (product_id IS NOT NULL OR kind IN ('price_list','collaborator_catalog','ahrefs_batch'))
 );
@@ -460,9 +461,34 @@ CREATE TABLE keywords (
     page_type    text,                     -- колонка Type: «Главная», «Video (xxx-yyy)»…
     anchor_type  anchor_type,
     is_active    boolean NOT NULL DEFAULT true,
+    share        numeric(5,2),              -- доля внутри группы, %: у безанкорного — из листа безанкорки
     UNIQUE (product_id, keyword)
 );
 CREATE INDEX idx_keywords_tool ON keywords(tool) WHERE is_active;
+
+-- Целевые доли анкоров продукта (ADR-059), проценты: 15 — это 15%.
+-- Тип страниц: доля ссылок на страницы типа и как делить их внутри типа.
+CREATE TABLE page_type_shares (
+    id           bigserial PRIMARY KEY,
+    product_id   bigint NOT NULL REFERENCES products(id),
+    page_type    text NOT NULL,
+    target_pct   numeric(5,2),
+    exact_pct    numeric(5,2),
+    diluted_pct  numeric(5,2),
+    naked_pct    numeric(5,2),
+    position     smallint NOT NULL DEFAULT 0,
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (product_id, page_type)
+);
+-- Страна размещений; country пусто — «остальные».
+CREATE TABLE country_shares (
+    id           bigserial PRIMARY KEY,
+    product_id   bigint NOT NULL REFERENCES products(id),
+    country      char(2),
+    target_pct   numeric(5,2) NOT NULL,
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    UNIQUE NULLS NOT DISTINCT (product_id, country)
+);
 
 CREATE TABLE placement_links (
     id                      bigserial PRIMARY KEY,
@@ -865,7 +891,11 @@ SELECT
       WHERE kp.keyword_id = k.id AND kp.country = 'US'
       ORDER BY checked_at DESC LIMIT 1) AS last_position,
     COUNT(pl.id) FILTER (WHERE p.status = 'published') AS links_placed,
-    COUNT(pl.id) FILTER (WHERE p.status IN ('planned','ordered','writing','review')) AS links_waiting
+    COUNT(pl.id) FILTER (WHERE p.status IN ('planned','ordered','writing','review')) AS links_waiting,
+    k.global_volume,
+    k.page_type,
+    k.anchor_type::text AS anchor_type,
+    k.share
 FROM keywords k
 LEFT JOIN placement_links pl ON pl.keyword_id = k.id
 LEFT JOIN placements p ON p.id = pl.placement_id

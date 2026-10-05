@@ -1,0 +1,331 @@
+/* Анкоры продукта (E3-05, ADR-059): страница «Анкоры», блок над ссылками
+   размещения, поле анкора с поиском, окно «Новый анкор».
+   Цвета — переменные расцветок (admin-palettes.css) и offers.css: зелёный —
+   по цели и «размещено», синий — «ждут», красный — недобор, жёлтый — перебор. */
+
+.seo-anchor-placed { color: var(--seo-down, #17803a); font-weight: 600; }
+.seo-anchor-waiting { color: var(--seo-info, #2a65a8); font-weight: 600; }
+.seo-anchor-zero { color: var(--body-quiet-color, #999); }
+.seo-anchor-pos { font-variant-numeric: tabular-nums; }
+.seo-anchor-url { color: var(--body-quiet-color, #666); font-size: 0.8125rem; }
+#result_list td .seo-anchor-name { font-weight: 600; }
+
+/* Полоска «цель / факт»: заливка — факт, чёрточка — цель. */
+.seo-bullet {
+  position: relative;
+  display: inline-block;
+  width: 140px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--darkened-bg, #f0f0f0);
+  vertical-align: middle;
+}
+.seo-bullet i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 5px;
+  background: var(--seo-down, #17803a);
+}
+.seo-bullet-under i { background: var(--seo-up, #c4302b); }
+.seo-bullet-over i { background: var(--seo-mark, #8a5a00); }
+.seo-bullet-none i { background: var(--body-quiet-color, #999); }
+.seo-bullet b {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--body-fg, #333);
+}
+.seo-bullet-note { margin-left: 8px; font-size: 0.75rem; white-space: nowrap; }
+.seo-bullet-note-under { color: var(--seo-up, #c4302b); }
+.seo-bullet-note-over { color: var(--seo-mark, #8a5a00); }
+.seo-bullet-note-ok { color: var(--seo-down, #17803a); }
+
+/* ---------- Страница «Анкоры» ---------- */
+
+.seo-anchors { display: flex; flex-direction: column; gap: 16px; margin: 0 0 20px; }
+.seo-anchors .seo-sub { color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+/* Безанкорка длинная — своя прокрутка, список анкоров не уезжает далеко вниз. */
+.seo-anchors-scroll { max-height: 380px; overflow-y: auto; }
+.seo-anchors-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--darkened-bg, #f5f5f7) !important; }
+.seo-anchors-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin-top: -8px; }
+body.admin-interface .seo-anchors-title {
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: var(--body-fg, #333);
+  font-size: 1.25rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.seo-anchors-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.seo-anchors-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 0; }
+.seo-anchors-tiles > div { padding: 10px 12px; border-radius: 8px; background: var(--darkened-bg, #f5f5f7); }
+.seo-anchors-tiles dt {
+  margin: 0 0 2px;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.seo-anchors-tiles dd { margin: 0; font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.seo-anchors-block { padding: 14px 16px; border-radius: 12px; background: var(--darkened-bg, #f5f5f7); }
+.seo-anchors-block > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; cursor: pointer; list-style: none; }
+.seo-anchors-block > summary::-webkit-details-marker { display: none; }
+.seo-anchors-block > summary::before { content: "▾"; color: var(--body-quiet-color, #666); }
+.seo-anchors-block:not([open]) > summary::before { content: "▸"; }
+body.admin-interface .seo-anchors-block h3 {
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: var(--body-fg, #333);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.seo-anchors-block[open] > summary { margin-bottom: 10px; }
+.seo-anchors-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+
+.seo-anchors .seo-anchors-table { width: 100%; border-collapse: collapse; background: none; font-size: 0.8125rem; }
+.seo-anchors .seo-anchors-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline-color, #ddd);
+  background: none;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.seo-anchors .seo-anchors-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline-color, #ddd);
+  background: none;
+  vertical-align: middle;
+}
+.seo-anchors .seo-anchors-table tfoot td { border-bottom: 0; color: var(--body-quiet-color, #666); }
+.seo-anchors .seo-num-col { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.seo-anchors .seo-bar-col { white-space: nowrap; }
+.seo-anchors-warn b { color: var(--seo-up, #c4302b); }
+
+/* Доля — поле прямо в ячейке. */
+.seo-share { display: inline-flex; align-items: center; gap: 2px; }
+.seo-share span { color: var(--body-quiet-color, #666); }
+body.admin-interface .seo-share-input {
+  width: 4.2em;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--body-fg, #333);
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+body.admin-interface .seo-share-input:hover { border-color: var(--border-color, #ccc); }
+body.admin-interface .seo-share-input:focus {
+  border-color: var(--seo-accent, #2a65a8);
+  background: var(--body-bg, #fff);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--seo-accent, #2a65a8) 20%, transparent);
+}
+.seo-share-input.seo-share-busy { opacity: 0.5; }
+.seo-share-input.seo-share-saved { animation: seo-anchor-flash 1.2s ease-out; }
+
+/* ---------- Блок «Анкоры продукта» в размещении ---------- */
+
+.seo-anchor-block {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 12px;
+  background: var(--darkened-bg, #f5f5f7);
+}
+.seo-anchor-block-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 10px; }
+body.admin-interface .seo-anchor-block-head h2 {
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: var(--body-fg, #333);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.seo-anchor-block-totals { font-size: 0.8125rem; color: var(--body-medium-color, #444); }
+.seo-anchor-block-all { margin-left: auto; font-size: 0.8125rem; }
+/* Блок не раздвигает панель: ширину задают поля формы (seo/panel.css, E9-11). */
+.seo-panel-body .seo-anchor-block { contain: inline-size; }
+.seo-anchor-block-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 24px; }
+body.admin-interface .seo-anchor-block h3 {
+  margin: 0 0 8px;
+  padding: 0;
+  background: none;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.seo-anchor-block h3 .seo-sub { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.seo-anchor-type { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.8125rem; }
+.seo-anchor-type .seo-bullet { width: 110px; }
+.seo-anchor-type-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seo-anchor-type-pct { white-space: nowrap; color: var(--body-quiet-color, #666); font-variant-numeric: tabular-nums; }
+.seo-anchor-type-pct b { color: var(--body-fg, #333); }
+.seo-anchor-picks ol { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; padding: 0; list-style: none; }
+.seo-anchor-picks li { list-style: none; padding: 0; }
+.seo-anchor-pick {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 8px;
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, background-color .15s;
+}
+.seo-anchor-pick:hover,
+.seo-anchor-pick:focus-visible { border-color: var(--seo-accent, #2a65a8); outline: none; }
+.seo-anchor-pick-n {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--seo-info-bg, #e7eff9);
+  color: var(--seo-info, #2a65a8);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.seo-anchor-pick-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seo-anchor-pick-text small { margin-left: 6px; color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-anchor-pick-meta { color: var(--body-quiet-color, #666); font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.seo-anchor-pick.seo-anchor-picked { opacity: 0.55; }
+/* Почему эти анкоры — одной строкой над группой одного типа страниц. */
+.seo-anchor-picks li.seo-anchor-pick-why { margin: 4px 0 0; color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-anchor-picks li.seo-anchor-pick-why:first-child { margin-top: 0; }
+.seo-anchor-pick.seo-anchor-picked .seo-anchor-pick-n { background: var(--seo-down-bg, #e3f3e8); color: var(--seo-down, #17803a); }
+
+/* ---------- Поле «Анкор» с поиском ---------- */
+
+.seo-picker { position: relative; display: inline-flex; align-items: center; width: 26em; max-width: 100%; vertical-align: middle; }
+body.admin-interface input.seo-picker-input {
+  width: 100%;
+  padding-right: 30px;
+  box-sizing: border-box;
+}
+.seo-picker-legacy input.seo-picker-input { color: var(--body-quiet-color, #666); font-style: italic; }
+.seo-picker-toggle {
+  position: absolute;
+  right: 4px;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.seo-picker-toggle::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border: solid var(--body-quiet-color, #888);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.seo-picker-toggle:hover { background: var(--darkened-bg, #f0f0f0); }
+/* Строка формы админки обрезает всё, что за ней (overflow: hidden), а у списков
+   в форме — отступ под подписи (form .aligned ul): выпадающему списку не нужно ни то, ни другое. */
+.form-row:has(.seo-picker) { overflow: visible; }
+form .aligned .seo-picker ul.seo-picker-list,
+.seo-picker ul.seo-picker-list { margin: 0; padding: 4px; }
+.seo-picker-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 320px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 10px;
+  background: var(--body-bg, #fff);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 22%);
+  list-style: none;
+}
+.seo-picker-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--body-fg, #333);
+  font-size: 0.8125rem;
+  list-style: none;
+  cursor: pointer;
+}
+.seo-picker-list li:hover,
+.seo-picker-list li.seo-picker-active { background: var(--darkened-bg, #f0f2f5); }
+.seo-picker-list li.seo-picker-current .seo-picker-name { font-weight: 600; color: var(--seo-accent-text, var(--link-fg)); }
+.seo-picker-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.seo-picker-meta { color: var(--body-quiet-color, #666); font-size: 0.75rem; white-space: nowrap; }
+.seo-picker-list li.seo-picker-add { color: var(--seo-accent-text, var(--link-fg)); font-weight: 600; border-top: 1px solid var(--hairline-color, #eee); border-radius: 0 0 6px 6px; }
+.seo-picker-list li.seo-picker-empty { color: var(--body-quiet-color, #666); cursor: default; }
+.seo-picker-list li.seo-picker-empty:hover { background: none; }
+
+.seo-anchor-url-flash,
+.seo-anchor-row-flash { animation: seo-anchor-flash 1.2s ease-out; }
+@keyframes seo-anchor-flash {
+  from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--seo-down, #17803a) 45%, transparent); }
+  to { box-shadow: 0 0 0 3px transparent; }
+}
+
+/* ---------- Окно «Новый анкор» ---------- */
+
+.seo-anchor-dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 14px;
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 35%);
+}
+.seo-anchor-dialog::backdrop { background: rgb(0 0 0 / 40%); }
+.seo-anchor-dialog-body { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; }
+body.admin-interface .seo-anchor-dialog h2 {
+  margin: 0 0 4px;
+  padding: 0;
+  background: none;
+  color: var(--body-fg, #333);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.seo-anchor-dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8125rem; font-weight: 600; }
+.seo-anchor-dialog label .seo-sub { font-weight: 400; }
+body.admin-interface .seo-anchor-dialog input,
+body.admin-interface .seo-anchor-dialog select { width: 100%; box-sizing: border-box; font-weight: 400; }
+.seo-anchor-dialog-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--seo-up-bg, #fbe9e8); color: var(--seo-up, #c4302b); font-size: 0.8125rem; }
+.seo-anchor-dialog-buttons { display: flex; gap: 8px; margin-top: 4px; }

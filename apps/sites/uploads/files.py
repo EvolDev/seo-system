@@ -16,7 +16,7 @@ import datetime as dt
 import io
 import re
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -117,13 +117,28 @@ def show(value: object) -> str:
     return str(value).strip()
 
 
-def read_rows(path: Path) -> list[tuple[object, ...]]:
-    """Все строки первого непустого листа xlsx или файла csv, как есть."""
+SheetRows = list[tuple[object, ...]]
+
+
+def read_rows(path: Path, pick: Callable[[SheetRows], bool] | None = None) -> SheetRows:
+    """Все строки листа xlsx или файла csv, как есть.
+
+    Лист — первый, который узнаёт `pick` (в книге анкоров нужный лист —
+    четвёртый); не узнал ни один или `pick` нет — первый непустой.
+    """
     if not path.is_file():
         raise FileError(f"Файл не найден: {path.name}")
     suffix = path.suffix.lower()
     if suffix in (".xlsx", ".xlsm"):
-        return _read_xlsx(path)
+        first: SheetRows | None = None
+        # Листы читаются по одному и дальше нужного не идут: в книге бывает
+        # по 45 000 строк на листе.
+        for _, rows in _iter_sheets(path):
+            if pick is None or pick(rows):
+                return rows
+            if first is None:
+                first = rows
+        return first or []
     if suffix in (".csv", ".txt", ".tsv"):
         return _read_csv(path.read_bytes())
     raise FileError(f"Формат «{suffix or path.name}» не поддерживается — нужен xlsx или csv.")
@@ -134,6 +149,7 @@ def read_table(
     *,
     header_row: int | None = None,
     is_header: Callable[[Sequence[str]], bool] | None = None,
+    pick_sheet: bool = False,
 ) -> Table:
     """Таблица файла. Строка заголовков — заданная или найденная сама.
 
@@ -141,7 +157,8 @@ def read_table(
     колонка «площадка» по словарю синонимов). Не узнал ни одну строку —
     берётся первая строка хотя бы с двумя непустыми ячейками.
     """
-    rows = read_rows(path)
+    pick = _recognized(is_header) if pick_sheet and is_header is not None else None
+    rows = read_rows(path, pick)
     if not any(not is_blank(cell) for row in rows for cell in row):
         raise FileError("Файл пустой.")
     if header_row is None:
@@ -229,7 +246,27 @@ def _columns(header_cells: Sequence[object], data: Sequence[Row], width: int) ->
     return tuple(columns)
 
 
-def _read_xlsx(path: Path) -> list[tuple[object, ...]]:
+def _recognized(is_header: Callable[[Sequence[str]], bool]) -> Callable[[SheetRows], bool]:
+    """Лист узнан: в первых строках есть строка заголовков, которую узнаёт `is_header`."""
+
+    def pick(rows: SheetRows) -> bool:
+        for cells in rows[:HEADER_SEARCH_ROWS]:
+            texts = [show(cell) for cell in cells if not is_blank(cell)]
+            if len(texts) >= 2 and is_header(texts):
+                return True
+        return False
+
+    return pick
+
+
+def read_sheets(path: Path) -> list[tuple[str, SheetRows]]:
+    """Непустые листы книги: название и строки. CSV — один лист без названия."""
+    if path.suffix.lower() not in (".xlsx", ".xlsm"):
+        return [("", read_rows(path))]
+    return list(_iter_sheets(path))
+
+
+def _iter_sheets(path: Path) -> Iterator[tuple[str, SheetRows]]:
     try:
         with warnings.catch_warnings():
             # Проверку данных и условное форматирование openpyxl не читает и
@@ -240,12 +277,15 @@ def _read_xlsx(path: Path) -> list[tuple[object, ...]]:
         raise FileError(f"Не удалось открыть xlsx: {error}") from error
     try:
         for sheet in workbook.worksheets:
-            rows: list[tuple[object, ...]] = [
-                tuple(_cell_value(cell) for cell in row) for row in sheet.iter_rows()
-            ]
+            # Лист в режиме «только чтение» разбирается при обходе — там же
+            # openpyxl и предупреждает; глушим на время чтения листа, не дольше.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                rows: SheetRows = [
+                    tuple(_cell_value(cell) for cell in row) for row in sheet.iter_rows()
+                ]
             if any(not is_blank(cell) for row in rows for cell in row):
-                return rows
-        return []
+                yield sheet.title, rows
     finally:
         workbook.close()
 

@@ -1,0 +1,114 @@
+{% load l10n %}
+{% comment %}
+Шапка «Анкоров» продукта (E3-05): контекст page — anchor_views.page_context.
+Доли правятся прямо в таблице: поле с data-share уходит POST-ом при смене
+значения (seo/anchors.js), после записи список перечитывается на месте.
+{% endcomment %}
+<section class="seo-anchors" data-anchors-page data-share-url="{{ page.share_url }}" data-product="{{ page.product.pk|unlocalize }}">
+  <div class="seo-anchors-top">
+    <div class="seo-anchors-actions">
+      {% if page.can_add %}<button type="button" class="seo-btn seo-btn-primary" data-anchor-new data-product="{{ page.product.pk|unlocalize }}">＋ Новый анкор</button>{% endif %}
+      <a class="seo-btn" href="{{ page.upload_url }}">Загрузить файл анкоров</a>
+    </div>
+  </div>
+
+  <dl class="seo-anchors-tiles">
+    <div><dt>Ключей</dt><dd>{{ page.keys }}</dd></div>
+    <div><dt>Безанкорных</dt><dd>{{ page.naked_count }}</dd></div>
+    <div><dt>Размещено</dt><dd class="seo-anchor-placed">{{ page.data.placed }}</dd></div>
+    <div><dt>Ждут</dt><dd class="seo-anchor-waiting">{{ page.data.waiting }}</dd></div>
+    <div title="Ссылки, у которых анкор не из списка: старые «Read more», адрес вместо ключа"><dt>Без анкора из списка</dt><dd>{{ page.data.loose_placed|add:page.data.loose_waiting }}</dd></div>
+  </dl>
+
+  <details class="seo-anchors-block" open>
+    <summary><h3>Доли по типам страниц</h3><span class="seo-sub">цель — сколько ссылок вести на страницы типа; факт — по размещённым и ждущим</span></summary>
+    {% if page.types %}
+    <div class="seo-table-wrap">
+      <table class="seo-anchors-table">
+        <thead>
+          <tr>
+            <th>Тип страницы</th>
+            <th class="seo-num-col">Цель</th>
+            <th class="seo-num-col">Размещено</th>
+            <th class="seo-num-col">Ждут</th>
+            <th class="seo-num-col">Всего</th>
+            <th class="seo-bar-col">Цель / факт</th>
+            <th class="seo-num-col" title="Доля прямых анкоров внутри типа">Прямой</th>
+            <th class="seo-num-col" title="Доля разбавленных анкоров внутри типа">Разбавл.</th>
+            <th class="seo-num-col" title="Доля безанкорных внутри типа">Безанкор</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in page.types %}
+          <tr>
+            <td><b>{{ row.stat.page_type }}</b></td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="target" value=row.target label="Цель" %}</td>
+            <td class="seo-num-col">{{ row.stat.placed }} <span class="seo-sub">{{ row.placed_pct }}</span></td>
+            <td class="seo-num-col">{{ row.stat.waiting }} <span class="seo-sub">{{ row.waiting_pct }}</span></td>
+            <td class="seo-num-col"><b>{{ row.total_pct }}</b></td>
+            <td class="seo-bar-col">
+              <div class="seo-bullet seo-bullet-{{ row.state }}" title="Факт {{ row.total_pct }}{% if row.target %}, цель {{ row.target }}%{% endif %}">
+                <i style="width: {{ row.fact_width }}%"></i>{% if row.target %}<b style="left: {{ row.target_left }}%"></b>{% endif %}
+              </div>
+              <span class="seo-bullet-note seo-bullet-note-{{ row.state }}">{{ row.gap_text }}</span>
+            </td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="exact" value=row.exact label="Прямой" %}</td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="diluted" value=row.diluted label="Разбавленный" %}</td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="naked" value=row.naked label="Безанкор" %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        {% if page.target_sum %}
+        <tfoot><tr><td>Сумма целей</td><td class="seo-num-col {% if not page.target_sum_ok %}seo-anchors-warn{% endif %}"><b>{{ page.target_sum }}</b></td><td colspan="7" class="seo-sub">{% if not page.target_sum_ok %}не 100% — рекомендации всё равно считаются, но доли не сходятся{% endif %}</td></tr></tfoot>
+        {% endif %}
+      </table>
+    </div>
+    {% else %}
+    <p class="seo-sub">Типов страниц нет: у анкоров не заполнен тип (Type), долей нет. Загрузите файл анкоров с листом «Распределение по типам страниц».</p>
+    {% endif %}
+  </details>
+
+  <div class="seo-anchors-pair">
+    <details class="seo-anchors-block" open>
+      <summary><h3>Безанкорка</h3><span class="seo-sub">бренд, адрес, нейтральные слова — доля внутри безанкорки</span></summary>
+      {% if page.naked %}
+      <div class="seo-table-wrap seo-anchors-scroll">
+      <table class="seo-anchors-table">
+        <thead><tr><th>Анкор</th><th class="seo-num-col">Цель</th><th class="seo-num-col">Ссылок</th><th class="seo-num-col">Факт</th></tr></thead>
+        <tbody>
+        {% for row in page.naked %}
+          <tr>
+            <td>{{ row.anchor.keyword }}</td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="naked" id=row.anchor.id field="share" value=row.share label=row.anchor.keyword %}</td>
+            <td class="seo-num-col">{{ row.links|default:"—" }}</td>
+            <td class="seo-num-col">{{ row.fact }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot><tr><td>Сумма</td><td class="seo-num-col"><b>{{ page.naked_sum }}</b></td><td colspan="2"></td></tr></tfoot>
+      </table>
+      </div>
+      {% else %}
+      <p class="seo-sub">Безанкорных анкоров нет — придут из листа «Распределение безанкорки» или окном «＋ Новый анкор».</p>
+      {% endif %}
+    </details>
+
+    <details class="seo-anchors-block" open>
+      <summary><h3>Страны</h3><span class="seo-sub">целевая доля размещений по стране площадки</span></summary>
+      {% if page.countries %}
+      <table class="seo-anchors-table">
+        <thead><tr><th>Страна</th><th class="seo-num-col">Цель</th></tr></thead>
+        <tbody>
+        {% for row in page.countries %}
+          <tr><td>{{ row.flag }}{{ row.name }}</td><td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="country" id=row.row.pk field="target" value=row.share label=row.name %}</td></tr>
+        {% endfor %}
+        </tbody>
+        <tfoot><tr><td>Сумма</td><td class="seo-num-col {% if not page.country_sum_ok %}seo-anchors-warn{% endif %}"><b>{{ page.country_sum }}</b></td></tr></tfoot>
+      </table>
+      {% else %}
+      <p class="seo-sub">Долей по странам нет — придут из листа «Распределение по странам».</p>
+      {% endif %}
+    </details>
+  </div>
+  {% include "admin/keywords/anchor_dialog.html" with dialog=page product=page.product %}
+</section>

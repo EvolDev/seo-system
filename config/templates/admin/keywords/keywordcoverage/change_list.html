@@ -1,0 +1,11 @@
+{% extends "admin/change_list.html" %}
+{% comment %}
+«Анкоры» продукта (E3-05, ADR-059): над списком — итоги, доли «цель / факт» по
+типам страниц, безанкорка и страны (admin/keywords/anchors_head.html), кнопки
+«＋ Новый анкор» и «Загрузить файл анкоров». Список — лист «Распределение
+анкоров»: строка открывает анкор панелью справа.
+{% endcomment %}
+{% block object-tools %}
+  {% if anchors_page %}{% include "admin/keywords/anchors_head.html" with page=anchors_page %}{% endif %}
+  {{ block.super }}
+{% endblock %}

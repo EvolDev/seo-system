@@ -78,6 +78,8 @@ nav:
       - how-to/invoices.md
       - how-to/home-stats.md
       - how-to/working-product.md
+      - how-to/choose-anchor.md
+      - how-to/upload-anchors.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md
@@ -86,6 +88,7 @@ nav:
       - reference/background-tasks.md
       - reference/api-spend.md
       - reference/sellers-prices-notes.md
+      - reference/anchors.md
   - Как это устроено:
       - explanation/index.md
       - explanation/site-evaluation.md

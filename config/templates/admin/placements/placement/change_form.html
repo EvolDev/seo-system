@@ -10,6 +10,11 @@ seo/indexation.js отправляет её без перехода и обно�
 Группы формы (E9-11): ссылки статьи — сразу после «Публикации». Django
 рисует ссылки после всех групп, поэтому группы after_links («Проверки»,
 «Комментарий», «Служебное») рисуются здесь после них.
+
+Над ссылками — «Анкоры продукта» (E3-05): итоги, доли и рекомендации
+(admin/keywords/anchor_summary.html) и окно «Новый анкор». Поле анкора с
+поиском настраивает seo/anchors.js — скрипт в конце формы: в панели записи он
+выполняется, когда ссылки уже на месте.
 {% endcomment %}
 {% block object-tools-items %}
 {% if check_indexation_url %}
@@ -32,8 +37,15 @@ seo/indexation.js отправляет её без перехода и обно�
 {% endif %}{% endfor %}
 {% endblock %}
 
+{% block inline_field_sets %}
+{% if anchor_block %}<div data-anchor-block-holder>{% include "admin/keywords/anchor_summary.html" %}</div>{% endif %}
+{{ block.super }}
+{% endblock %}
+
 {% block after_related_objects %}
 {% for fieldset in adminform %}{% if fieldset.name in after_links %}
   {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
 {% endif %}{% endfor %}
+{% if anchor_dialog %}{% include "admin/keywords/anchor_dialog.html" with dialog=anchor_dialog product=anchor_product %}{% endif %}
+<script>window.seoAnchors && window.seoAnchors.init(document);</script>
 {% endblock %}

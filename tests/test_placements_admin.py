@@ -26,7 +26,9 @@ def site() -> Site:
 
 
 def _keyword(product: Product, text: str) -> Keyword:
-    return Keyword.objects.create(product=product, keyword=text, target_url="https://x")
+    return Keyword.objects.create(
+        product=product, keyword=text, target_url=f"https://convertio.co/{text.replace(' ', '-')}/"
+    )
 
 
 def _form(
@@ -48,14 +50,9 @@ def _form(
     return data
 
 
-def _link(anchor: str, keyword: Keyword | None, index: int) -> dict[str, str]:
-    return {
-        "anchor": anchor,
-        "target_url": "https://convertio.co/",
-        "keyword": str(keyword.pk) if keyword else "",
-        "anchor_type": "exact",
-        "link_index": str(index),
-    }
+def _link(keyword: Keyword | None, url: str = "") -> dict[str, str]:
+    """Ссылка формы (E3-05): анкор из списка и куда ведёт; пусто — адрес анкора."""
+    return {"keyword": str(keyword.pk) if keyword else "", "target_url": url}
 
 
 class TestCreate:
@@ -68,19 +65,61 @@ class TestCreate:
     ) -> None:
         mp3 = _keyword(convertio, "mp4 to mp3")
         video = _keyword(convertio, "online video converter")
-        links = [_link("mp4 to mp3", mp3, 1), _link("online video converter", video, 2)]
+        links = [_link(mp3), _link(video, "https://convertio.co/video-converter/")]
         response = admin_client.post(ADD_URL, _form(site, convertio, links))
         assert response.status_code == 302
         placement = Placement.objects.get()
         assert (placement.site, placement.product, placement.status) == (site, convertio, "ordered")
-        bound = placement.links.order_by("link_index").values_list("anchor", "keyword")
-        assert list(bound) == [("mp4 to mp3", mp3.pk), ("online video converter", video.pk)]
+        bound = placement.links.order_by("link_index").values_list(
+            "link_index", "anchor", "keyword", "target_url", "anchor_type"
+        )
+        assert list(bound) == [
+            # Адрес не вписали — подставился адрес анкора; номер — по порядку.
+            (1, "mp4 to mp3", mp3.pk, "https://convertio.co/mp4-to-mp3/", "exact"),
+            (
+                2,
+                "online video converter",
+                video.pk,
+                "https://convertio.co/video-converter/",
+                "exact",
+            ),
+        ]
+        # Свой адрес остался в ссылке, у анкора — прежний.
+        video.refresh_from_db()
+        assert video.target_url == "https://convertio.co/online-video-converter/"
+
+    def test_url_without_anchor_is_error(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        links = [_link(None, "https://convertio.co/")]
+        response = admin_client.post(ADD_URL, _form(site, convertio, links))
+        assert response.status_code == 200
+        errors = response.context["inline_admin_formsets"][0].formset.errors
+        assert errors[0]["keyword"] == ["Выберите анкор."]
+
+    def test_empty_slot_is_skipped(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        links = [_link(_keyword(convertio, "convert")), _link(None)]
+        assert admin_client.post(ADD_URL, _form(site, convertio, links)).status_code == 302
+        assert PlacementLink.objects.count() == 1
+
+    def test_form_without_old_fields(self, admin_client: Client, convertio: Product) -> None:
+        _keyword(convertio, "convert")
+        page = admin_client.get(ADD_URL).content.decode()
+        assert "data-anchor-select" in page and "data-anchor-url" in page
+        assert 'name="links-0-anchor"' not in page
+        assert 'name="links-0-link_index"' not in page
+        assert 'name="links-0-extraction_test_passed"' not in page
+        # Штатного «+» с окном Django у анкора больше нет.
+        assert "add_id_links-0-keyword" not in page
+        assert 'data-product="' in page and 'data-url="https://convertio.co/convert/"' in page
 
     def test_keyword_of_other_product_rejected(
         self, admin_client: Client, site: Site, convertio: Product
     ) -> None:
         clideo = Product.objects.create(name="Clideo", domain="clideo.com")
-        links = [_link("video editor", _keyword(clideo, "video editor"), 1)]
+        links = [_link(_keyword(clideo, "video editor"))]
         response = admin_client.post(ADD_URL, _form(site, convertio, links))
         assert response.status_code == 200
         errors = response.context["inline_admin_formsets"][0].formset.errors
@@ -105,28 +144,51 @@ class TestExisting:
         self._post(
             admin_client,
             link,
-            anchor="Convertio",
+            keyword="",
             target_url="https://convertio.co/",
             lost_at_0="2026-11-01",
             lost_at_1="00:00:00",
             char_offset="5",
         )
         link.refresh_from_db()
-        assert link.anchor == "Convertio"
+        # Старая ссылка без анкора из списка остаётся как была.
+        assert (link.anchor, link.keyword_id) == ("convertio.co", None)
         assert link.lost_at == dt.datetime(2026, 10, 1, tzinfo=dt.UTC)
         assert link.char_offset is None
+
+    def test_legacy_link_shown_and_replaced(
+        self, admin_client: Client, link: PlacementLink, convertio: Product
+    ) -> None:
+        url = reverse("admin:placements_placement_change", args=[link.placement_id])
+        page = admin_client.get(url).content.decode()
+        assert "«convertio.co» — нет в анкорах" in page
+        brand = Keyword.objects.create(
+            product=convertio,
+            keyword="Convertio",
+            target_url="https://convertio.co/",
+            anchor_type="branded",
+        )
+        self._post(admin_client, link, keyword=str(brand.pk), target_url="https://convertio.co/")
+        link.refresh_from_db()
+        assert (link.anchor, link.keyword_id) == ("Convertio", brand.pk)
+        assert link.anchor_type == "branded"
 
     def test_links_cannot_be_deleted(self, admin_client: Client, link: PlacementLink) -> None:
         url = reverse("admin:placements_placement_change", args=[link.placement_id])
         response = admin_client.get(url)
         assert response.context["inline_admin_formsets"][0].formset.can_delete is False
-        self._post(admin_client, link, anchor="x", target_url="https://x", DELETE="on")
+        self._post(admin_client, link, keyword="", target_url="https://x", DELETE="on")
         assert PlacementLink.objects.filter(pk=link.pk).exists()
 
 
 @pytest.mark.parametrize(
     ("app", "model"),
-    [("placements", "placement"), ("keywords", "keyword"), ("keywords", "keywordposition")],
+    [
+        ("placements", "placement"),
+        ("keywords", "keyword"),
+        ("keywords", "keywordposition"),
+        ("keywords", "keywordcoverage"),
+    ],
 )
 def test_delete_disabled(admin_client: Client, app: str, model: str) -> None:
     response = admin_client.get(reverse(f"admin:{app}_{model}_changelist"))

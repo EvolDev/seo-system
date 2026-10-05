@@ -1,0 +1,28 @@
+{% load l10n %}
+{% comment %}
+Окно «Новый анкор» (E3-05): анкор, куда ведёт и, если знают, тип страницы.
+Одно на странице: и в «Анкорах», и в форме размещения. Открывают кнопки с
+data-anchor-new (продукт — в data-product или поле продукта формы), записывает
+seo/anchors.js; добавленный анкор приходит событием seo:anchor-added.
+
+Окно стоит внутри формы размещения, поэтому своей формы у него нет, а у полей
+нет имён: с формой размещения они не уходят, значения собирает скрипт.
+{% endcomment %}
+<dialog class="seo-anchor-dialog" data-anchor-dialog data-add-url="{{ dialog.add_url }}" data-product="{{ product.pk|unlocalize }}" aria-labelledby="seo-anchor-dialog-title">
+  <div class="seo-anchor-dialog-body">
+    <h2 id="seo-anchor-dialog-title">Новый анкор <span class="seo-sub" data-anchor-dialog-product>{{ product.name }}</span></h2>
+    <label>Анкор<input type="text" data-dialog-field="keyword" maxlength="200" autocomplete="off" placeholder="mp4 to mp3"></label>
+    <label>Куда ведёт<input type="url" data-dialog-field="target_url" maxlength="2000" autocomplete="off" placeholder="https://{{ dialog.product_domain|default:product.domain }}/…"></label>
+    <label>Тип страницы <span class="seo-sub">— если знаете: так анкор попадёт в доли</span>
+      <select data-dialog-field="page_type">
+        <option value="">— не знаю —</option>
+        {% for name in dialog.page_types %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      </select>
+    </label>
+    <p class="seo-anchor-dialog-error" data-anchor-dialog-error role="alert" hidden></p>
+    <div class="seo-anchor-dialog-buttons">
+      <button type="button" class="seo-btn seo-btn-primary" data-anchor-dialog-save>Сохранить</button>
+      <button type="button" class="seo-btn" data-anchor-dialog-cancel>Отмена</button>
+    </div>
+  </div>
+</dialog>

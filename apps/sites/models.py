@@ -70,13 +70,20 @@ class UploadKind(models.TextChoices):
     AHREFS_BATCH = "ahrefs_batch", "Ahrefs Batch Analysis"
     PLACEMENTS = "placements", "Размещения продукта"
     REF_DOMAINS = "ahrefs_refdomains", "Ссылающиеся домены Ahrefs"
+    ANCHORS = "anchors", "Анкоры продукта"
 
 
 # Загрузки без продавца: замер Ahrefs наш, у файла размещений продавец — в
 # строках, у загрузки он только «от кого», если файл от продавца (E1-09).
-UPLOADS_WITHOUT_SELLER = (UploadKind.AHREFS_BATCH, UploadKind.PLACEMENTS, UploadKind.REF_DOMAINS)
+# Анкоры продукта (E3-05) — наши, продавца у них нет.
+UPLOADS_WITHOUT_SELLER = (
+    UploadKind.AHREFS_BATCH,
+    UploadKind.PLACEMENTS,
+    UploadKind.REF_DOMAINS,
+    UploadKind.ANCHORS,
+)
 # Загрузки под продукт: чьи это размещения и на кого ссылаются домены.
-UPLOADS_FOR_PRODUCT = (UploadKind.PLACEMENTS, UploadKind.REF_DOMAINS)
+UPLOADS_FOR_PRODUCT = (UploadKind.PLACEMENTS, UploadKind.REF_DOMAINS, UploadKind.ANCHORS)
 
 
 class UploadStatus(models.TextChoices):

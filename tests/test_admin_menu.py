@@ -48,14 +48,17 @@ def test_admin_site_is_ours() -> None:
 def test_groups_follow_the_work(admin_client: Client) -> None:
     menu = _menu(admin_client)
     assert [group["name"] for group in menu] == ["Работа", "Справочники", "Настройки", "Служебное"]
-    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Счета", "Ключи"]
+    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Счета"]
+    # Анкоры продукта — справочник (E3-05, ADR-059); форма ключа — в «Служебном».
     assert _names(menu[1]) == [
         "Каталог площадок",
         "Продавцы",
         "Рабочие списки",
         "Продукты",
+        "Анкоры",
         "Ссылающиеся домены",
     ]
+    assert "Ключи" in _names(menu[3])
 
 
 def test_no_similar_names(admin_client: Client) -> None:
@@ -104,7 +107,6 @@ def test_home_starts_with_work(admin_client: Client) -> None:
         "Загрузки",
         "Размещения",
         "Счета",
-        "Ключи",
     ]
     assert cards[0]["url"] == reverse("admin:sites_productsitelatest_changelist")
     assert "Convertio, список «Сентябрь 2026»" in cards[0]["note"]
@@ -121,7 +123,6 @@ def test_home_without_products(admin_client: Client) -> None:
         ("0", "предложений ждут разбора"),
         ("", ""),
         ("0", "к оплате"),
-        ("", ""),
     ]
 
 

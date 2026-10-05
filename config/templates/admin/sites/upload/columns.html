@@ -14,19 +14,26 @@
   {% csrf_token %}
   {% if errors %}<div class="errornote">{% for error in errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
   <div class="seo-note">
-    {% if placements_kind %}
+    {% if anchors_kind %}
+      <p><b>{{ upload.file_name }}</b> · анкоры {{ upload.product.name }}.</p>
+    {% elif placements_kind %}
       <p><b>{{ upload.file_name }}</b> · размещения {{ upload.product.name }}{% if upload.seller %} · от продавца {{ upload.seller.name }}{% endif %}{% if upload.employee %} · от сотрудника {{ upload.employee.first_name|default:upload.employee.username }}{% endif %} · файл на {{ upload.prices_date|date:"d.m.Y" }}.</p>
     {% else %}
       <p><b>{{ upload.file_name }}</b> · продавец {{ upload.seller.name }} · цены на {{ upload.prices_date|date:"d.m.Y" }}.</p>
     {% endif %}
     <p>
       Строка заголовков — <input type="number" name="header_row" value="{{ upload.header_row }}" min="0" class="seo-num">
-      (если не та — впишите номер и нажмите «Дальше»{% if upload.header_row == 0 %}; 0 — заголовков нет, в файле одни домены{% endif %}).
+      (если не та — впишите номер и нажмите «Дальше»{% if upload.header_row == 0 %}; 0 — заголовков нет, в файле одни домены{% endif %}).{% if not anchors_kind %}
       Валюта цен —
-      <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>.
+      <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>.{% endif %}
     </p>
     <ul>
-      {% if placements_kind %}
+      {% if anchors_kind %}
+        <li>Нужны две колонки: анкор и куда ведёт. Остальное — если есть: объёмы, раздел (Tool), тип страницы (Type), позиции.</li>
+        <li>Позиций может быть сколько угодно: дата снимка — из заголовка («Pos 22.09.26»). 101 — «вне топ-100».</li>
+        <li>Размещено и ждут система считает сама по размещениям — эти колонки не загружаются.</li>
+        <li>Разметка запомнится для файлов анкоров: следующий файл с теми же колонками пройдёт без этого шага.</li>
+      {% elif placements_kind %}
         <li>Колонки без своего поля идут в «прочие данные» размещения и видны в его панели — из файла ничего не теряется. Метрики площадки из файла — тоже туда: когда их сняли, неизвестно.</li>
         <li>Разметка запомнится для файлов размещений: следующий файл с теми же колонками пройдёт без этого шага, про новую колонку спрошу только её.</li>
         <li>Колонок индексации может быть несколько: дата отметки — из заголовка («Индексация 02.09.26»), без неё — дата файла.</li>
@@ -44,7 +51,7 @@
 
   {% if known %}
     <details class="seo-details"{% if not asked %} open{% endif %}>
-      <summary>{% if placements_kind %}Уже размечены раньше{% else %}Уже размечены у продавца{% endif %} — {{ known|length }}</summary>
+      <summary>{% if placements_kind or anchors_kind %}Уже размечены раньше{% else %}Уже размечены у продавца{% endif %} — {{ known|length }}</summary>
       {% include "admin/sites/upload/_columns_table.html" with columns=known %}
     </details>
   {% endif %}

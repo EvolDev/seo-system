@@ -40,10 +40,11 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from apps.keywords import anchor_views
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
 from apps.placements import export as placement_export
 from apps.placements import invoices
-from apps.placements.forms import PlacementForm
+from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLinkFormSet
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
@@ -154,15 +155,20 @@ def _local_midnight(day: date) -> datetime:
 class PlacementLinkInline(StackedInline):
     """Ссылки размещения: задание правит человек, остальное — проверка страницы.
 
+    Задание — анкор из списка анкоров продукта и куда ведёт (E3-05, ADR-059):
+    поле анкора с поиском и окном «Новый анкор» (seo/anchors.js), адрес
+    подставляется из анкора. Номер ссылки ставится сам, тест на извлечение
+    в форме не показывается — до проверок статьи (E7-02).
+
     Что на странице (`rel`, позиция, живость, время пропажи), пишут
     краулер и проверка живости (E2-04, E2-05) — в форме только чтение:
-    время пропажи пишется один раз. Тест на извлечение до E7-02 делает
-    человек.
+    время пропажи пишется один раз.
     """
 
     model = PlacementLink
+    form = PlacementLinkForm
+    formset = PlacementLinkFormSet
     can_delete = False
-    autocomplete_fields = ("keyword",)
     readonly_fields = (
         "is_alive",
         "rel",
@@ -177,16 +183,7 @@ class PlacementLinkInline(StackedInline):
     fieldsets = (
         (
             None,
-            {
-                "fields": (
-                    "anchor",
-                    "anchor_type",
-                    "target_url",
-                    "keyword",
-                    "link_index",
-                    "extraction_test_passed",
-                )
-            },
+            {"fields": ("keyword", "target_url")},
         ),
         (
             "На странице — заполняет проверка",
@@ -205,6 +202,14 @@ class PlacementLinkInline(StackedInline):
     def get_extra(self, request: HttpRequest, obj: Any = None, **kwargs: Any) -> int:
         # У нового размещения сразу два слота: ссылок в статье одна-две.
         return 2 if obj is None else 0
+
+
+def _initial_product(context: dict[str, Any]) -> int | None:
+    """Продукт новой формы размещения — начальное значение поля (рабочий продукт)."""
+    form = context.get("adminform")
+    value = form.form.initial.get("product") if form is not None else None
+    product = getattr(value, "pk", value)
+    return int(product) if isinstance(product, int | str) and str(product).isdigit() else None
 
 
 def _queue_checks(placement_ids: list[int]) -> list[str]:
@@ -329,7 +334,7 @@ class PlacementAdmin(NoDeleteAdmin):
     )
 
     class Media:
-        js = (Js("seo/indexation.js"), Js("seo/invoices.js"))
+        js = (Js("seo/indexation.js"), Js("seo/invoices.js"), Js("seo/anchors.js"))
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             # offers.css — «прочие данные из файла» в том же виде, что в карточке площадки.
             "all": (
@@ -337,6 +342,7 @@ class PlacementAdmin(NoDeleteAdmin):
                 Css("seo/status-history.css"),
                 Css("seo/offers.css"),
                 Css("seo/invoices.css"),
+                Css("seo/anchors.css"),
             )
         }
 
@@ -555,6 +561,19 @@ class PlacementAdmin(NoDeleteAdmin):
         obj: Any = None,
     ) -> Any:
         context["after_links"] = AFTER_LINKS
+        # «Анкоры продукта» над ссылками (E3-05): итоги, доли и рекомендации —
+        # без анкоров, которые уже стоят в этом размещении.
+        product_id = obj.product_id if obj is not None else _initial_product(context)
+        used = (
+            list(obj.links.exclude(keyword=None).values_list("keyword_id", flat=True))
+            if obj is not None
+            else []
+        )
+        context.update(anchor_views.summary_context(product_id, used))
+        product = Product.objects.filter(pk=product_id).first() if product_id else None
+        if product is not None:
+            context["anchor_dialog"] = anchor_views.dialog_context(product)
+            context["anchor_product"] = product
         if obj is not None:
             context["panel_links"] = [
                 ("Карточка площадки", reverse("admin:sites_site_card", args=[obj.site_id]), True)

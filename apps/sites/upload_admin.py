@@ -124,8 +124,8 @@ class UploadForm(forms.Form):
             data["new_employee"] = ""
         if kind != UploadKind.AHREFS_BATCH:
             data["country"] = ""
-        if kind in (UploadKind.AHREFS_BATCH, UploadKind.REF_DOMAINS):
-            # Замер и ссылки — наши, из Ahrefs: продавца нет.
+        if kind in (UploadKind.AHREFS_BATCH, UploadKind.REF_DOMAINS, UploadKind.ANCHORS):
+            # Замер и ссылки — наши, из Ahrefs, анкоры — наши: продавца нет.
             data["seller"] = None
             return data
         if kind == UploadKind.COLLABORATOR_CATALOG:
@@ -208,6 +208,8 @@ class UploadAdmin(NoDeleteAdmin):
             )
         if obj.kind == UploadKind.REF_DOMAINS:
             return format_html('Ahrefs<div class="seo-sub">ссылаются на {}</div>', obj.product)
+        if obj.kind == UploadKind.ANCHORS:
+            return format_html('Анкоры<div class="seo-sub">{}</div>', obj.product)
         if obj.seller is not None:
             return format_html("{}", obj.seller.name)
         where = countries.name(obj.country) if obj.country else "все страны"
@@ -221,6 +223,7 @@ class UploadAdmin(NoDeleteAdmin):
             UploadKind.AHREFS_BATCH: "замер",
             UploadKind.REF_DOMAINS: "выгрузка",
             UploadKind.PLACEMENTS: "файл",
+            UploadKind.ANCHORS: "файл",
         }.get(UploadKind(obj.kind), "цены")
         return format_html('{}<div class="seo-sub">{}</div>', f"{obj.prices_date:%d.%m.%Y}", what)
 
@@ -419,6 +422,7 @@ class UploadAdmin(NoDeleteAdmin):
             "empty": [c for c in columns if not c.get("filled")],
             "fields": service.field_choices(upload),
             "placements_kind": upload.kind == UploadKind.PLACEMENTS,
+            "anchors_kind": upload.kind == UploadKind.ANCHORS,
             "confidence": {c.value: _confidence_class(c) for c in Confidence},
             "currencies": sorted({*CURRENCIES, upload.currency or "EUR"}),
             "rates": latest_rates(),
@@ -437,6 +441,8 @@ class UploadAdmin(NoDeleteAdmin):
             return self._placements_summary(request, upload)
         if upload.kind == UploadKind.REF_DOMAINS:
             return self._refdomains_summary(request, upload)
+        if upload.kind == UploadKind.ANCHORS:
+            return self._anchors_summary(request, upload)
         if upload.status == UploadStatus.DONE and not catalog_kind:
             return HttpResponseRedirect(_url("review", upload))
         if upload.status == UploadStatus.NEW:
@@ -507,6 +513,29 @@ class UploadAdmin(NoDeleteAdmin):
             "list_url": f"{refs}?product__id__exact={upload.product_id}",
         }
         return TemplateResponse(request, "admin/sites/upload/refdomains.html", context)
+
+    def _anchors_summary(self, request: HttpRequest, upload: Upload) -> HttpResponse:
+        """Файл анкоров (E3-05): сводка «что сведётся с базой» до записи и итог после."""
+        if upload.status == UploadStatus.NEW:
+            return HttpResponseRedirect(_step_url(upload))
+        done = upload.status == UploadStatus.DONE
+        result = upload.result or {}
+        context = {
+            **self._context(
+                request,
+                "Записано" if done else "Сводка до записи",
+                step=4 if done else 3,
+                upload=upload,
+            ),
+            "steps": ["Файл", "Колонки", "Сводка до записи", "Записано"],
+            "summary": upload.summary or {},
+            "counts": result.get("counts") or {},
+            "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
+            "done": done,
+            "anchors_url": reverse("admin:keywords_keywordcoverage_changelist")
+            + f"?product={upload.product_id}",
+        }
+        return TemplateResponse(request, "admin/sites/upload/anchors.html", context)
 
     def _placements_summary(self, request: HttpRequest, upload: Upload) -> HttpResponse:
         """Файл размещений: сводка до записи, а после — итог. Разбора нет (ADR-051)."""
@@ -698,7 +727,11 @@ class UploadAdmin(NoDeleteAdmin):
             "opts": self.model._meta,
             "upload": upload,
             "step": step,
-            "steps": ["Файл", "Колонки", "Сводка до записи", "Разбор"],
+            # Разбор есть только у прайса; у размещений и анкоров — итог.
+            "steps": ["Файл", "Колонки", "Сводка до записи", "Разбор"]
+            if upload is None
+            or upload.kind in (UploadKind.PRICE_LIST, UploadKind.COLLABORATOR_CATALOG)
+            else ["Файл", "Колонки", "Сводка до записи", "Записано"],
         }
 
 
@@ -773,6 +806,13 @@ def _last_choice(request: HttpRequest) -> dict[str, Any]:
     product = working_product_id(request)
     if product is not None:
         initial["product"] = product
+    # Кнопка «Загрузить файл анкоров» на странице «Анкоры» — сразу этот тип.
+    asked = request.GET.get("kind")
+    if asked in UploadKind.values:
+        initial["kind"] = asked
+        if (request.GET.get("product") or "").isdigit():
+            initial["product"] = int(request.GET["product"])
+        return initial
     last = (
         Upload.objects.filter(author_id=request.user.pk)
         .order_by("-created_at", "-pk")

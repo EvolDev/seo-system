@@ -213,9 +213,9 @@ class TestGeneralSettings:
         DomainSetting.objects.create(key="DR_ZONES", value={"green": 50, "yellow": 35})
         DomainSetting.objects.create(key="DR_ZONES", product=product, value={"green": 30})
         response = admin_client.get(reverse("admin:content_domainsetting_changelist"))
-        # Общие: DR_ZONES и из миграций content.0003–0006 — INDEXATION_SCHEDULE,
-        # OFFER_RECHECK, UPLOAD_PRICE_CAP, GRAY_TERMS, GRAY_ZONES.
-        assert response.context["cl"].result_count == 6
+        # Общие: DR_ZONES и из миграций content.0003–0007 — INDEXATION_SCHEDULE,
+        # OFFER_RECHECK, UPLOAD_PRICE_CAP, GRAY_TERMS, GRAY_ZONES, ANCHOR_RECOMMEND.
+        assert response.context["cl"].result_count == 7
 
     def test_add_general_value(self, admin_client: Client) -> None:
         url = reverse("admin:content_domainsetting_add")

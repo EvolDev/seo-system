@@ -30,6 +30,7 @@ SETTING_KEYS: dict[str, str] = {
     "FACT_ROTATION_WINDOW": "Окно ротации фактов: last_n_articles",
     "REVISION_LIMIT": "Предел итераций правок: max_iterations",
     "ANCHOR_REUSE_WINDOW": "Повтор анкора: days, max_on_similar_sites",
+    "ANCHOR_RECOMMEND": "Рекомендации анкоров: skip_top, limit",
     "AUTHORITY_DOMAINS": "Белый список авторитетных доменов",
     "TOOL_CATEGORIES": "Разделы сайта продукта — значения keywords.tool",
     # Проверки — 13-CONFIG.md §2.4
@@ -127,6 +128,29 @@ class UploadPriceCap:
 
 
 @dataclass(frozen=True)
+class AnchorRecommend:
+    """Рекомендации анкоров в размещении — `ANCHOR_RECOMMEND` (E3-05, ADR-059).
+
+    Ключ на позиции от 1 до `skip_top` не предлагается: он уже в топе
+    (04-DOMAIN-RULES.md §2.2). `limit` — сколько анкоров в списке.
+    """
+
+    skip_top: int
+    limit: int
+
+    @classmethod
+    def parse(cls, value: Any) -> "AnchorRecommend":
+        if not isinstance(value, dict) or set(value) != {"skip_top", "limit"}:
+            raise ValueError("Нужен объект ровно с полями skip_top и limit.")
+        skip, limit = value["skip_top"], value["limit"]
+        if not isinstance(skip, int) or isinstance(skip, bool) or not 0 <= skip <= 100:
+            raise ValueError("skip_top — позиция от 0 до 100; 0 — предлагать и ключи в топе.")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+            raise ValueError("limit — сколько анкоров показать, от 1 до 50.")
+        return cls(skip, limit)
+
+
+@dataclass(frozen=True)
 class GrayZones:
     """Зоны доли серых страниц в индексе, % — `GRAY_ZONES` (04-DOMAIN-RULES.md §1.2).
 
@@ -177,6 +201,7 @@ SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "UPLOAD_PRICE_CAP": UploadPriceCap.parse,
     "GRAY_ZONES": GrayZones.parse,
     "GRAY_TERMS": parse_gray_terms,
+    "ANCHOR_RECOMMEND": AnchorRecommend.parse,
 }
 
 
@@ -221,6 +246,18 @@ def upload_price_cap() -> UploadPriceCap:
         return UploadPriceCap.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"UPLOAD_PRICE_CAP: {error}") from error
+
+
+def anchor_recommend(product_id: int | None) -> AnchorRecommend:
+    """Действующие правила рекомендаций анкоров для продукта."""
+    value = get_setting("ANCHOR_RECOMMEND", product_id)
+    if value is None:
+        # Общее значение заводит миграция content.0007 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки ANCHOR_RECOMMEND — заведите общее значение.")
+    try:
+        return AnchorRecommend.parse(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"ANCHOR_RECOMMEND: {error}") from error
 
 
 def gray_terms() -> tuple[str, ...]:

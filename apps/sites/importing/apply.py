@@ -27,7 +27,7 @@ from django.db import models
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from apps.keywords.models import Keyword, KeywordPosition
+from apps.keywords.models import AnchorType, Keyword, KeywordPosition
 from apps.placements import invoices
 from apps.placements.matching import LADDER, match_placement
 from apps.placements.models import (
@@ -152,6 +152,8 @@ class Importer:
                     global_volume=data.global_volume,
                     tool=data.tool,
                     page_type=data.page_type,
+                    # Строка листа анкоров — ключ, прямой анкор (E3-05).
+                    anchor_type=AnchorType.EXACT,
                 )
                 keywords[data.keyword] = keyword
                 self.report.count("keywords", Outcome.CREATED)
@@ -170,6 +172,9 @@ class Importer:
                         Section.KEYWORD_CONFLICTS,
                         changed,
                     )
+                if keyword.anchor_type is None:
+                    keyword.anchor_type = AnchorType.EXACT
+                    changed.append("anchor_type")
                 self._save(keyword, changed, "keywords")
             self._import_positions(keyword, data, where)
         return keywords
@@ -719,6 +724,7 @@ class Importer:
                 anchor=link.anchor,
                 target_url=link.target_url,
                 link_index=link.index,
+                anchor_type=keyword.anchor_type if keyword is not None else None,
             )
             self.report.count("placement_links", Outcome.CREATED)
             return

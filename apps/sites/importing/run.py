@@ -16,6 +16,7 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
+from apps.keywords.models import Keyword
 from apps.observability.models import TaskRun, TaskStatus
 from apps.sites.importing.apply import Importer, compare_copy
 from apps.sites.importing.invoice_sheet import (
@@ -40,6 +41,7 @@ from apps.sites.importing.rows import (
 )
 from apps.sites.importing.workbook import open_workbook, read_sheet
 from apps.sites.models import StatusSource
+from apps.sites.uploads import anchors
 from config.changes import bind_change
 from config.run_id import current_run_id
 
@@ -114,6 +116,11 @@ def _import(options: ImportOptions, report: Report) -> None:
     invoice_rows = parse_invoices(invoices_sheet, report) if invoices_sheet else None
     if invoice_rows is None:
         report.note(f"Вкладки «{INVOICES_SHEET}» нет — счета не загружались")
+    # Листы долей и безанкорки (E3-05) — тем же разбором, что и загрузка анкоров.
+    shares = anchors.Parsed()
+    anchors.read_shares(options.path, shares)
+    for line in shares.issues:
+        report.note(line)
 
     # transaction.atomic — всё внутри блока применяется целиком или никак:
     # исключение откатывает все записи, как BEGIN … ROLLBACK в SQL.
@@ -126,6 +133,17 @@ def _import(options: ImportOptions, report: Report) -> None:
             report=report,
         )
         saved_keywords = importer.import_keywords(keywords)
+        if shares.types or shares.naked or shares.countries:
+            # После ключей — у безанкорки тип страницы по адресу ключа; до
+            # размещений — их «Convertio» и «click here» найдут свой анкор.
+            counts = anchors.write(anchors.build_plan(shares, importer.convertio))
+            report.note(
+                f"Доли анкоров: типов страниц {counts['types']}, безанкорных {counts['naked']}, "
+                f"стран {counts['countries']}; ссылок получили анкор {counts['links']}"
+            )
+            saved_keywords = {
+                k.keyword: k for k in Keyword.objects.filter(product=importer.convertio)
+            }
         importer.import_sites(sites, saved_keywords)
         if {LINKS_PLACED, LINKS_WAITING} <= set(keywords_sheet.headers):
             importer.compare_link_counts(keywords, saved_keywords)

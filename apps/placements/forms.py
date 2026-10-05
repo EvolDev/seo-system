@@ -7,16 +7,29 @@
 
 Счёт (E1-14, ADR-055): статус кнопками, «Оплачен» ставит сегодняшний день в
 пустую дату оплаты; доли строк — `apps.placements.invoices.shares`.
+
+Ссылка размещения (E3-05, ADR-059): анкор — одно поле с поиском по анкорам
+продукта (seo/anchors.js), «куда ведёт» подставляется из анкора и правится;
+текст и тип анкора берутся из него, номер ссылки ставится сам.
 """
 
 from typing import Any, ClassVar
 
 from django import forms
+from django.db.models import Max, Q
 from django.forms.models import BaseInlineFormSet
 from django.utils import timezone
 
+from apps.keywords.models import NAKED_TYPES, AnchorType, Keyword
 from apps.placements import invoices
-from apps.placements.models import Invoice, InvoiceItem, InvoiceStatus, Placement, PlacementStatus
+from apps.placements.models import (
+    Invoice,
+    InvoiceItem,
+    InvoiceStatus,
+    Placement,
+    PlacementLink,
+    PlacementStatus,
+)
 from apps.sites.offers import CURRENCIES
 from config.forms import ChoiceButtons, DayField, DayFieldsForm, DayInput, MoneyField
 
@@ -168,3 +181,121 @@ def _total_changed(invoice: Invoice) -> bool:
         return True
     before = Invoice.objects.filter(pk=invoice.pk).values_list("amount_cents", "currency").first()
     return before != (invoice.amount_cents, invoice.currency)
+
+
+class AnchorSelect(forms.Select):
+    """Выбор анкора: обычный <select>, seo/anchors.js превращает его в поле с поиском.
+
+    У каждого варианта — продукт, адрес и тип страницы: поле показывает
+    анкоры продукта размещения и подставляет адрес в «Куда ведёт». `legacy` —
+    текст старой ссылки без анкора из списка: остаётся выбранным, пока не
+    выберут анкор.
+    """
+
+    legacy: str = ""
+
+    def __init__(self, attrs: dict[str, Any] | None = None) -> None:
+        super().__init__({"data-anchor-select": "", **(attrs or {})})
+
+    def create_option(
+        self,
+        name: str,
+        value: Any,
+        label: Any,
+        selected: Any,
+        index: int,
+        subindex: int | None = None,
+        attrs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        keyword = getattr(value, "instance", None)
+        if isinstance(keyword, Keyword):
+            option["attrs"].update(
+                {
+                    "data-product": str(keyword.product_id),
+                    "data-url": keyword.target_url,
+                    "data-type": keyword.page_type or "",
+                    "data-naked": "1" if keyword.anchor_type in NAKED_TYPES else "",
+                }
+            )
+        elif value == "" and self.legacy:
+            option["label"] = f"«{self.legacy}» — нет в анкорах"
+            option["attrs"]["data-legacy"] = "1"
+        return option
+
+
+class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
+    keyword = forms.ModelChoiceField(
+        label="Анкор",
+        queryset=Keyword.objects.none(),
+        required=False,
+        widget=AnchorSelect,
+        empty_label="— выберите анкор —",
+    )
+    target_url = forms.CharField(
+        label="Куда ведёт",
+        required=False,
+        max_length=2000,
+        widget=forms.URLInput(attrs={"data-anchor-url": "", "class": "vURLField"}),
+        help_text="Подставляется из анкора; если адрес другой — впишите свой.",
+    )
+
+    class Meta:
+        model = PlacementLink
+        fields = ("keyword", "target_url")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        field = self.fields["keyword"]
+        assert isinstance(field, forms.ModelChoiceField)
+        current = self.instance.keyword_id
+        # Активные анкоры всех продуктов: поле само оставит анкоры продукта
+        # размещения; выключенный анкор этой ссылки — тоже, иначе он пропал бы.
+        field.queryset = (
+            Keyword.objects.filter(Q(is_active=True) | Q(pk=current))
+            .only("pk", "keyword", "product_id", "target_url", "page_type", "anchor_type")
+            .order_by("product_id", "keyword")
+        )
+        if self.instance.pk is not None and current is None and self.instance.anchor:
+            widget = field.widget
+            assert isinstance(widget, AnchorSelect)
+            widget.legacy = self.instance.anchor
+            field.empty_label = ""
+
+    def clean(self) -> dict[str, Any] | None:
+        data = super().clean()
+        if data is None:
+            return None
+        keyword: Keyword | None = data.get("keyword")
+        url = (data.get("target_url") or "").strip()
+        if keyword is not None:
+            self.instance.anchor = keyword.keyword
+            self.instance.anchor_type = keyword.anchor_type or AnchorType.EXACT
+            if not url:
+                url = keyword.target_url
+        elif not (self.instance.pk is not None and self.instance.anchor):
+            if url:
+                self.add_error("keyword", "Выберите анкор.")
+            return data
+        if url and not url.startswith(("http://", "https://")):
+            self.add_error("target_url", "Адрес страницы целиком: https://…")
+        elif not url:
+            self.add_error("target_url", "Впишите, куда ведёт ссылка.")
+        data["target_url"] = url
+        return data
+
+
+class PlacementLinkFormSet(BaseInlineFormSet):  # type: ignore[type-arg]
+    """Ссылки статьи: номер новой ссылки — следующий за последним у размещения."""
+
+    def save_new(self, form: forms.ModelForm, commit: bool = True) -> Any:  # type: ignore[type-arg]
+        link = form.save(commit=False)
+        link.placement = self.instance
+        if link.link_index is None:
+            last = PlacementLink.objects.filter(placement=self.instance).aggregate(
+                last=Max("link_index")
+            )["last"]
+            link.link_index = (last or 0) + 1
+        if commit:
+            link.save()
+        return link

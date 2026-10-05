@@ -14,7 +14,7 @@
 
 {% block content %}
 <div data-steps-for="price_list collaborator_catalog">{% include "admin/sites/upload/_steps.html" %}</div>
-<ol class="seo-steps" data-steps-for="placements" hidden>
+<ol class="seo-steps" data-steps-for="placements anchors" hidden>
   <li class="seo-step-on">1. Файл</li><li>2. Колонки</li><li>3. Сводка до записи</li><li>4. Записано</li>
 </ol>
 <ol class="seo-steps" data-steps-for="ahrefs_batch ahrefs_refdomains" hidden>
@@ -27,12 +27,12 @@
     <div class="form-row">
       <label>{{ form.kind.label }}</label>
       <div class="seo-radios">{% for radio in form.kind %}<label>{{ radio.tag }} {{ radio.choice_label }}</label>{% endfor %}</div>
-      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена. Ahrefs Batch Analysis — файл кнопки Export на странице Batch Analysis, продавец не нужен. Размещения продукта — файл коллеги или продавца: где уже размещались, хоть одним столбцом доменов. Ссылающиеся домены Ahrefs — выгрузка Referring domains по домену продукта.</div>
+      <div class="help">Каталог Collaborator — выгрузка всех площадок из английского интерфейса; разметка колонок у него встроена. Ahrefs Batch Analysis — файл кнопки Export на странице Batch Analysis, продавец не нужен. Размещения продукта — файл коллеги или продавца: где уже размещались, хоть одним столбцом доменов. Ссылающиеся домены Ahrefs — выгрузка Referring domains по домену продукта. Анкоры продукта — как лист «Распределение анкоров»: ключ, URL, объёмы, позиции по датам; листы долей из той же книги разберу сама.</div>
     </div>
-    <div class="form-row" data-kinds="placements ahrefs_refdomains">
+    <div class="form-row" data-kinds="placements ahrefs_refdomains anchors">
       {{ form.product.errors }}
       <label for="{{ form.product.id_for_label }}">{{ form.product.label }}</label> {{ form.product }}
-      <div class="help" data-labels='{"ahrefs_refdomains": "Продукт, по домену которого сделана выгрузка: эти площадки спрячутся из его «Площадок»."}'>Чьи это размещения.</div>
+      <div class="help" data-labels='{"ahrefs_refdomains": "Продукт, по домену которого сделана выгрузка: эти площадки спрячутся из его «Площадок».", "anchors": "Чьи это анкоры: сведу с анкорами этого продукта."}'>Чьи это размещения.</div>
     </div>
     <div class="form-row" data-kinds="ahrefs_batch">
       {{ form.country.errors }}
@@ -71,8 +71,8 @@
     </div>
     <div class="form-row">
       {{ form.prices_date.errors }}
-      <label for="{{ form.prices_date.id_for_label }}" data-labels='{"ahrefs_batch": "Дата замера", "ahrefs_refdomains": "Дата выгрузки", "placements": "Дата файла"}'>{{ form.prices_date.label }}</label> {{ form.prices_date }}
-      <div class="help" data-labels='{"ahrefs_batch": "Метрики станут замером на эту дату. Ещё одна выгрузка с той же датой обновит замер, а не задвоит.", "ahrefs_refdomains": "День, когда сделана выгрузка: домены, которых в ней нет, получат пометку «ссылка пропала» с этой даты.", "placements": "На эту дату — отметки индексации из колонки без даты в заголовке и рабочий список «‹продукт› · размещения · дата»."}'>{{ form.prices_date.help_text }}</div>
+      <label for="{{ form.prices_date.id_for_label }}" data-labels='{"ahrefs_batch": "Дата замера", "ahrefs_refdomains": "Дата выгрузки", "placements": "Дата файла", "anchors": "Дата файла"}'>{{ form.prices_date.label }}</label> {{ form.prices_date }}
+      <div class="help" data-labels='{"ahrefs_batch": "Метрики станут замером на эту дату. Ещё одна выгрузка с той же датой обновит замер, а не задвоит.", "ahrefs_refdomains": "День, когда сделана выгрузка: домены, которых в ней нет, получат пометку «ссылка пропала» с этой даты.", "placements": "На эту дату — отметки индексации из колонки без даты в заголовке и рабочий список «‹продукт› · размещения · дата».", "anchors": "Только для списка загрузок: позиции ложатся на даты из заголовков колонок («Pos 22.09.26»)."}'>{{ form.prices_date.help_text }}</div>
     </div>
     <div class="form-row">
       {{ form.file.errors }}

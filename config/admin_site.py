@@ -30,7 +30,6 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "upload"),
             ("placements", "placement"),
             ("placements", "invoice"),
-            ("keywords", "keyword"),
         ],
     ),
     (
@@ -41,6 +40,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "seller"),
             ("sites", "sitelist"),
             ("sites", "product"),
+            ("keywords", "keywordcoverage"),
             ("sites", "productrefdomain"),
         ],
     ),
@@ -55,6 +55,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "exchangerate"),
             ("sites", "grayscan"),
             ("sites", "siteaudit"),
+            ("keywords", "keyword"),
             ("keywords", "keywordposition"),
             ("observability", "taskrun"),
             ("observability", "apiusage"),
@@ -191,7 +192,6 @@ def _home_cards(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 _number(numbers["published"]),
                 f"опубликовано · в работе: {_number(numbers['in_progress'])}",
             ),
-            "keyword": (_number(numbers["keywords"]), "активных ключей продукта"),
         }
     notes["upload"] = (
         _number(numbers.get("review_pending", 0)),
@@ -217,7 +217,6 @@ def _home_numbers() -> dict[str, Any]:
     """Цифры для карточек главной: продукт по умолчанию и самый новый список."""
     # Модели — внутри функции: этот модуль читается при загрузке приложений,
     # до того как модели готовы.
-    from apps.keywords.models import Keyword
     from apps.placements.models import Invoice, InvoiceStatus, Placement, PlacementStatus
     from apps.sites.models import Product, ProductSite, SiteList, SiteStatus, UploadItem
 
@@ -257,7 +256,6 @@ def _home_numbers() -> dict[str, Any]:
             in_progress=Count("pk", filter=Q(status__in=in_progress)),
         )
     )
-    numbers["keywords"] = Keyword.objects.filter(product=product, is_active=True).count()
     return numbers
 
 

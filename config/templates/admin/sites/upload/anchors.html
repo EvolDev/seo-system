@@ -1,0 +1,120 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Файл анкоров продукта (E3-05, ADR-059): сводка «что сведётся с базой» до записи
+и итог после. Разбора нет: запись ничего не стирает — новое добавляется,
+знакомое обновляется значениями файла, позиции ложатся снимками. Пока идёт
+проверка или запись, страница опрашивает состояние (seo/uploads.js).
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
+{% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
+
+{% block content %}
+{% include "admin/sites/upload/_steps.html" %}
+<p class="seo-lead">
+  Анкоры <b>{{ upload.product.name }}</b> — файл «{{ upload.file_name }}».
+</p>
+{% if busy %}
+  <div class="seo-busy" data-state-url="{% url 'admin:sites_upload_state' upload.pk %}">
+    <div class="seo-spin" aria-hidden="true"></div>
+    <div>
+      <b data-state-label>{{ upload.get_status_display }}…</b>
+      <div class="seo-sub">Задача очереди «{% if upload.status == 'writing' %}upload_write{% else %}upload_check{% endif %}» — видна в «Запусках задач». Обычно несколько секунд.</div>
+    </div>
+  </div>
+{% elif upload.status == 'failed' %}
+  <div class="errornote">{{ upload.error }}</div>
+  <div class="submit-row">
+    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}?kind=anchors&amp;product={{ upload.product_id }}">Загрузить файл снова</a>
+  </div>
+{% else %}
+  {% if done %}
+    <div class="seo-stats">
+      <div class="seo-stat seo-good"><b>{{ counts.created|default:0 }}</b><span>новых анкоров</span></div>
+      <div class="seo-stat"><b>{{ counts.updated|default:0 }}</b><span>обновлено</span></div>
+      <div class="seo-stat"><b>{{ counts.positions|default:0 }}</b><span>позиций записано</span></div>
+      <div class="seo-stat"><b>{{ counts.naked|default:0 }}</b><span>безанкорных</span></div>
+      <div class="seo-stat"><b>{{ counts.types|default:0 }}</b><span>долей типов страниц</span></div>
+      <div class="seo-stat"><b>{{ counts.countries|default:0 }}</b><span>долей стран</span></div>
+      <div class="seo-stat"><b>{{ counts.links|default:0 }}</b><span>ссылок получили анкор</span></div>
+    </div>
+    <div class="submit-row">
+      <a class="seo-btn seo-btn-primary" href="{{ anchors_url }}">К анкорам</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+    </div>
+  {% else %}
+    <p class="seo-lead">В базу ещё ничего не записано. Запись сведёт файл с тем, что есть: новое добавится, у знакомых анкоров значения файла заменят прежние, пустые ячейки ничего не сотрут. Чего нет в файле — останется.</p>
+    <div class="seo-stats">
+      <div class="seo-stat"><b>{{ summary.anchors }}</b><span>анкоров в файле</span></div>
+      <div class="seo-stat seo-good"><b>{{ summary.new_total }}</b><span>новых</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.changed_total }}</b><span>изменятся</span></div>
+      <div class="seo-stat"><b>{{ summary.same }}</b><span>без изменений</span></div>
+      <div class="seo-stat"><b>{{ summary.positions_new }}</b><span>новых позиций{% if summary.dates %} · {{ summary.dates|join:", " }}{% endif %}</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.positions_changed }}</b><span>позиций изменится</span></div>
+      <div class="seo-stat"><b>{{ summary.types_new|add:summary.types_changed }}</b><span>долей типов страниц</span></div>
+      <div class="seo-stat"><b>{{ summary.naked_new|add:summary.naked_changed }}</b><span>безанкорных</span></div>
+      <div class="seo-stat"><b>{{ summary.countries_new|add:summary.countries_changed }}</b><span>долей стран</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.issues_total }}</b><span>замечаний</span></div>
+    </div>
+    <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="submit-row" data-run-form="all" data-done-url="{% url 'admin:sites_upload_summary' upload.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="default seo-run-btn">Записать в базу</button>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">Колонки</a>
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      <div class="seo-inline-loader" data-loader hidden></div>
+    </form>
+  {% endif %}
+  <div class="seo-boxes">
+    <div class="seo-box">
+      <h3>Новые анкоры — {{ summary.new_total }}</h3>
+      <ul>
+        {% for row in summary.new %}<li><b>{{ row.keyword }}</b> <span class="seo-sub">{{ row.url }}{% if row.page_type %} · {{ row.page_type }}{% endif %}</span></li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% if summary.new_total > summary.new|length %}<li class="seo-flat">всего {{ summary.new_total }}</li>{% endif %}
+      </ul>
+    </div>
+    <div class="seo-box">
+      <h3>Изменятся — {{ summary.changed_total }}</h3>
+      <ul>
+        {% for row in summary.changed %}<li><b>{{ row.keyword }}</b>: {% for label, old, new in row.changes %}{{ label|lower }} {{ old }} → {{ new }}{% if not forloop.last %}; {% endif %}{% endfor %}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% if summary.changed_total > summary.changed|length %}<li class="seo-flat">всего {{ summary.changed_total }}</li>{% endif %}
+      </ul>
+    </div>
+    {% if summary.types %}
+      <div class="seo-box">
+        <h3>Доли типов страниц</h3>
+        <ul>{% for row in summary.types %}<li><b>{{ row.page_type }}</b> ({{ row.state }}): цель {{ row.target }}; прямой {{ row.exact }}, разбавленный {{ row.diluted }}, безанкор {{ row.naked }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if summary.naked %}
+      <div class="seo-box">
+        <h3>Безанкорка</h3>
+        <ul>{% for row in summary.naked %}<li><b>{{ row.text }}</b> — {% if row.was %}{{ row.was }} → {% endif %}{{ row.share }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if summary.countries %}
+      <div class="seo-box">
+        <h3>Доли стран</h3>
+        <ul>{% for row in summary.countries %}<li><b>{{ row.name }}</b> — {% if row.was %}{{ row.was }} → {% endif %}{{ row.share }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if summary.missing_total %}
+      <div class="seo-box">
+        <h3>Есть в системе, в файле нет — останутся</h3>
+        <ul>
+          {% for keyword in summary.missing %}<li>{{ keyword }}</li>{% endfor %}
+          {% if summary.missing_total > summary.missing|length %}<li class="seo-flat">всего {{ summary.missing_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+    {% if summary.issues %}
+      <div class="seo-box">
+        <h3>Замечания</h3>
+        <ul>
+          {% for line in summary.issues %}<li>{{ line }}</li>{% endfor %}
+          {% if summary.issues_total > summary.issues|length %}<li class="seo-flat">всего {{ summary.issues_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

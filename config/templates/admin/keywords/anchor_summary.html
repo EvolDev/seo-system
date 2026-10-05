@@ -1,0 +1,52 @@
+{% load l10n %}
+{% comment %}
+«Анкоры продукта» над ссылками размещения (E3-05, ADR-059): сколько ссылок
+размещено и ждёт, «цель / факт» по типам страниц и «Рекомендуем» — анкоры по
+порядку, которые ведут доли к цели. Щелчок по анкору ставит его в свободную
+ссылку (seo/anchors.js). Контекст — anchor_block из anchor_views.summary_context;
+этот же кусок отдаёт адрес summary_url, когда в новой форме сменили продукт.
+{% endcomment %}
+{% if anchor_block %}{% with block=anchor_block %}
+<section class="seo-anchor-block" data-anchor-block data-summary-url="{{ block.summary_url }}" data-product="{{ block.product.pk|unlocalize }}" aria-label="Анкоры продукта">
+  <header class="seo-anchor-block-head">
+    <h2>Анкоры {{ block.product.name }}</h2>
+    <span class="seo-anchor-block-totals">размещено <b class="seo-anchor-placed">{{ block.data.placed }}</b> · ждут <b class="seo-anchor-waiting">{{ block.data.waiting }}</b></span>
+    <a href="{{ block.anchors_url }}" class="seo-anchor-block-all" target="_blank" rel="noopener">Все анкоры ↗</a>
+  </header>
+  <div class="seo-anchor-block-grid">
+    <div class="seo-anchor-types">
+      <h3>Доли по типам страниц <span class="seo-sub">факт / цель</span></h3>
+      {% for row in block.types %}
+      <div class="seo-anchor-type" title="{{ row.stat.page_type }}: размещено {{ row.stat.placed }}, ждут {{ row.stat.waiting }}; {{ row.gap_text }}">
+        <span class="seo-anchor-type-name">{{ row.stat.page_type }}</span>
+        <div class="seo-bullet seo-bullet-{{ row.state }}"><i style="width: {{ row.fact_width }}%"></i><b style="left: {{ row.target_left }}%"></b></div>
+        <span class="seo-anchor-type-pct"><b>{{ row.total_pct }}</b> / {{ row.target }}%</span>
+      </div>
+      {% empty %}
+      <p class="seo-sub">Долей по типам страниц нет — <a href="{{ block.anchors_url }}" target="_blank" rel="noopener">заведите на странице «Анкоры»</a>.</p>
+      {% endfor %}
+    </div>
+    <div class="seo-anchor-picks">
+      <h3>Рекомендуем <span class="seo-sub">щелчок — в свободную ссылку</span></h3>
+      {% if block.picks %}
+      <ol>
+        {% for pick in block.picks %}
+        {% ifchanged pick.reason %}<li class="seo-anchor-pick-why">{{ pick.reason }}</li>{% endifchanged %}
+        <li>
+          <button type="button" class="seo-anchor-pick" data-anchor-pick="{{ pick.id|unlocalize }}" data-keyword="{{ pick.keyword }}" data-url="{{ pick.url }}" title="{{ pick.reason }} · {{ pick.url }}">
+            <span class="seo-anchor-pick-n">{{ forloop.counter }}</span>
+            <span class="seo-anchor-pick-text"><b>{{ pick.keyword }}</b>{% if pick.naked %} <span class="seo-chip">безанкор</span>{% endif %}
+              <small>{{ pick.page_type }}</small></span>
+            <span class="seo-anchor-pick-meta">{% if pick.position %}поз. {{ pick.position }} · {% endif %}{{ pick.placed }} / {{ pick.waiting }}</span>
+          </button>
+        </li>
+        {% endfor %}
+      </ol>
+      <p class="seo-sub">Справа — позиция в выдаче и ссылки: размещено / ждут. {% if block.skip_top %}Ключи на позициях 1–{{ block.skip_top }} не предлагаются.{% endif %}</p>
+      {% else %}
+      <p class="seo-sub">Предложить нечего: у продукта нет анкоров — загрузите файл на странице «Анкоры».</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endwith %}{% endif %}
