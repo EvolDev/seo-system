@@ -1,7 +1,8 @@
 """Базовые классы админки для всех доменных приложений.
 
-Удаление отключено везде: ничего не удаляем физически (ADR-008).
-Инфраструктура для моделей всех приложений, поэтому живёт в `config/`,
+Удалить можно любую запись (ADR-060, вместо «ничего не удаляем» ADR-008):
+подтверждение показывает, что уйдёт вместе с ней и где очистится ссылка
+(`config/deletion.py`). Инфраструктура для моделей всех приложений, поэтому живёт в `config/`,
 как `config/db.py`. Тема Admin Interface — оформление поверх штатной
 админки (ADR-038), поэтому и классы здесь штатные, Django.
 
@@ -15,6 +16,7 @@
 консоль ошибкой, хотя ошибки нет).
 """
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from django import forms
@@ -23,6 +25,8 @@ from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.text import capfirst
+
+from config import deletion
 
 # В заглушках типов (django-stubs) классы админки параметризуются моделью:
 # ModelAdmin[Site]. Сам Django так писать не даёт — `admin.ModelAdmin[Any]`
@@ -71,6 +75,9 @@ def _short_text_input(db_field: "models.Field[Any, Any]", kwargs: dict[str, Any]
     ):
         kwargs["widget"] = forms.TextInput(attrs={"class": "vTextField"})
 
+
+# Сколько записей назвать по имени на странице подтверждения удаления.
+DELETE_NAMES = 30
 
 # Панель записи и окна просят у сервера только содержимое — этим заголовком.
 PARTIAL_HEADER = "X-Seo-Partial"
@@ -275,9 +282,40 @@ class StackedInline(_StackedInline):
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 
-class NoDeleteAdmin(ModelAdmin):
+class RecordAdmin(ModelAdmin):
+    # ---------- Удаление (ADR-060) ----------
+    # Штатные страница подтверждения и действие «Удалить выбранные» Django
+    # спрашивают у админки, что удалится (`get_deleted_objects`), и потом
+    # удаляют (`delete_model`, `delete_queryset`). Здесь оба шага идут через
+    # `config.deletion`: вместе с записью — всё, что без неё не живёт.
+
+    def delete_roots(self, objs: Iterable[Any]) -> dict[deletion.Model, list[int]]:
+        """Что удаляем на самом деле. У списков поверх представлений — свою запись."""
+        return {self.model: [obj.pk for obj in objs]}
+
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return False
+        # Строку представления удалить нельзя: удаляется запись, на которой оно
+        # стоит, — это говорит `delete_roots` списка («Площадки» → площадка).
+        if not self.model._meta.managed and type(self).delete_roots is RecordAdmin.delete_roots:
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def get_deleted_objects(
+        self, objs: Any, request: HttpRequest
+    ) -> tuple[list[Any], dict[str, int], set[str], list[str]]:
+        objects = list(objs)
+        plan = deletion.collect(self.delete_roots(objects))
+        names: list[Any] = [str(obj) for obj in objects[:DELETE_NAMES]]
+        if len(objects) > DELETE_NAMES:
+            names.append(f"…и ещё {len(objects) - DELETE_NAMES}")
+        counts = {line.text: line.count for line in plan.lines()}
+        return names, counts, set(), []
+
+    def delete_model(self, request: HttpRequest, obj: Any) -> None:
+        deletion.delete(self.delete_roots([obj]))
+
+    def delete_queryset(self, request: HttpRequest, queryset: Any) -> None:
+        deletion.delete(self.delete_roots(queryset))
 
     # Заголовки страниц. Штатные — «Выберите площадка для изменения», «Изменить
     # площадка»: название модели в единственном числе, в именительном падеже.
@@ -308,7 +346,7 @@ class NoDeleteAdmin(ModelAdmin):
         return super().add_view(request, form_url, {"title": title, **(extra_context or {})})
 
 
-class SnapshotAdmin(NoDeleteAdmin):
+class SnapshotAdmin(RecordAdmin):
     """Снапшоты (ADR-008, уточнение 27.09.2026).
 
     Новый замер — «Сохранить как новый объект»: форма открывается с

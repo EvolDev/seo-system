@@ -53,17 +53,20 @@ def test_list_in_russian_with_today_spend(admin_client: Client, settings: Settin
     assert "Выдача Google сегодня: $0,003 из $5,00 в сутки" in content
 
 
-def test_read_only(admin_client: Client) -> None:
+def test_no_add_no_change_but_delete_works(admin_client: Client) -> None:
+    """Запись расхода не заводят и не правят руками, а удалить можно (ADR-060)."""
     usage = ApiUsage.objects.create(provider="serper", cost_cents=Decimal("0.1"))
     assert admin_client.get(reverse("admin:observability_apiusage_add")).status_code == 403
     change = admin_client.post(
         reverse("admin:observability_apiusage_change", args=[usage.pk]), {"provider": "x"}
     )
     assert change.status_code == 403
-    delete = admin_client.post(reverse("admin:observability_apiusage_delete", args=[usage.pk]))
-    assert delete.status_code == 403
     usage.refresh_from_db()
     assert usage.provider == "serper"
+    url = reverse("admin:observability_apiusage_delete", args=[usage.pk])
+    assert admin_client.get(url).status_code == 200
+    assert admin_client.post(url, {"post": "yes"}).status_code == 302
+    assert not ApiUsage.objects.filter(pk=usage.pk).exists()
 
 
 def test_search_by_run_id(admin_client: Client) -> None:

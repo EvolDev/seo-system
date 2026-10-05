@@ -20,13 +20,21 @@
 - отметки индексации — проверки человеком в журнале на дату из заголовка или
   на дату файла; «в индексе» у размещения — по самой свежей проверке;
 - комментарий — заметка площадки с продуктом; тот же текст второй раз не пишется;
-- заплаченная цена — ещё и предложение продавца на дату размещения: рабочей
-  становится у площадки без рабочей цены или у того же продавца и услуги,
-  если она свежее и по площадке нет заявки в работе. Иначе ложится рядом,
-  уже разобранной: старые цены не должны засыпать «Площадки» вопросами. У
+- заплаченная цена — ещё и предложение продавца на дату размещения. Дальше —
+  как у прайса (`plan.classify`, ADR-060): у площадки без рабочей цены она
+  становится рабочей, у того же продавца и услуги — тоже, если нет заявки в
+  работе; цена другого продавца ждёт решения во вкладках разбора загрузки
+  («Дешевле рабочей», «Дороже рабочей»…) рядом с ценой Collaborator. Та же
+  цена того же продавца второй раз не пишется, нулевая — не пишется вовсе. У
   Collaborator цен из размещений нет — его цены идут из каталога;
 - цена выше порога `UPLOAD_PRICE_CAP` не пишется — в сводку;
 - все площадки файла — в рабочий список «‹продукт› · размещения · ‹дата›».
+
+Строка, все ссылки которой ведут на другой наш продукт, не записывается: она
+попадает в сводку отдельным списком, а если таких строк большинство, сводка
+говорит «похоже, это файл ‹продукт›» (ADR-060). 05.10.2026 файл размещений
+Clideo записался под Convertio, потому что в шапке стоял рабочий продукт: 455
+лишних размещений, 453 сдвинутых статуса и 13 перезаписанных размещений.
 
 Две строки файла про одну площадку видят друг друга: новое размещение первой
 строки (ещё без id) попадает в кандидаты следующей.
@@ -43,7 +51,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from apps.content.domain_settings import UploadPriceCap, indexation_schedule
+from apps.content.domain_settings import UploadPriceCap, indexation_schedule, offer_recheck
 from apps.keywords.models import Keyword
 from apps.observability.models import Check, CheckStatus, Performer
 from apps.placements import indexation, invoices
@@ -53,6 +61,7 @@ from apps.sites.models import (
     MetricSource,
     PlacementType,
     Product,
+    ReviewGroup,
     Seller,
     Site,
     SiteList,
@@ -60,6 +69,7 @@ from apps.sites.models import (
     SiteNote,
     SitePrice,
     Upload,
+    UploadItem,
     ensure_product_sites,
 )
 from apps.sites.rates import to_eur_cents
@@ -68,8 +78,17 @@ from apps.sites.uploads.placement_records import (
     LinkData,
     ParsedPlacements,
     PlacementRecord,
+    is_on_domain,
 )
-from apps.sites.uploads.plan import LIST_LIMIT, ORDER_IN_WORK, blocked_ids, start_of_day
+from apps.sites.uploads.plan import (
+    LIST_LIMIT,
+    Decision,
+    SiteState,
+    blocked_ids,
+    classify,
+    load_state,
+    start_of_day,
+)
 
 CHUNK = 1000
 _USERNAME = re.compile(r"[^\w.@+-]+")
@@ -125,15 +144,6 @@ class Conflict:
     file: str
 
 
-@dataclass(frozen=True)
-class Working:
-    """Рабочая цена площадки — решает, станет ли рабочей цена из размещения."""
-
-    seller_id: int
-    service: str
-    checked_at: dt.datetime
-
-
 @dataclass
 class PlanRow:
     """Строка файла и что с ней будет."""
@@ -160,6 +170,8 @@ class PlanRow:
     note_new: bool = False
     offer: str | None = None  # NEW_OFFER, CHANGED_OFFER, SAME_OFFER; None — предложения нет
     becomes_working: bool = False
+    decision: Decision | None = None  # вкладка разбора и нужно ли решение — как у прайса
+    ref_price_id: int | None = None  # рабочая цена площадки до загрузки
 
     @property
     def ambiguous(self) -> bool:
@@ -185,6 +197,21 @@ class PlacementPlan:
     rows: list[PlanRow] = field(default_factory=list)
     capped: list[dict[str, Any]] = field(default_factory=list)
     no_status: int = 0
+    # Строки, чьи ссылки ведут на другой наш продукт: {line, domain, product, url}.
+    foreign: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def foreign_product(self) -> str | None:
+        """Продукт, на который ведёт большинство строк файла, — или None.
+
+        Половина и больше строк со ссылками на один чужой продукт — это файл
+        не того продукта: сводка говорит об этом прямо, до записи.
+        """
+        if not self.foreign:
+            return None
+        names = Counter(row["product"] for row in self.foreign)
+        name, count = names.most_common(1)[0]
+        return name if count * 2 >= len(self.rows) + len(self.foreign) else None
 
     @property
     def new_domains(self) -> list[str]:
@@ -201,7 +228,14 @@ class PlacementPlan:
             for row in work
             for c in row.conflicts
         ]
-        issues = self.parsed.issues
+        # Непонятное в пропущенных строках не показываем: эти строки не пишутся,
+        # и «ссылка ведёт не на домен продукта — запишется» о них противоречит
+        # списку «Ссылки ведут на другой продукт — пропущены».
+        skipped = {row["line"] for row in self.foreign}
+        issues = {
+            kind: [issue for issue in found if issue.line not in skipped]
+            for kind, found in self.parsed.issues.items()
+        }
         return {
             "rows": rows,
             "blank_rows": blank_rows,
@@ -222,6 +256,9 @@ class PlacementPlan:
             "notes_new": sum(row.note_new for row in work),
             "offers_new": sum(row.offer == NEW_OFFER for row in work),
             "offers_working": sum(row.becomes_working for row in work),
+            "offers_review": sum(
+                bool(row.decision and row.decision.needs_decision) for row in work
+            ),
             "cap_eur": self.cap.eur,
             **_capped("conflicts", conflicts),
             **_capped("ambiguous", [_line(row) for row in self.rows if row.ambiguous]),
@@ -235,6 +272,8 @@ class PlacementPlan:
                 [{"domain": d, "lines": list(lines)} for d, lines in self.parsed.duplicates],
             ),
             **_capped("blocked", [{"domain": domain} for domain in self.blocked]),
+            **_capped("foreign", self.foreign),
+            "foreign_product": self.foreign_product,
             **{
                 kind: [
                     {"line": i.line, "domain": i.domain, "message": i.message}
@@ -269,7 +308,7 @@ class _Planner:
             cap=cap,
         )
         domains = sorted({record.domain for record in parsed.records})
-        sites, self.plan.restore, prices = _load_sites(domains)
+        sites, self.plan.restore, _ = _load_sites(domains)
         blocked = blocked_ids(sites.values())
         self.plan.blocked = sorted(d for d, site_id in sites.items() if site_id in blocked)
         for domain in self.plan.blocked:
@@ -277,24 +316,59 @@ class _Planner:
         self.plan.sites = sites
         site_ids = list(sites.values())
         self.pools: dict[str, list[Placement]] = _placements(sites, self.plan.product)
-        self.working = _working(prices)
-        self.frozen = _frozen(site_ids)
         self.plan.sellers = _sellers(parsed.records, upload)
         self.plan.employees = _employees()
         self.human_checks = _human_checks(p.pk for pool in self.pools.values() for p in pool)
         self.notes = _notes(sites)
         self.offers = _offers_by_key(site_ids)
+        self.latest = _latest_offers(site_ids)
+        self.recheck_pct = offer_recheck().min_change_pct
+        # Рабочая цена, отказы и заявки площадок — как их видит разбор прайса.
+        self.states: dict[str, SiteState] = load_state(
+            domains, seller_id=0, before=start_of_day(upload.prices_date), rates=rates
+        ).sites
         # id() размещения → что эта загрузка уже собирается к нему добавить.
         self.planned_links: dict[int, set[int]] = {}
         self.planned_marks: set[tuple[int, dt.datetime]] = set()
         collaborator = Seller.objects.filter(is_collaborator=True).values_list("name", flat=True)
         self.collaborator = {name.lower() for name in collaborator}
+        # Домены остальных продуктов: по ним узнаём строки из чужого файла.
+        self.others = {
+            product.domain: product.name
+            for product in Product.objects.exclude(pk=self.plan.product.pk)
+            if product.domain
+        }
 
     def build(self) -> PlacementPlan:
         for record in self.plan.parsed.records:
-            if record.domain not in self.plan.blocked:
-                self.plan.rows.append(self._row(record))
+            if record.domain in self.plan.blocked:
+                continue
+            foreign = self._foreign(record)
+            if foreign is not None:
+                self.plan.foreign.append(foreign)
+                continue
+            self.plan.rows.append(self._row(record))
         return self.plan
+
+    def _foreign(self, record: PlacementRecord) -> dict[str, Any] | None:
+        """Строка другого продукта: её ссылки ведут на его домен, а не на наш.
+
+        Хоть одна ссылка на свой продукт — строка наша. Строка без ссылок —
+        тоже наша: по чему судить, непонятно, а статус и цена из файла нужны.
+        """
+        mine = self.plan.product.domain
+        if any(is_on_domain(link.target_url, mine) for link in record.links):
+            return None
+        for link in record.links:
+            for domain, name in self.others.items():
+                if is_on_domain(link.target_url, domain):
+                    return {
+                        "line": record.line,
+                        "domain": record.domain,
+                        "product": name,
+                        "url": link.target_url,
+                    }
+        return None
 
     def _row(self, record: PlacementRecord) -> PlanRow:
         plan = self.plan
@@ -487,29 +561,39 @@ class _Planner:
 
     def _offer(self, row: PlanRow, seller: str) -> None:
         record = row.record
+        cents = row.offer_cents
+        if not cents:
+            return  # «бесплатно» или пусто — не цена продавца
         service = record.placement_type or PlacementType.GUEST_POST
         checked_at = start_of_day(record.published_on or self.plan.file_date)
+        known = self.plan.sellers.get(seller.lower())
+        state = self.states.get(record.domain) if row.site_id is not None else None
+        row.decision = classify(
+            service=service,
+            cents=cents,
+            currency=self.plan.currency,
+            eur_cents=to_eur_cents(cents, self.plan.currency, self.rates),
+            seller_id=known.pk if known is not None else -1,
+            site=state,
+            record_has_gp=False,
+            recheck_pct=self.recheck_pct,
+        )
+        row.becomes_working = row.decision.becomes_working
+        row.ref_price_id = state.working.id if state is not None and state.working else None
         if row.site_id is None:
             row.offer = NEW_OFFER
-            row.becomes_working = True
             return
         existing = self.offers.get((row.site_id, seller.lower(), service, checked_at))
-        if existing is None:
+        latest = self.latest.get((row.site_id, seller.lower(), service))
+        if existing is None and latest is not None and _same_price(latest, cents, self.plan):
+            # Та же цена того же продавца уже есть с другой датой — второй не пишем.
+            row.offer = SAME_OFFER
+        elif existing is None:
             row.offer = NEW_OFFER
-        elif (existing.placement_cents, existing.currency) == (row.offer_cents, self.plan.currency):
+        elif _same_price(existing, cents, self.plan):
             row.offer = SAME_OFFER
         else:
             row.offer = CHANGED_OFFER
-        working = self.working.get(row.site_id)
-        known = self.plan.sellers.get(seller.lower())
-        if working is None or (
-            known is not None
-            and working.seller_id == known.pk
-            and working.service == service
-            and working.checked_at < checked_at
-            and row.site_id not in self.frozen
-        ):
-            row.becomes_working = True
 
     def _conflict(
         self,
@@ -553,6 +637,7 @@ class Writer:
         self.site_ids = dict(plan.sites)
         self.created: set[str] = set()
         self.schedule = indexation_schedule(plan.product.pk)
+        self.items: list[UploadItem] = []  # строки разбора цен — как у прайса
 
     def run(self) -> dict[str, Any]:
         self._sites()
@@ -570,6 +655,8 @@ class Writer:
             self._checks(row, placement)
             self._note(row, site_id)
             self._offer(row, site_id, sellers, offers)
+        UploadItem.objects.bulk_create(self.items, batch_size=CHUNK)
+        self.counts["needs_decision"] = sum(item.needs_decision for item in self.items)
         site_list = self._site_list()
         self.upload.site_list = site_list
         return {"counts": dict(self.counts), "list": site_list.name}
@@ -717,7 +804,7 @@ class Writer:
         sellers: dict[str, Seller],
         offers: dict[OfferKey, SitePrice],
     ) -> None:
-        if row.offer is None or row.seller is None:
+        if row.offer is None or row.seller is None or row.decision is None:
             return
         record = row.record
         seller = sellers[row.seller.lower()]
@@ -730,8 +817,13 @@ class Writer:
             "currency": self.plan.currency,
             "extra": {"Цена из размещения": f"{self.plan.product.name}, {self.upload.file_name}"},
         }
+        decision = row.decision
+        # Ждёт решения — без отметки «разобрано»: вопрос в разборе и в «Площадках».
+        reviewed_at = None if decision.needs_decision else self.now
         key = (site_id, seller.name.lower(), service, checked_at)
         offer = offers.get(key)
+        if row.offer == SAME_OFFER and offer is None:
+            offer = _latest_offers([site_id]).get((site_id, seller.name.lower(), service))
         if offer is None:
             offer = SitePrice.objects.create(
                 site_id=site_id,
@@ -739,21 +831,36 @@ class Writer:
                 placement_type=service,
                 source=MetricSource.CSV_IMPORT,
                 checked_at=checked_at,
-                reviewed_at=self.now,
+                reviewed_at=reviewed_at,
                 **values,
             )
             offers[key] = offer
             self.counts["offers_created"] += 1
-        elif any(getattr(offer, name) != value for name, value in values.items()):
+        elif row.offer == CHANGED_OFFER:
             for name, value in values.items():
                 setattr(offer, name, value)
-            offer.save(update_fields=list(values))
+            offer.reviewed_at = reviewed_at
+            offer.save(update_fields=[*values, "reviewed_at"])
             self.counts["offers_updated"] += 1
         else:
             self.counts["offers_unchanged"] += 1
         if row.becomes_working:
             Site.all_objects.filter(pk=site_id).update(price_id=offer.pk, updated_at=self.now)
             self.counts["working_set"] += 1
+        group = decision.group if row.offer != SAME_OFFER else ReviewGroup.SAME
+        self.items.append(
+            UploadItem(
+                upload=self.upload,
+                site_id=site_id,
+                price_id=offer.pk,
+                ref_price_id=row.ref_price_id,
+                review_group=group,
+                needs_decision=decision.needs_decision and row.offer != SAME_OFFER,
+                auto_applied=row.becomes_working,
+                site_created=record.domain in self.created,
+                line=record.line,
+            )
+        )
 
     def _site_list(self) -> SiteList:
         site_list, _ = SiteList.objects.get_or_create(
@@ -826,21 +933,23 @@ def _placements(sites: dict[str, int], product: Product) -> dict[str, list[Place
     return result
 
 
-def _working(prices: dict[int, int]) -> dict[int, Working]:
-    result: dict[int, Working] = {}
-    for chunk in _chunks(list(prices.values())):
-        for offer in SitePrice.objects.filter(pk__in=chunk):
-            result[offer.site_id] = Working(offer.seller_id, offer.placement_type, offer.checked_at)
-    return result
-
-
-def _frozen(site_ids: Sequence[int]) -> set[int]:
-    """Площадки с заявкой в работе: их рабочая цена сама не двигается (ADR-044)."""
-    result: set[int] = set()
+def _latest_offers(site_ids: Sequence[int]) -> dict[tuple[int, str, str], SitePrice]:
+    """Последняя цена площадки у продавца за услугу — ключ «площадка, продавец, услуга»."""
+    result: dict[tuple[int, str, str], SitePrice] = {}
     for chunk in _chunks(site_ids):
-        frozen = Placement.objects.filter(site_id__in=chunk, status__in=ORDER_IN_WORK)
-        result.update(frozen.values_list("site_id", flat=True))
+        rows = (
+            SitePrice.objects.filter(site_id__in=chunk)
+            .select_related("seller")
+            .order_by("-checked_at", "-pk")
+        )
+        for offer in rows:
+            key = (offer.site_id, offer.seller.name.lower(), offer.placement_type)
+            result.setdefault(key, offer)
     return result
+
+
+def _same_price(offer: SitePrice, cents: int, plan: "PlacementPlan") -> bool:
+    return (offer.placement_cents, offer.currency) == (cents, plan.currency)
 
 
 def _sellers(records: Iterable[PlacementRecord], upload: Upload) -> dict[str, Seller]:

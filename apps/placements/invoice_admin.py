@@ -33,7 +33,7 @@ from apps.sites.display import domain_tools_html
 from apps.sites.offers import money
 from apps.workspace.products import WorkingProductFilter
 from config import export
-from config.admin import NoDeleteAdmin, TabularInline
+from config.admin import RecordAdmin, TabularInline
 from config.assets import Css, Js
 from config.export import month_name
 
@@ -135,7 +135,7 @@ class PaidMonthFilter(admin.SimpleListFilter):
 
 
 @admin.register(Invoice)
-class InvoiceAdmin(NoDeleteAdmin):
+class InvoiceAdmin(RecordAdmin):
     panel = True
     form = InvoiceForm
     inlines = (InvoiceItemInline,)

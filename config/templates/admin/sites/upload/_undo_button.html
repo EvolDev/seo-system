@@ -1,0 +1,6 @@
+{% comment %}Отмена загрузки (ADR-060): записанную — по журналу, незаписанную — просто удалить.{% endcomment %}
+{% if upload.status == 'done' %}
+<a class="seo-btn seo-btn-danger" href="{% url 'admin:sites_upload_delete' upload.pk %}" title="Вернуть базу к состоянию до загрузки и удалить её вместе с файлом">Отменить загрузку</a>
+{% else %}
+<a class="seo-btn seo-btn-danger" href="{% url 'admin:sites_upload_delete' upload.pk %}" title="В базу ещё ничего не записано: удалится загрузка и файл">Удалить загрузку</a>
+{% endif %}

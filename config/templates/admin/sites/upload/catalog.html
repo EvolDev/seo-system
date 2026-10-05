@@ -111,5 +111,6 @@
   <summary>Отклоняли, дубли, ошибки, незнакомые значения</summary>
   <div class="seo-boxes" data-swap="issues">{% include "admin/sites/upload/_issues.html" with data=issues %}</div>
 </details>
-<p><a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a></p>
+<p><a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}</p>
 {% endblock %}

@@ -41,6 +41,7 @@
     <div class="submit-row">
       <a class="seo-btn seo-btn-primary" href="{{ anchors_url }}">К анкорам</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
     </div>
   {% else %}
     <p class="seo-lead">В базу ещё ничего не записано. Запись сведёт файл с тем, что есть: новое добавится, у знакомых анкоров значения файла заменят прежние, пустые ячейки ничего не сотрут. Чего нет в файле — останется.</p>
@@ -61,6 +62,7 @@
       <button type="submit" class="default seo-run-btn">Записать в базу</button>
       <a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">Колонки</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
       <div class="seo-inline-loader" data-loader hidden></div>
     </form>
   {% endif %}

@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.keywords.models import Keyword
@@ -491,6 +493,47 @@ class TestOffers:
         assert not SitePrice.objects.filter(site__domain="a.com").exists()
         b = Placement.objects.get(site__domain="b.com")
         assert (b.price_paid_cents, b.currency) == (32500, "USD")
+
+
+class TestForeignProduct:
+    """Файл не того продукта: строки чужого продукта не записываются (ADR-060)."""
+
+    def test_rows_of_other_product_are_skipped(self, convertio: Product, clideo: Product) -> None:
+        # Тот же файл Clideo, что 05.10.2026 записался под Convertio.
+        upload = _check(_upload(convertio, [TOMSGUIDE], name="clideo-barygi.csv"))
+        summary = upload.summary or {}
+        assert summary["foreign_total"] == 1
+        assert summary["foreign_product"] == "Clideo"
+        assert summary["foreign"][0]["url"] == "https://clideo.com/video-editor"
+        assert summary["placements_new"] == 0
+        # Про пропущенную строку не говорим ещё и «ссылка не на домен — запишется».
+        assert summary["links_foreign_total"] == 0
+        _write(upload)
+        assert not Placement.objects.filter(product=convertio).exists()
+        assert not Site.objects.filter(domain="tomsguide.com").exists()
+
+    def test_own_link_is_written(self, convertio: Product, clideo: Product) -> None:
+        row = {**TOMSGUIDE, "Ссылка1": "https://convertio.co/video-converter"}
+        upload = _check(_upload(convertio, [row]))
+        assert (upload.summary or {})["foreign_total"] == 0
+        _write(upload)
+        assert Placement.objects.filter(product=convertio).count() == 1
+
+    def test_row_without_links_is_written(self, convertio: Product, clideo: Product) -> None:
+        row = {**TOMSGUIDE, "Анкор1": "", "Ссылка1": "", "Анкор2": "", "Ссылка2": ""}
+        upload = _check(_upload(convertio, [row]))
+        assert (upload.summary or {})["foreign_total"] == 0
+        _write(upload)
+        assert Placement.objects.filter(product=convertio).count() == 1
+
+    def test_warning_on_summary_screen(
+        self, convertio: Product, clideo: Product, admin_client: Client
+    ) -> None:
+        upload = _check(_upload(convertio, [TOMSGUIDE]))
+        page = admin_client.get(reverse("admin:sites_upload_summary", args=[upload.pk]))
+        content = page.content.decode()
+        assert "Похоже, это файл «Clideo», а не «Convertio»" in content
+        assert "Ссылки ведут на другой продукт — пропущены" in content
 
 
 def test_human_mark_does_not_hide_newer_system_check(clideo: Product) -> None:

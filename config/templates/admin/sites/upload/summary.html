@@ -53,6 +53,7 @@
     <button type="submit" class="default seo-run-btn">Записать в базу</button>
     {% if upload.kind == 'price_list' %}<a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">Назад: колонки</a>{% endif %}
     <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
     <div class="seo-inline-loader" data-loader hidden></div>
   </form>
 {% endif %}

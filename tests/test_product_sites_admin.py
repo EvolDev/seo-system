@@ -16,7 +16,7 @@ from pytest_django import DjangoAssertNumQueries
 
 from apps.content.models import DomainSetting
 from apps.placements.models import Placement, PlacementStatus
-from apps.sites.admin import _euros
+from apps.sites.admin import SellerFilter, _euros
 from apps.sites.models import (
     AuditAuthor,
     AuditVerdict,
@@ -66,6 +66,15 @@ def _domains(client: Client, **params: str) -> set[str]:
     assert response.status_code == 200
     changelist: ChangeList = response.context["cl"]
     return {row.domain for row in changelist.result_list}
+
+
+def _sellers(client: Client, **params: str) -> list[str]:
+    """Пункты фильтра «продавец» — с числом площадок у имени."""
+    response = client.get(URL, params)
+    assert response.status_code == 200
+    changelist: ChangeList = response.context["cl"]
+    spec = next(s for s in changelist.filter_specs if isinstance(s, SellerFilter))
+    return [str(choice["display"]) for choice in spec.choices(changelist)]
 
 
 def _status(site: Site, product: Product, status: SiteStatus) -> None:
@@ -191,6 +200,30 @@ class TestFilters:
         assert _domains(admin_client, list="all", published="yes") == {"mid.com"}
         assert _domains(admin_client, list="all", published="no") == {"low.com", "high.com"}
 
+    def test_seller_counts_follow_other_filters(
+        self, admin_client: Client, convertio: Product, offer: OfferFactory
+    ) -> None:
+        """У имени продавца — сколько его площадок в списке при остальных фильтрах."""
+        hub = Seller.objects.create(name="LinkHub Media", currency="USD")
+        Seller.objects.create(name="Quiet Links", currency="USD")
+        offer(_site("low.com", dr=10), 10000, seller=hub, working=False)
+        offer(_site("high.com", dr=90), 10000, seller=hub, working=False)
+        found = _sellers(admin_client, list="all")
+        assert "LinkHub Media (2)" in found
+        # Продавца, у которого в этом списке площадок нет, в фильтре не показываем.
+        assert not [name for name in found if "Quiet Links" in name]
+        narrowed = _sellers(admin_client, list="all", dr__range__gte="50")
+        assert "LinkHub Media (1)" in narrowed
+
+    def test_chosen_seller_stays_when_nothing_left(
+        self, admin_client: Client, convertio: Product, offer: OfferFactory
+    ) -> None:
+        """Выбранный продавец виден с нулём — иначе фильтр нечем снять."""
+        hub = Seller.objects.create(name="LinkHub Media", currency="USD")
+        offer(_site("low.com", dr=10), 10000, seller=hub, working=False)
+        found = _sellers(admin_client, list="all", seller=str(hub.pk), dr__range__gte="50")
+        assert "LinkHub Media (0)" in found
+
     def test_writing(self, admin_client: Client, convertio: Product, offer: OfferFactory) -> None:
         # «Написание» вместо «пишем мы» (ADR-043): предлагает ли площадка статью.
         offer(_site("writes.com"), 10000, writing_cents=9000)
@@ -236,14 +269,18 @@ class TestPrices:
 
 
 class TestReadOnly:
-    def test_no_add_change_delete(self, admin_client: Client, convertio: Product) -> None:
-        _site("a.com")
+    def test_no_add_change_delete_removes_site(
+        self, admin_client: Client, convertio: Product
+    ) -> None:
+        site = _site("a.com")
         response = admin_client.get(URL, {"list": "all"})
         model_admin = response.context["cl"].model_admin
         request = response.wsgi_request
         assert not model_admin.has_add_permission(request)
         assert not model_admin.has_change_permission(request)
-        assert not model_admin.has_delete_permission(request)
+        # «Удалить отмеченные» удаляет саму площадку (ADR-060).
+        assert model_admin.has_delete_permission(request)
+        assert model_admin.delete_roots(response.context["cl"].result_list) == {Site: [site.pk]}
 
 
 def test_query_count(
@@ -253,13 +290,15 @@ def test_query_count(
     offer: OfferFactory,
     django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
-    """Критерий приёмки: страница — не больше 13 запросов при любом числе строк.
+    """Критерий приёмки: страница — не больше 14 запросов при любом числе строк.
 
     С E1-07 — ещё и с продавцами, предложениями, заметками и их фильтрами.
     С E1-10 — с выбранным регионом и его «от/до»: список регионов — 11-й
     запрос, колонки региона — подзапросы в основном. С E9-10 — «Мои фильтры»:
     наборы пользователя на этом списке — 12-й. С E9-12 — рабочий продукт
     пользователя — 13-й (список продуктов — общий у шапки и фильтра).
+    С ADR-060 — счётчики площадок у продавцов в фильтре: 14-й, один на всех
+    продавцов.
     """
     site_list = SiteList.objects.create(name="Сентябрь")
     seller = Seller.objects.create(name="LinkHub Media", currency="USD")
@@ -289,7 +328,7 @@ def test_query_count(
     # Тема Admin Interface при первом открытии заводит свою строку и кладёт её
     # в кеш; в работающем приложении она там уже есть, считаем без неё.
     admin_client.get(URL)
-    with django_assert_max_num_queries(13):
+    with django_assert_max_num_queries(14):
         response = admin_client.get(URL, params)
     assert response.status_code == 200
     assert len(response.context["cl"].result_list) == 100

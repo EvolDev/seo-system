@@ -1,8 +1,9 @@
 {% extends "admin/base_site.html" %}
 {% comment %}
-Файл размещений (E1-09, ADR-051): сводка до записи и итог. Разбора нет — решать
-нечего: размещения дополняются, а что в базе другое — список «Расходится с базой»
-и кнопка «Записать, заменив расходящиеся». Пока идёт проверка или запись, страница
+Файл размещений (E1-09, ADR-051): сводка до записи и итог. Размещения дополняются,
+а что в базе другое — список «Расходится с базой» и кнопка «Записать, заменив
+расходящиеся». Цены продавцов — в разбор, как у прайса (ADR-060). Строки, чьи ссылки ведут на другой
+наш продукт, пропускаются — предупреждение наверху. Пока идёт проверка или запись, страница
 опрашивает состояние (seo/uploads.js).
 {% endcomment %}
 
@@ -29,6 +30,13 @@
     <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить файл снова</a>
   </div>
 {% else %}
+  {% if summary.foreign_total %}
+    <div class="errornote">
+      {% if summary.foreign_product %}<b>Похоже, это файл «{{ summary.foreign_product }}», а не «{{ upload.product.name }}».</b> {% endif %}
+      Строк, где все ссылки ведут на другой наш продукт — {{ summary.foreign_total }} из {{ summary.rows }}{% if not done %}; они не запишутся{% else %}; они не записаны{% endif %}.
+      {% if not done %}Если файл правда не того продукта, <a href="{% url 'admin:sites_upload_add' %}">загрузите его заново</a> с нужным продуктом.{% endif %}
+    </div>
+  {% endif %}
   {% if done %}
     <div class="seo-stats">
       <div class="seo-stat seo-good"><b>{{ counts.placements_created|default:0 }}</b><span>размещений создано</span></div>
@@ -37,19 +45,21 @@
       <div class="seo-stat"><b>{{ counts.sites_created|default:0 }}</b><span>новых площадок</span></div>
       <div class="seo-stat"><b>{{ counts.links_created|default:0 }}</b><span>ссылок</span></div>
       <div class="seo-stat"><b>{{ counts.checks_created|default:0 }}</b><span>отметок индексации</span></div>
-      <div class="seo-stat"><b>{{ counts.offers_created|default:0 }}</b><span>цен продавцов, рабочих — {{ counts.working_set|default:0 }}</span></div>
+      <div class="seo-stat{% if review_pending %} seo-warn{% endif %}"><b>{{ counts.offers_created|default:0 }}</b><span>цен продавцов, рабочих — {{ counts.working_set|default:0 }}{% if review_need %}, ждут решения — {{ review_pending }} из {{ review_need }}{% endif %}</span></div>
       <div class="seo-stat"><b>{{ counts.sellers_created|default:0 }}</b><span>новых продавцов</span></div>
       <div class="seo-stat"><b>{{ counts.employees_created|default:0 }}</b><span>новых сотрудников</span></div>
       <div class="seo-stat seo-warn"><b>{{ summary.conflicts_total|default:0 }}</b><span>расходилось с базой{% if result.runs.0.action == 'replace' %} — заменено{% else %} — не тронуто{% endif %}</span></div>
     </div>
     <p class="seo-hint">
-      Площадки файла — в рабочем списке «{{ list_name }}»: в «Площадках» другого продукта у них видно «другие продукты: {{ upload.product.name }}», а у площадок без рабочей цены — цена продавца, через которого брали.
+      Площадки файла — в рабочем списке «{{ list_name }}»: в «Площадках» другого продукта у них видно «другие продукты: {{ upload.product.name }}». У площадок без рабочей цены рабочей стала цена продавца, через которого брали; где рабочая уже была (например, Collaborator), цена продавца ждёт решения в «Разборе цен» — там она рядом с рабочей.
     </p>
     <div class="submit-row">
+      {% if review_items %}<a class="seo-btn{% if review_pending %} seo-btn-primary{% endif %}" href="{% url 'admin:sites_upload_review' upload.pk %}">Разбор цен{% if review_pending %} — ждут {{ review_pending }}{% endif %}</a>{% endif %}
       {% if sites_url %}<a class="seo-btn" href="{{ sites_url }}">Открыть «Площадки»</a>{% endif %}
       <a class="seo-btn" href="{{ placements_url }}">Размещения {{ upload.product.name }}</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить ещё файл</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
     </div>
   {% else %}
     <p class="seo-lead">В базу ещё ничего не записано. Проверьте цифры и списки ниже и нажмите «Записать в базу».</p>
@@ -61,13 +71,13 @@
       <div class="seo-stat"><b>{{ summary.placements_unchanged }}</b><span>уже есть, без изменений</span></div>
       <div class="seo-stat"><b>{{ summary.links_new }}</b><span>новых ссылок</span></div>
       <div class="seo-stat"><b>{{ summary.checks_new }}</b><span>отметок индексации</span></div>
-      <div class="seo-stat"><b>{{ summary.offers_new }}</b><span>цен продавцов, станут рабочими — {{ summary.offers_working }}</span></div>
+      <div class="seo-stat"><b>{{ summary.offers_new }}</b><span>цен продавцов, станут рабочими — {{ summary.offers_working }}, в разбор — {{ summary.offers_review|default:0 }}</span></div>
       <div class="seo-stat seo-warn"><b>{{ summary.conflicts_total }}</b><span>расходится с базой</span></div>
       <div class="seo-stat seo-warn"><b>{{ summary.errors_total|add:summary.price_cap_total }}</b><span>ошибки и цены-ошибки</span></div>
     </div>
     <p class="seo-hint">
       Найденное размещение только дополняется: пустое заполнится, статус — только вперёд. Что в базе заполнено по-другому — в списке «Расходится с базой», без галочки не тронется.
-      Строки без статуса ({{ summary.no_status }}) — «Опубликовано». Цена, которую заплатили, станет и ценой продавца на дату размещения: рабочей — у площадок без рабочей цены.
+      Строки без статуса ({{ summary.no_status }}) — «Опубликовано». Цена, которую заплатили, станет и ценой продавца на дату размещения: рабочей — у площадок без рабочей цены, а где рабочая другого продавца — в разбор, как у прайса. Нулевая цена не пишется; та же цена того же продавца — второй раз тоже.
       Цены выше €{{ summary.cap_eur|floatformat:0 }} похожи на ошибку и не пишутся — порог в «Настройках», UPLOAD_PRICE_CAP.
     </p>
     <div class="submit-row seo-run-row">
@@ -86,6 +96,7 @@
       {% endif %}
       <a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">К колонкам</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
     </div>
   {% endif %}
 
@@ -153,6 +164,16 @@
       <div class="seo-box">
         <h3>Дубли в файле</h3>
         <ul>{% for row in summary.duplicates %}<li><b>{{ row.domain }}</b>: строки {{ row.lines|join:" и " }}; взята первая</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if summary.foreign %}
+      <div class="seo-box">
+        <h3>Ссылки ведут на другой продукт — пропущены</h3>
+        <ul>
+          {% for row in summary.foreign %}<li>Строка {{ row.line }}, {{ row.domain }}: {{ row.url }} — это «{{ row.product }}»</li>{% endfor %}
+          {% if summary.foreign_total > summary.foreign|length %}<li class="seo-flat">всего {{ summary.foreign_total }}</li>{% endif %}
+        </ul>
+        <p class="seo-hint">Размещение этого продукта из такой строки не создаётся: 05.10.2026 файл Clideo записался под Convertio и дал 455 лишних размещений.</p>
       </div>
     {% endif %}
     {% if summary.blocked %}

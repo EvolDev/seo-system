@@ -44,6 +44,8 @@ def _post_file(client: Client, content: str = CSV, name: str = "clideo.csv", **d
 
 def _confirm_columns(client: Client, upload: Upload, **overrides: str) -> Any:
     fields = {f"field:{c['key']}": c["field"] for c in upload.columns or []}
+    # Галочка «грузить» у каждой колонки — как её ставит форма шага «Колонки».
+    fields |= {f"load:{c['key']}": "1" for c in upload.columns or []}
     fields.update({f"field:{key}": value for key, value in overrides.items()})
     return client.post(
         reverse("admin:sites_upload_columns", args=[upload.pk]),

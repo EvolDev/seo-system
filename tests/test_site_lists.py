@@ -78,8 +78,9 @@ class TestAdmin:
         assert response.context["has_change_permission"] is False
 
     @pytest.mark.parametrize("model", ["sitelist", "sitelistitem"])
-    def test_delete_disabled(self, admin_client: Client, model: str) -> None:
+    def test_delete_allowed(self, admin_client: Client, model: str) -> None:
+        # Удалить можно любую запись (ADR-060).
         response = admin_client.get(reverse(f"admin:sites_{model}_changelist"))
         assert response.status_code == 200
         model_admin = response.context["cl"].model_admin
-        assert model_admin.has_delete_permission(response.wsgi_request) is False
+        assert model_admin.has_delete_permission(response.wsgi_request) is True

@@ -19,6 +19,7 @@ from apps.workspace.products import (
     without_product,
     working_product_id,
 )
+from config import deletion
 
 pytestmark = pytest.mark.django_db
 
@@ -86,7 +87,7 @@ class TestWorkingProduct:
     ) -> None:
         convertio, clideo = products
         choose_product(admin_user, clideo)
-        clideo.delete_unused()
+        deletion.delete({Product: [clideo.pk]})
         assert UserSettings.objects.get(user=admin_user).product is None
         assert working_product_id(_request(admin_user)) == convertio.pk
 

@@ -43,6 +43,7 @@
       <a class="seo-btn" href="{{ sites_url }}">Открыть «Площадки»</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить ещё файл</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
     </div>
   {% else %}
     <p class="seo-lead">В базу ещё ничего не записано. Проверьте цифры и нажмите «Записать в базу».</p>
@@ -63,6 +64,7 @@
       {% csrf_token %}
       <button type="submit" class="default seo-run-btn">Записать в базу</button>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
       <div class="seo-inline-loader" data-loader hidden></div>
     </form>
   {% endif %}

@@ -12,7 +12,8 @@
 import datetime as dt
 import hashlib
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -21,7 +22,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from apps.content.domain_settings import offer_recheck, upload_price_cap
@@ -420,67 +421,92 @@ def write(
         )
         if upload.status != UploadStatus.WRITING:
             return
-        if upload.kind == UploadKind.AHREFS_BATCH:
-            _write_ahrefs(upload)
-            return
-        if upload.kind == UploadKind.PLACEMENTS:
-            _write_placements(upload, replace=action == Action.REPLACE)
-            return
-        if upload.kind == UploadKind.REF_DOMAINS:
-            _write_refdomains(upload)
-            return
-        if upload.kind == UploadKind.ANCHORS:
-            _write_anchors(upload)
-            return
-        try:
-            table, parsed, unknown = parse(upload)
-        except FileError as error:
-            _fail(upload, str(error))
-            return
-        plan = plan_for(upload, parsed)
-        summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown)
-        how = Action(action)
-        chosen = frozenset(Part(part) for part in parts) if parts is not None else ALL_PARTS
-        rule = filters.parse_spec(spec)
-        if how == Action.KNOWN:
-            plan = plan.select(lambda item: item.site is not None)
-        elif how == Action.NEW:
-            rows = dict(filters.rows_from_table(table))
-            plan = plan.select(
-                lambda item: (
-                    item.site is None
-                    and filters.matches(rows.get(item.record.domain, filters.EMPTY_ROW), rule)
-                )
+        with journal(upload):
+            _write(upload, action, parts, spec)
+    logger.info("загрузка записана", extra={"upload_id": upload_id, "action": action})
+
+
+@contextmanager
+def journal(upload: Upload) -> Iterator[None]:
+    """Всё, что запись меняет в рабочих таблицах, — в журнал загрузки (ADR-060).
+
+    Номер загрузки — переменная транзакции, её читает триггер `log_upload_change`.
+    На выходе номер снимается: дальше в той же транзакции журнал не пишется.
+    """
+    upload.journaled = True
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT set_config('seo.upload_id', %s, true)", [str(upload.pk)])
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT set_config('seo.upload_id', '', true)")
+
+
+def _write(
+    upload: Upload,
+    action: str,
+    parts: Iterable[str] | None,
+    spec: Mapping[str, Any] | None,
+) -> None:
+    """Запись загрузки по её виду — внутри транзакции, блокировки и журнала `write`."""
+    if upload.kind == UploadKind.AHREFS_BATCH:
+        _write_ahrefs(upload)
+        return
+    if upload.kind == UploadKind.PLACEMENTS:
+        _write_placements(upload, replace=action == Action.REPLACE)
+        return
+    if upload.kind == UploadKind.REF_DOMAINS:
+        _write_refdomains(upload)
+        return
+    if upload.kind == UploadKind.ANCHORS:
+        _write_anchors(upload)
+        return
+    try:
+        table, parsed, unknown = parse(upload)
+    except FileError as error:
+        _fail(upload, str(error))
+        return
+    plan = plan_for(upload, parsed)
+    summary = plan.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown)
+    how = Action(action)
+    chosen = frozenset(Part(part) for part in parts) if parts is not None else ALL_PARTS
+    rule = filters.parse_spec(spec)
+    if how == Action.KNOWN:
+        plan = plan.select(lambda item: item.site is not None)
+    elif how == Action.NEW:
+        rows = dict(filters.rows_from_table(table))
+        plan = plan.select(
+            lambda item: (
+                item.site is None
+                and filters.matches(rows.get(item.record.domain, filters.EMPTY_ROW), rule)
             )
-        written = Writer(upload, plan, chosen).run()
-        run = {
-            "action": how.value,
-            "parts": sorted(part.value for part in chosen),
-            "filters": rule if how == Action.NEW else {},
-            "filter_text": filters.describe(rule) if how == Action.NEW else "",
-            "at": timezone.now().isoformat(),
-            "sites": len({item.record.domain for item in plan.items}),
-            **written,
-        }
-        runs = [*(upload.result or {}).get("runs", []), run]
-        if how == Action.ALL:
-            upload.result = {**summary, **written, "runs": runs}
-        else:
-            # Сводка — по состоянию после записи: добавленные стали «уже в базе».
-            fresh = plan_for(upload, parsed)
-            upload.summary = _with_refs(
-                fresh.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown),
-                parsed,
-            )
-            upload.result = {"runs": runs}
-        upload.status = UploadStatus.DONE
-        upload.error = None
-        upload.written_at = timezone.now()
-        upload.save()
-    logger.info(
-        "загрузка записана",
-        extra={"upload_id": upload.pk, "action": action, "counts": written["counts"]},
-    )
+        )
+    written = Writer(upload, plan, chosen).run()
+    run = {
+        "action": how.value,
+        "parts": sorted(part.value for part in chosen),
+        "filters": rule if how == Action.NEW else {},
+        "filter_text": filters.describe(rule) if how == Action.NEW else "",
+        "at": timezone.now().isoformat(),
+        "sites": len({item.record.domain for item in plan.items}),
+        **written,
+    }
+    runs = [*(upload.result or {}).get("runs", []), run]
+    if how == Action.ALL:
+        upload.result = {**summary, **written, "runs": runs}
+    else:
+        # Сводка — по состоянию после записи: добавленные стали «уже в базе».
+        fresh = plan_for(upload, parsed)
+        upload.summary = _with_refs(
+            fresh.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown),
+            parsed,
+        )
+        upload.result = {"runs": runs}
+    upload.status = UploadStatus.DONE
+    upload.error = None
+    upload.written_at = timezone.now()
+    upload.save()
 
 
 def ahrefs_plan(upload: Upload) -> tuple[Table, ahrefs.Plan]:

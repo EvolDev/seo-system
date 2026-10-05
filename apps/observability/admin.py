@@ -19,7 +19,7 @@ from django.utils.safestring import SafeString
 
 from apps.integrations.serp import spent_today
 from apps.observability.models import ApiUsage, TaskRun, TaskStatus
-from config.admin import NoDeleteAdmin
+from config.admin import RecordAdmin
 
 # Названия задач по-русски. Задачи нет в списке — показывается её имя.
 TASK_LABELS = {
@@ -82,7 +82,7 @@ class TaskFilter(admin.SimpleListFilter):
 
 
 @admin.register(TaskRun)
-class TaskRunAdmin(NoDeleteAdmin):
+class TaskRunAdmin(RecordAdmin):
     list_display = (
         "task",
         "status",
@@ -158,7 +158,7 @@ class TaskRunAdmin(NoDeleteAdmin):
 
 
 @admin.register(ApiUsage)
-class ApiUsageAdmin(NoDeleteAdmin):
+class ApiUsageAdmin(RecordAdmin):
     """Расход платных API, кроме LLM: строка — один платный запрос."""
 
     list_display = ("created_at", "provider_name", "endpoint", "units", "cost", "run")

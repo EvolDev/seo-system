@@ -1,9 +1,10 @@
 <div class="seo-table-wrap">
   <table class="seo-upload-table">
-    <thead><tr><th>Колонка в файле</th><th>Первые значения</th><th>Куда записать</th><th>Уверенность</th></tr></thead>
+    <thead><tr><th>Грузить</th><th>Колонка в файле</th><th>Первые значения</th><th>Куда записать</th><th>Уверенность</th></tr></thead>
     <tbody>
       {% for column in columns %}
         <tr>
+          <td><input type="checkbox" name="load:{{ column.key }}" value="1" aria-label="Загружать колонку {{ column.header }}"{% if column.field != "skip" %} checked{% endif %}></td>
           <td><b>{{ column.header }}</b><div class="seo-sub">колонка {{ column.letter }} · заполнено {{ column.filled }}</div></td>
           <td class="seo-sub">{% for sample in column.samples %}{{ sample }}{% if not forloop.last %} · {% endif %}{% empty %}<span class="seo-flat">пусто в первых строках</span>{% endfor %}</td>
           <td>

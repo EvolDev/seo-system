@@ -75,6 +75,8 @@ def _uploaded(admin_client: Client, linkhub: Seller) -> Upload:
     upload = Upload.objects.get()
     columns = upload.columns or []
     fields = {f"field:{c['key']}": c["field"] for c in columns}
+    # Галочка «грузить» у каждой колонки — как её ставит форма шага «Колонки».
+    fields |= {f"load:{c['key']}": "1" for c in columns}
     admin_client.post(
         reverse("admin:sites_upload_columns", args=[upload.pk]),
         {**fields, "currency": "USD", "header_row": upload.header_row},
@@ -104,6 +106,25 @@ class TestSteps:
         assert response["Location"] == reverse("admin:sites_upload_columns", args=[upload.pk])
         page = admin_client.get(response["Location"]).content.decode()
         assert "Website" in page and "GP Price" in page and "Прочие данные" in page
+
+    def test_unchecked_column_is_not_loaded(
+        self, admin_client: Client, linkhub: Seller, known: Site
+    ) -> None:
+        """Снятая галочка «грузить» — колонка не попадает в загрузку (просьба 05.10.2026)."""
+        _post_file(admin_client, CSV, kind="price_list", seller=linkhub.pk)
+        upload = Upload.objects.get()
+        page = admin_client.get(reverse("admin:sites_upload_columns", args=[upload.pk]))
+        assert 'name="load:' in page.content.decode()
+        columns = upload.columns or []
+        skipped = next(c for c in columns if c["header"] == "DA")
+        payload: dict[str, object] = {f"field:{c['key']}": c["field"] for c in columns}
+        payload |= {f"load:{c['key']}": "1" for c in columns if c["key"] != skipped["key"]}
+        admin_client.post(
+            reverse("admin:sites_upload_columns", args=[upload.pk]),
+            {**payload, "currency": "USD", "header_row": upload.header_row},
+        )
+        upload.refresh_from_db()
+        assert (upload.mapping or {})[skipped["key"]] == "skip"
 
     def test_new_seller_is_created_from_the_form(self, admin_client: Client, known: Site) -> None:
         ExchangeRate.objects.create(currency="USD", rate_date=PRICE_DATE, rate=Decimal("1.1"))
@@ -149,7 +170,11 @@ class TestSteps:
         columns = upload.columns or []
         admin_client.post(
             reverse("admin:sites_upload_columns", args=[upload.pk]),
-            {**{f"field:{c['key']}": c["field"] for c in columns}, "currency": "USD"},
+            {
+                **{f"field:{c['key']}": c["field"] for c in columns},
+                **{f"load:{c['key']}": "1" for c in columns},
+                "currency": "USD",
+            },
         )
         response = admin_client.get(reverse("admin:sites_upload_summary", args=[upload.pk]))
         page = response.content.decode()

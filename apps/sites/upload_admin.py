@@ -9,6 +9,7 @@
 
 import datetime as dt
 import json
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from django import forms
@@ -39,11 +40,11 @@ from apps.sites.models import (
 from apps.sites.offers import CURRENCIES, money
 from apps.sites.rates import latest_rates
 from apps.sites.tasks import upload_check, upload_write
-from apps.sites.uploads import filters, placements, review, service
+from apps.sites.uploads import filters, placements, review, service, undo
 from apps.sites.uploads.apply import Part
 from apps.sites.uploads.columns import Confidence
 from apps.workspace.products import working_product_id
-from config.admin import NoDeleteAdmin
+from config.admin import RecordAdmin
 from config.assets import Css
 from config.run_id import bind_run_id, new_run_id
 
@@ -147,7 +148,7 @@ class UploadForm(forms.Form):
 
 
 @admin.register(Upload)
-class UploadAdmin(NoDeleteAdmin):
+class UploadAdmin(RecordAdmin):
     """Список загрузок и их путь. Строку не правят: открыть — значит продолжить."""
 
     list_display = (
@@ -183,6 +184,46 @@ class UploadAdmin(NoDeleteAdmin):
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         # Штатной формы правки нет: загрузку продолжают по шагам.
         return False
+
+    # ---------- Отмена загрузки (ADR-060) ----------
+    # Удалить загрузку — значит отменить её: база возвращается к состоянию до
+    # неё по журналу (`uploads/undo.py`). Штатные подтверждение и «Удалить
+    # выбранные» Django — с нашими словами (шаблоны `admin/sites/upload/`).
+
+    def get_actions(self, request: HttpRequest, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        actions: dict[str, Any] = super().get_actions(request, *args, **kwargs)
+        if "delete_selected" in actions:
+            func, name, _ = actions["delete_selected"]
+            actions["delete_selected"] = (func, name, "Отменить отмеченные загрузки")
+        return actions
+
+    def get_deleted_objects(
+        self, objs: Any, request: HttpRequest
+    ) -> tuple[list[Any], dict[str, int], set[str], list[str]]:
+        uploads = sorted(objs, key=lambda upload: -upload.pk)
+        chosen = {upload.pk for upload in uploads}
+        names: list[Any] = []
+        protected: list[str] = []
+        for upload in uploads:
+            later = [u for u in undo.later_uploads(upload) if u.pk not in chosen]
+            if later:
+                protected.append(
+                    f"«{upload}»: её строки потом меняли более поздние загрузки — сначала "
+                    "отмените их: " + ", ".join(f"«{u}»" for u in later)
+                )
+                continue
+            names += [str(upload), undo.preview(upload).lines() if len(uploads) == 1 else []]
+        return names, {}, set(), protected
+
+    def delete_model(self, request: HttpRequest, obj: Upload) -> None:
+        undo.undo(obj)
+
+    def delete_queryset(self, request: HttpRequest, queryset: Iterable[Upload]) -> None:
+        for upload in sorted(queryset, key=lambda u: -u.pk):
+            undo.undo(upload)
+
+    def delete_roots(self, objs: Iterable[Any]) -> dict[Any, list[int]]:
+        raise NotImplementedError("загрузка не удаляется, а отменяется: uploads/undo.py")
 
     # ---------- Колонки списка ----------
 
@@ -236,8 +277,12 @@ class UploadAdmin(NoDeleteAdmin):
     @admin.display(description="разобрано")
     def progress_cell(self, obj: Upload) -> SafeString:
         need = getattr(obj, "need", 0)
-        # Разбор — только у прайса и каталога.
-        reviewed = obj.kind in (UploadKind.PRICE_LIST, UploadKind.COLLABORATOR_CATALOG)
+        # Разбор — у прайса, каталога и цен из файла размещений (ADR-060).
+        reviewed = obj.kind in (
+            UploadKind.PRICE_LIST,
+            UploadKind.COLLABORATOR_CATALOG,
+            UploadKind.PLACEMENTS,
+        )
         if obj.status != UploadStatus.DONE or not reviewed:
             return format_html('<span class="seo-flat">{}</span>', "—")
         if not need:
@@ -404,7 +449,7 @@ class UploadAdmin(NoDeleteAdmin):
                 )
                 return HttpResponseRedirect(_url("columns", upload))
             mapping = {
-                str(column["key"]): request.POST.get(f"field:{column['key']}", "extra")
+                str(column["key"]): _chosen_field(request, str(column["key"]))
                 for column in upload.columns or []
             }
             errors = service.confirm_mapping(
@@ -538,7 +583,7 @@ class UploadAdmin(NoDeleteAdmin):
         return TemplateResponse(request, "admin/sites/upload/anchors.html", context)
 
     def _placements_summary(self, request: HttpRequest, upload: Upload) -> HttpResponse:
-        """Файл размещений: сводка до записи, а после — итог. Разбора нет (ADR-051)."""
+        """Файл размещений: сводка до записи, а после — итог и разбор цен (ADR-051, ADR-060)."""
         if upload.status == UploadStatus.NEW:
             return HttpResponseRedirect(_step_url(upload))
         done = upload.status == UploadStatus.DONE
@@ -564,6 +609,12 @@ class UploadAdmin(NoDeleteAdmin):
             "placements_url": reverse("admin:placements_placement_changelist")
             + f"?product__id__exact={upload.product_id}",
         }
+        if done:
+            # Цены продавцов из файла — в разбор, как у прайса (ADR-060).
+            reviewed, need = review.progress(upload)
+            context["review_items"] = UploadItem.objects.filter(upload=upload).exists()
+            context["review_need"] = need
+            context["review_pending"] = need - reviewed
         return TemplateResponse(request, "admin/sites/upload/placements.html", context)
 
     def write_view(self, request: HttpRequest, upload_id: int) -> HttpResponse:
@@ -893,6 +944,17 @@ def _step_url(upload: Upload) -> str:
 def _sites_url(upload: Upload) -> str:
     base = reverse("admin:sites_productsitelatest_changelist")
     return f"{base}?list={upload.site_list_id}" if upload.site_list_id else base
+
+
+def _chosen_field(request: HttpRequest, key: str) -> str:
+    """Куда записать колонку: снятая галочка «грузить» — «не загружать».
+
+    Галочка есть у каждой колонки шага «Колонки», у пустых — скрытым полем:
+    нет её в запросе — значит, человек снял её сам.
+    """
+    if f"load:{key}" not in request.POST:
+        return "skip"
+    return request.POST.get(f"field:{key}", "extra")
 
 
 def _confidence_class(confidence: Confidence) -> str:

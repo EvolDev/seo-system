@@ -74,10 +74,11 @@ class TestSnapshots:
 @pytest.mark.parametrize(
     "model", ["product", "site", "productsite", "sitemetric", "siteprice", "grayscan", "siteaudit"]
 )
-def test_delete_disabled(admin_client: Client, model: str) -> None:
+def test_delete_allowed(admin_client: Client, model: str) -> None:
+    # Удалить можно любую запись (ADR-060).
     response = admin_client.get(reverse(f"admin:sites_{model}_changelist"))
     assert response.status_code == 200
-    assert response.context["cl"].model_admin.has_delete_permission(response.wsgi_request) is False
+    assert response.context["cl"].model_admin.has_delete_permission(response.wsgi_request) is True
 
 
 def test_product_site_rows_are_not_added_by_hand(admin_client: Client) -> None:

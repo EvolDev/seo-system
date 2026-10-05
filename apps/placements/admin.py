@@ -53,7 +53,7 @@ from apps.sites.offers import money
 from apps.sites.status_history import placement_history
 from apps.workspace.products import ALL, WorkingProductFilter, working_product_id
 from config import export
-from config.admin import NoDeleteAdmin, StackedInline
+from config.admin import RecordAdmin, StackedInline
 from config.assets import Css, Js
 from config.export import month_name
 from config.queue import MAX_ATTEMPTS
@@ -236,7 +236,7 @@ AFTER_LINKS = (CHECKS, COMMENT, SERVICE)
 
 
 @admin.register(Placement)
-class PlacementAdmin(NoDeleteAdmin):
+class PlacementAdmin(RecordAdmin):
     """Размещения. Проверка индексации без перезагрузки страницы — кнопка ↻ в
     колонке «в индексе», действие «Проверить индексацию» для отмеченных строк и
     кнопка в карточке. Скрипт `seo/indexation.js` ставит пачку проверок одним

@@ -10,6 +10,7 @@
 """
 
 import datetime as dt
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -32,7 +33,7 @@ from apps.keywords.models import (
 )
 from apps.sites.admin import ProductFilter
 from apps.workspace.products import WorkingProductFilter, product_filter, working_product_id
-from config.admin import NoDeleteAdmin, SnapshotAdmin
+from config.admin import RecordAdmin, SnapshotAdmin
 from config.assets import Css, Js
 
 # Колонок позиций в списке «Анкоров» — как на листе таблицы: четыре последних снимка.
@@ -41,7 +42,7 @@ _DATES = "_seo_anchor_dates"
 
 
 @admin.register(Keyword)
-class KeywordAdmin(NoDeleteAdmin):
+class KeywordAdmin(RecordAdmin):
     """Ключ (анкор) — форма для панели «Анкоров». Список ключей — «Анкоры»."""
 
     panel = True
@@ -164,7 +165,7 @@ def anchors_product(request: HttpRequest) -> int | None:
 
 
 @admin.register(KeywordCoverage)
-class KeywordCoverageAdmin(NoDeleteAdmin):
+class KeywordCoverageAdmin(RecordAdmin):
     """Анкоры продукта: лист «Распределение анкоров» и доли над ним (E3-05)."""
 
     list_display_links = None
@@ -183,6 +184,13 @@ class KeywordCoverageAdmin(NoDeleteAdmin):
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+    # «Удалить отмеченные» удаляет сами ключи — с позициями; ссылки остаются без ключа (ADR-060).
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return bool(request.user.has_perm("keywords.delete_keyword"))
+
+    def delete_roots(self, objs: Iterable[Any]) -> dict[Any, list[int]]:
+        return {Keyword: [row.pk for row in objs]}
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[KeywordCoverage]:
         queryset = super().get_queryset(request)

@@ -1,9 +1,8 @@
-"""Продукт, заведённый по ошибке, удаляется, пока с ним не работали (ADR-036)."""
+"""Удаление продукта (ADR-036, ADR-060): вместе со всем, что без него не живёт."""
 
 from collections.abc import Callable
 
 import pytest
-from django.core.exceptions import ValidationError
 from django.test import Client
 from django.urls import reverse
 
@@ -39,7 +38,7 @@ def test_unused_product_is_deleted_with_its_rows(
 
     confirm = admin_client.get(_delete_url(product))
     assert confirm.status_code == 200
-    assert "пустые строки" in confirm.content.decode()
+    assert "Решения по площадкам: <b>1</b>" in confirm.content.decode()
 
     assert admin_client.post(_delete_url(product), {"post": "yes"}).status_code == 302
     assert not Product.objects.filter(pk=product.pk).exists()
@@ -81,22 +80,25 @@ def _prompt(product: Product, site: Site) -> None:
 @pytest.mark.parametrize(
     "history", [_decision, _imported, _reason, _audit, _placement, _keyword, _prompt]
 )
-def test_product_with_history_is_not_deleted(
+def test_product_with_history_is_deleted_with_it(
     admin_client: Client,
     product: Product,
     site: Site,
     history: Callable[[Product, Site], None],
 ) -> None:
+    # С ADR-060 продукт с историей тоже удаляется — вместе с ней; площадки остаются.
     history(product, site)
     assert product.has_history()
     change = admin_client.get(reverse("admin:sites_product_change", args=[product.pk]))
-    assert _delete_url(product) not in change.content.decode()
-    assert admin_client.post(_delete_url(product), {"post": "yes"}).status_code == 403
-    with pytest.raises(ValidationError):
-        product.delete_unused()
-    assert Product.objects.filter(pk=product.pk).exists()
+    assert _delete_url(product) in change.content.decode()
+    assert admin_client.post(_delete_url(product), {"post": "yes"}).status_code == 302
+    assert not Product.objects.filter(pk=product.pk).exists()
+    assert not ProductSite.objects.exists()
+    assert not Placement.objects.exists()
+    assert not Keyword.objects.exists()
+    assert Site.objects.filter(pk=site.pk).exists()
 
 
-def test_no_bulk_delete(admin_client: Client, product: Product) -> None:
+def test_bulk_delete_offered(admin_client: Client, product: Product) -> None:
     changelist = admin_client.get(reverse("admin:sites_product_changelist"))
-    assert "delete_selected" not in changelist.content.decode()
+    assert "delete_selected" in changelist.content.decode()

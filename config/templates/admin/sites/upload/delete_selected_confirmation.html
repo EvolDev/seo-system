@@ -1,0 +1,7 @@
+{% extends "admin/delete_selected_confirmation.html" %}
+{% comment %}Отмена отмеченных загрузок по их журналу (ADR-060): сначала самая поздняя.{% endcomment %}
+{% block seo_protected_text %}Отменить отмеченные загрузки сейчас нельзя:{% endblock %}
+{% block seo_question %}Отменить отмеченные загрузки: {{ queryset|length }}?{% endblock %}
+{% block seo_together %}База вернётся к состоянию до них: записанное удалится, изменённое вернётся
+  как было. Загрузки и файлы тоже удалятся.{% endblock %}
+{% block seo_button %}Отменить загрузки{% endblock %}

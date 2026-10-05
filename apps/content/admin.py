@@ -24,7 +24,7 @@ from apps.content.domain_settings import (
 from apps.content.models import DomainSetting
 from apps.sites.domains import normalize_domain
 from apps.sites.models import Product
-from config.admin import NoDeleteAdmin, TabularInline
+from config.admin import RecordAdmin, TabularInline
 
 # Поля ценового ориентира на странице продукта → ключи внутри PRICE_REFERENCE.
 PRICE_FIELDS = {
@@ -300,7 +300,7 @@ class GeneralSettingForm(forms.ModelForm):  # type: ignore[type-arg]
 
 
 @admin.register(DomainSetting)
-class DomainSettingAdmin(NoDeleteAdmin):
+class DomainSettingAdmin(RecordAdmin):
     """Раздел «Настройки»: общие значения для всех продуктов.
 
     Локальные значения здесь не показываются — их правят на странице продукта.

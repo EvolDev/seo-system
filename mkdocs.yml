@@ -80,6 +80,7 @@ nav:
       - how-to/working-product.md
       - how-to/choose-anchor.md
       - how-to/upload-anchors.md
+      - how-to/delete-and-undo.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

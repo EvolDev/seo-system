@@ -190,14 +190,16 @@ class TestExisting:
         ("keywords", "keywordcoverage"),
     ],
 )
-def test_delete_disabled(admin_client: Client, app: str, model: str) -> None:
+def test_delete_allowed(admin_client: Client, app: str, model: str) -> None:
+    # Удалить можно любую запись (ADR-060); «Анкоры» удаляют сами ключи.
     response = admin_client.get(reverse(f"admin:{app}_{model}_changelist"))
     assert response.status_code == 200
-    assert response.context["cl"].model_admin.has_delete_permission(response.wsgi_request) is False
+    assert response.context["cl"].model_admin.has_delete_permission(response.wsgi_request) is True
 
 
-def test_delete_page_forbidden(admin_client: Client, site: Site, convertio: Product) -> None:
+def test_delete_page_deletes(admin_client: Client, site: Site, convertio: Product) -> None:
     placement = Placement.objects.create(site=site, product=convertio)
     url = reverse("admin:placements_placement_delete", args=[placement.pk])
-    assert admin_client.post(url, {"post": "yes"}).status_code == 403
-    assert Placement.objects.filter(pk=placement.pk).exists()
+    assert admin_client.post(url, {"post": "yes"}).status_code == 302
+    assert not Placement.objects.filter(pk=placement.pk).exists()
+    assert Site.objects.filter(pk=site.pk).exists()

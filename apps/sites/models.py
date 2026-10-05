@@ -192,18 +192,6 @@ class Product(models.Model):
             )
         )
 
-    def delete_unused(self) -> None:
-        """Удаляет продукт, заведённый по ошибке, вместе с его пустыми строками.
-
-        Продукт с историей не удаляется — его выключают флагом «активен».
-        """
-        with transaction.atomic():
-            if self.has_history():
-                raise ValidationError("С продуктом уже работали — его можно только выключить.")
-            self.product_sites.all().delete()
-            self.domain_settings.all().delete()
-            self.delete()
-
 
 class Seller(models.Model):
     """Продавец площадок: перекупщик со своим прайсом или каталог (ADR-041, ADR-043).
@@ -899,6 +887,8 @@ class Upload(models.Model):
     )
     created_at = models.DateTimeField("загружен", db_default=PgNow())
     written_at = models.DateTimeField("записан", null=True, blank=True)
+    # Запись шла с журналом изменений (ADR-060): загрузку можно отменить целиком.
+    journaled = models.BooleanField("с журналом", default=False, db_default=False)
 
     class Meta:
         db_table = "uploads"
@@ -1003,6 +993,43 @@ class UploadItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.upload_id} · {self.site_id} · {self.get_review_group_display()}"
+
+
+class UploadChange(models.Model):
+    """Журнал загрузки: строка, которую запись вставила, поменяла или удалила (ADR-060).
+
+    Пишет триггер `log_upload_change` на рабочих таблицах, пока в транзакции
+    стоит номер загрузки (`seo.upload_id`, его ставит `service.write`). У
+    вставки прежней строки нет, у правки и удаления — строка целиком до
+    изменения. Отмена загрузки (`uploads/undo.py`) по журналу возвращает
+    прежние строки и удаляет вставленные.
+    """
+
+    upload = models.ForeignKey(
+        Upload, models.PROTECT, verbose_name="загрузка", related_name="changes", db_index=False
+    )
+    table_name = models.TextField("таблица")
+    row_id = models.BigIntegerField("строка")
+    op = models.TextField("действие")  # I — вставка, U — правка, D — удаление
+    before = models.JSONField("было", null=True, blank=True)
+
+    class Meta:
+        db_table = "upload_changes"
+        verbose_name = "изменение загрузки"
+        verbose_name_plural = "изменения загрузки"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(
+                fields=["upload", "table_name", "row_id"], name="idx_upload_changes_upload"
+            ),
+        ]
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(op__in=["I", "U", "D"]), name="upload_changes_op_check"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.upload_id} · {self.op} {self.table_name}#{self.row_id}"
 
 
 class ProductRefDomain(models.Model):

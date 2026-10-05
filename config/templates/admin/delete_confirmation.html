@@ -1,0 +1,23 @@
+{% extends "admin/delete_confirmation.html" %}
+{% comment %}Удаление записи со всем, что без неё не живёт (ADR-060).{% endcomment %}
+{% load i18n %}
+
+{% block delete_protected %}
+  <p>{% block seo_protected_text %}Удалить «{{ object }}» сейчас нельзя:{% endblock %}</p>
+  <ul id="deleted-objects">{{ protected|unordered_list }}</ul>
+{% endblock %}
+
+{% block delete_confirm %}
+  <p><b>{% block seo_question %}Удалить «{{ object }}»?{% endblock %}</b></p>
+  <p>{% block seo_together %}Вместе с записью удалится всё, что без неё не живёт; где ссылка
+    необязательная — она очистится. Вернуть удалённое нельзя.{% endblock %}</p>
+  {% include "admin/seo_delete_summary.html" %}
+  {% block seo_objects %}{% endblock %}
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="post" value="yes">
+    {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
+    {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
+    <button type="submit" class="seo-btn seo-btn-primary">{% block seo_button %}Удалить{% endblock %}</button>
+    <a href="#" class="seo-btn cancel-link">Отмена</a>
+  </form>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% comment %}Что уйдёт вместе с записью (ADR-060): строки плана `config/deletion.py`.{% endcomment %}
+{% if model_count %}
+  <ul class="seo-delete-summary">
+    {% for text, count in model_count %}<li>{{ text }}: <b>{{ count }}</b></li>{% endfor %}
+  </ul>
+{% endif %}

@@ -2,7 +2,8 @@
 {% comment %}
 Шаг 2 — разметка колонок прайса (E1-08, ADR-041). Сначала новые колонки —
 про них и вопрос; запомненные у продавца — свёрнуты, их можно поправить.
-Непустая колонка без поля — в «прочие данные»; «не загружать» — только явно.
+Непустая колонка без поля — в «прочие данные». Снятая галочка «грузить» — «не
+загружать», что бы ни стояло в «куда записать» (просьба пользователя 05.10.2026).
 {% endcomment %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
@@ -28,6 +29,7 @@
       <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>.{% endif %}
     </p>
     <ul>
+      <li>Галочка «грузить» у колонки: снимите — и колонка в загрузку не попадёт совсем, что в «куда записать» неважно.</li>
       {% if anchors_kind %}
         <li>Нужны две колонки: анкор и куда ведёт. Остальное — если есть: объёмы, раздел (Tool), тип страницы (Type), позиции.</li>
         <li>Позиций может быть сколько угодно: дата снимка — из заголовка («Pos 22.09.26»). 101 — «вне топ-100».</li>
@@ -58,12 +60,13 @@
 
   {% if empty %}
     <p class="seo-sub">Пустые колонки, записывать из них нечего: {% for column in empty %}«{{ column.header }}»{% if not forloop.last %}, {% endif %}{% endfor %}.</p>
-    {% for column in empty %}<input type="hidden" name="field:{{ column.key }}" value="{{ column.field|default:'extra' }}">{% endfor %}
+    {% for column in empty %}<input type="hidden" name="field:{{ column.key }}" value="{{ column.field|default:'extra' }}"><input type="hidden" name="load:{{ column.key }}" value="1">{% endfor %}
   {% endif %}
 
   <div class="submit-row">
     <button type="submit" class="default seo-run-btn">Дальше: сводка</button>
     <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+      {% include "admin/sites/upload/_undo_button.html" %}
   </div>
 </form>
 {% endblock %}

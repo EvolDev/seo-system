@@ -236,11 +236,13 @@ class TestGeneralSettings:
         assert response.status_code == 200
         assert not DomainSetting.objects.filter(key="MY_SETTING").exists()
 
-    def test_general_value_cannot_be_deleted(self, admin_client: Client) -> None:
+    def test_general_value_can_be_deleted(self, admin_client: Client) -> None:
+        """Удалить общее значение можно (ADR-060): признак перестаёт считаться."""
         setting = DomainSetting.objects.create(key="DR_ZONES", value={"green": 50})
         url = reverse("admin:content_domainsetting_delete", args=[setting.pk])
-        assert admin_client.post(url, {"post": "yes"}).status_code == 403
-        assert DomainSetting.objects.filter(pk=setting.pk).exists()
+        assert admin_client.post(url, {"post": "yes"}).status_code == 302
+        assert not DomainSetting.objects.filter(pk=setting.pk).exists()
+        assert get_setting("DR_ZONES", None) is None
 
 
 class TestSettingValueShape:

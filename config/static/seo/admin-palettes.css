@@ -342,6 +342,16 @@ body.admin-interface .seo-run-btn:focus-visible {
 body.admin-interface .seo-btn:disabled,
 body.admin-interface .seo-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Необратимое действие — отменить загрузку, удалить (ADR-060): красная надпись, без заливки. */
+body.admin-interface .seo-btn.seo-btn-danger,
+body.admin-interface a.seo-btn.seo-btn-danger:link,
+body.admin-interface a.seo-btn.seo-btn-danger:visited { color: var(--error-fg); }
+body.admin-interface .seo-btn.seo-btn-danger:hover { border-color: var(--error-fg); }
+
+/* Что уйдёт вместе с записью — на странице подтверждения удаления. */
+body.admin-interface .seo-delete-summary { margin: 8px 0 16px; padding-left: 20px; }
+body.admin-interface .seo-delete-summary li { list-style: disc; margin: 2px 0; }
+
 /* Главное действие — заливка. */
 body.admin-interface .seo-run-btn:not(.seo-btn),
 body.admin-interface .seo-btn.seo-btn-primary,

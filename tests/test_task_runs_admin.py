@@ -86,10 +86,13 @@ def test_run_page_read_only(admin_client: Client, runs: list[TaskRun]) -> None:
     assert admin_client.post(url, {}).status_code == 403
 
 
-def test_no_add_no_delete(admin_client: Client, runs: list[TaskRun]) -> None:
+def test_no_add_but_delete_works(admin_client: Client, runs: list[TaskRun]) -> None:
+    """Запуск задачи заводит очередь, а не человек; удалить запись можно (ADR-060)."""
     assert admin_client.get(reverse("admin:observability_taskrun_add")).status_code == 403
     delete = reverse("admin:observability_taskrun_delete", args=[runs[0].pk])
-    assert admin_client.get(delete).status_code == 403
+    assert admin_client.get(delete).status_code == 200
+    assert admin_client.post(delete, {"post": "yes"}).status_code == 302
+    assert not TaskRun.objects.filter(pk=runs[0].pk).exists()
 
 
 def test_duration_text() -> None:

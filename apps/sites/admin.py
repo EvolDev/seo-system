@@ -1,9 +1,8 @@
 """Админка блока 1: продукты, площадки, решения, продавцы, цены, списки.
 
-Удаление отключено везде: ничего не удаляем физически. Площадку
-скрывает пометка «удалена», решение по ней меняется статусом. Исключения —
-локальные настройки на странице продукта (ADR-035) и продукт, с которым
-ещё не работали (ADR-036).
+Удалить можно любую запись (ADR-060): подтверждение показывает, что уйдёт
+вместе с ней — правила сборки в `config/deletion.py`. Площадку можно и не
+удалять, а скрыть пометкой «удалена»; решение по ней меняется статусом.
 
 Рабочая цена, предложения продавцов, заметки и карточка площадки —
 ADR-043; правила смены цены — `apps/sites/offers.py`. Серость в Google в
@@ -11,10 +10,10 @@ ADR-043; правила смены цены — `apps/sites/offers.py`. Серо
 """
 
 import datetime as dt
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from collections.abc import Set as AbstractSet
 from contextlib import suppress
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django import forms
 from django.contrib import admin, messages
@@ -88,14 +87,19 @@ from apps.sites.status_history import site_history
 from apps.workspace import card as card_sections
 from apps.workspace.products import WorkingProductFilter, products_of, working_product_id
 from config import export
-from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline, is_partial
+from config.admin import RecordAdmin, SnapshotAdmin, TabularInline, is_partial
 from config.assets import Css, Js
 from config.export import attachment
 from config.forms import ChoiceButtons
 
+if TYPE_CHECKING:
+    # Словарь пункта фильтра описан только в заглушках django-stubs:
+    # под TYPE_CHECKING его видит mypy, а Python при запуске — нет.
+    from django.contrib.admin.filters import _ListFilterChoices
+
 
 @admin.register(Product)
-class ProductAdmin(NoDeleteAdmin):
+class ProductAdmin(RecordAdmin):
     """Продукт и его настройки: заводя продукт, человек сразу видит, что заполнить."""
 
     panel = True
@@ -122,29 +126,6 @@ class ProductAdmin(NoDeleteAdmin):
     ) -> None:
         super().save_model(request, obj, form, change)
         form.save_settings(obj)
-
-    # Продукт, заведённый по ошибке, удаляется, пока с ним не работали
-    # (ADR-036). По одному, со страницы продукта: массового удаления нет.
-    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        if obj is None or obj.has_history():
-            return False
-        return ModelAdmin.has_delete_permission(self, request, obj)
-
-    def get_deleted_objects(
-        self, objs: Any, request: HttpRequest
-    ) -> tuple[list[str], dict[str, int], set[str], list[str]]:
-        # Строки продукт × площадка защищены от удаления (PROTECT), и штатная
-        # страница подтверждения отказала бы. Удаляет их delete_unused.
-        products = list(objs)
-        counts = {
-            "продукты": len(products),
-            "площадки продуктов — пустые строки": sum(p.product_sites.count() for p in products),
-            "настройки продукта": sum(p.domain_settings.count() for p in products),
-        }
-        return [str(product) for product in products], counts, set(), []
-
-    def delete_model(self, request: HttpRequest, obj: Product) -> None:
-        obj.delete_unused()
 
 
 class DeletedFilter(admin.SimpleListFilter):
@@ -199,7 +180,7 @@ def card_url(site_id: int) -> str:
 
 
 @admin.register(Site)
-class SiteAdmin(NoDeleteAdmin):
+class SiteAdmin(RecordAdmin):
     """Каталог площадок — факты о площадке. Цены и заметки — в её карточке."""
 
     panel = True
@@ -638,7 +619,7 @@ class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
 
 
 @admin.register(ProductSite)
-class ProductSiteAdmin(NoDeleteAdmin):
+class ProductSiteAdmin(RecordAdmin):
     """Решения по площадкам: статус площадки у продукта (ADR-030).
 
     В «Площадках» статус открывает решение панелью справа (`decision_view`,
@@ -709,7 +690,7 @@ class ProductSiteAdmin(NoDeleteAdmin):
 
 
 @admin.register(Seller)
-class SellerAdmin(NoDeleteAdmin):
+class SellerAdmin(RecordAdmin):
     """Продавцы (ADR-041, ADR-043). Collaborator — тоже продавец, его заводит миграция.
 
     Счета продавца (E1-14, ADR-055): в списке — к оплате и заплачено, в карточке —
@@ -838,7 +819,7 @@ class SellerAdmin(NoDeleteAdmin):
 
 
 @admin.register(ExchangeRate)
-class ExchangeRateAdmin(NoDeleteAdmin):
+class ExchangeRateAdmin(RecordAdmin):
     """Курсы ЕЦБ — только просмотр: их пишет задача раз в день (ADR-043)."""
 
     list_display = ("currency", "rate", "rate_date", "created_at")
@@ -932,7 +913,7 @@ class SiteAuditAdmin(SiteSnapshotAdmin):
 
 
 @admin.register(SiteList)
-class SiteListAdmin(NoDeleteAdmin):
+class SiteListAdmin(RecordAdmin):
     """Рабочие списки (ADR-033). Создаёт их импорт; здесь — обзор и имя."""
 
     panel = True
@@ -1011,7 +992,7 @@ class SiteListAdmin(NoDeleteAdmin):
 
 
 @admin.register(SiteListItem)
-class SiteListItemAdmin(NoDeleteAdmin):
+class SiteListItemAdmin(RecordAdmin):
     """Площадки списка — только просмотр: в список их добавляет импорт."""
 
     list_display = ("site", "site_list", "first_seen", "added_at")
@@ -1217,14 +1198,62 @@ class OffersFilter(admin.SimpleListFilter):
 
 
 class SellerFilter(admin.SimpleListFilter):
-    """Площадки, которые предлагает продавец: есть хоть одна его цена."""
+    """Площадки, которые предлагает продавец: есть хоть одна его цена.
+
+    У имени — сколько площадок продавца в списке при остальных выбранных
+    фильтрах: «Athena Smith (12)». Продавцы без площадок в таком списке не
+    показываются, кроме выбранного.
+    """
 
     title = "продавец"
     parameter_name = "seller"
+    # Тема спрашивает пункты дважды за страницу (выпадающий список или
+    # ссылками — по их числу), а считать площадки второй раз незачем.
+    _counted: dict[int, int] | None = None
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
         sellers = Seller.objects.order_by("name").values_list("pk", "name")
         return [(str(pk), name) for pk, name in sellers]
+
+    def choices(self, changelist: Any) -> "Iterator[_ListFilterChoices]":
+        if self._counted is None:
+            self._counted = self._counts(changelist)
+        counts = self._counted
+        items = super().choices(changelist)
+        yield next(items)  # «Все»
+        for (value, _), choice in zip(self.lookup_choices, items, strict=True):
+            count = counts.get(int(value), 0)
+            if count or choice["selected"]:
+                yield {**choice, "display": f"{choice['display']} ({count})"}
+
+    def _counts(self, changelist: Any) -> dict[int, int]:
+        """Продавец → площадок в списке со всеми фильтрами, кроме этого. Один запрос.
+
+        Штатный способ — `changelist.get_queryset(request,
+        exclude_parameters=...)`, как считает свои фасеты сама админка. Он
+        собирает все фильтры страницы заново, а каждый из них спрашивает базу
+        про свои пункты: это десять лишних запросов на экран. Поэтому берём
+        уже собранные фильтры страницы и применяем их сами, без своего.
+        """
+        rows = changelist.root_queryset
+        for spec in changelist.filter_specs:
+            if spec is self:
+                continue
+            narrowed = spec.queryset(self.request, rows)
+            if narrowed is not None:
+                rows = narrowed
+        if changelist.query:
+            rows, _ = changelist.model_admin.get_search_results(
+                self.request, rows, changelist.query
+            )
+        rows = rows.order_by()
+        found = (
+            SitePrice.objects.filter(site_id__in=rows.values("site_id"))
+            .values("seller_id")
+            .annotate(sites=Count("site_id", distinct=True))
+            .values_list("seller_id", "sites")
+        )
+        return dict(found)
 
     def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
         value = self.value()
@@ -1436,7 +1465,7 @@ class OffersChangeList(ChangeList):
 
 
 @admin.register(ProductSiteLatest)
-class ProductSiteLatestAdmin(NoDeleteAdmin):
+class ProductSiteLatestAdmin(RecordAdmin):
     """Площадки продукта «на сегодня» — рабочий список вместо Excel.
 
     Строка — это представление, поэтому сами строки не правятся. Статус
@@ -1505,6 +1534,13 @@ class ProductSiteLatestAdmin(NoDeleteAdmin):
     def has_fix_price_permission(self, request: HttpRequest) -> bool:
         # Строки — представление, их не правят; меняется площадка: её право.
         return bool(request.user.has_perm("sites.change_site"))
+
+    # «Удалить отмеченные» удаляет сами площадки — у всех продуктов (ADR-060).
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return bool(request.user.has_perm("sites.delete_site"))
+
+    def delete_roots(self, objs: Iterable[Any]) -> dict[Any, list[int]]:
+        return {Site: sorted({row.site_id for row in objs})}
 
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
         return export.ExportChangeList if export.is_export(request) else OffersChangeList

@@ -106,7 +106,13 @@ VIEWS = [
 
 # Функции схемы: E1-07 — пересчёт в евро для представлений; E1-13 — строки
 # истории статусов для триггеров.
-FUNCTIONS = ["eur_rate", "log_site_status_change", "log_placement_status_change"]
+# E1-08 — журнал загрузок для отмены (ADR-060).
+FUNCTIONS = [
+    "eur_rate",
+    "log_site_status_change",
+    "log_placement_status_change",
+    "log_upload_change",
+]
 
 # Триггеры схемы: E1-13 — история статусов (ADR-049).
 TRIGGERS = [
@@ -114,6 +120,38 @@ TRIGGERS = [
     "product_sites_status_update",
     "placements_status_insert",
     "placements_status_update",
+    # Журнал загрузок (ADR-060): по два на каждую рабочую таблицу.
+    *(
+        f"{table}_upload_log{suffix}"
+        for table in (
+            "auth_user",
+            "checks",
+            "country_shares",
+            "domain_settings",
+            "gray_scans",
+            "invoice_items",
+            "invoices",
+            "keyword_positions",
+            "keywords",
+            "page_type_shares",
+            "placement_links",
+            "placement_status_changes",
+            "placements",
+            "product_ref_domains",
+            "product_sites",
+            "sellers",
+            "site_country_metrics",
+            "site_list_items",
+            "site_lists",
+            "site_metrics",
+            "site_notes",
+            "site_prices",
+            "site_status_changes",
+            "sites",
+            "upload_items",
+        )
+        for suffix in ("", "_update")
+    ),
 ]
 
 ENUMS: dict[str, type[TextChoices]] = {

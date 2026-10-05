@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.18 от 05.10.2026 — журнал загрузок: отмена загрузки целиком (ADR-060)
 -- Версия 1.17 от 05.10.2026 — анкоры продукта: доли типов страниц и стран, безанкорка (ADR-059)
 -- Версия 1.16 от 05.10.2026 — свёрнутые разделы карточки площадки у пользователя (ADR-058)
 -- Версия 1.15 от 05.10.2026 — рабочий продукт пользователя (ADR-057)
@@ -16,7 +17,7 @@
 -- Версия 1.4 от 27.09.2026 — рабочие списки площадок (ADR-033)
 -- Версия 1.3 от 27.09.2026 — позиция ссылки в двух вариантах, как в Word (ADR-032)
 -- Версия 1.2 от 27.09.2026 — несколько продуктов (ADR-030)
--- (проверена применением на PostgreSQL 16: 46 таблиц и заглушка auth_user, 10 представлений, 3 функции, 4 триггера)
+-- (проверена применением на PostgreSQL 16: 47 таблиц и заглушка auth_user, 10 представлений, 4 функции, 54 триггера)
 --
 -- Это опорный DDL. При работе через Django миграции генерируются
 -- из моделей, но схема должна соответствовать этому файлу. Известные
@@ -308,6 +309,7 @@ CREATE TABLE uploads (
     author_id     integer REFERENCES auth_user(id),   -- кто загрузил
     created_at    timestamptz NOT NULL DEFAULT now(),
     written_at    timestamptz,
+    journaled     boolean NOT NULL DEFAULT false, -- запись шла с журналом: отменяется целиком (ADR-060)
     CONSTRAINT uploads_seller_check
         CHECK (seller_id IS NOT NULL OR kind IN ('ahrefs_batch','placements','ahrefs_refdomains','anchors')),
     CONSTRAINT uploads_product_check
@@ -330,6 +332,22 @@ CREATE TABLE upload_items (
     source_value    text                             -- адрес из файла, если там не домен
 );
 CREATE INDEX idx_upload_items_upload ON upload_items(upload_id, review_group);
+
+-- Журнал загрузки (ADR-060): строка, которую запись загрузки вставила, поменяла
+-- или удалила. Пишет триггер log_upload_change, пока в транзакции стоит номер
+-- загрузки (seo.upload_id). У вставки прежней строки нет, у правки и удаления —
+-- строка целиком до изменения. Отмена загрузки возвращает прежние строки и
+-- удаляет вставленные, потом удаляет саму загрузку.
+CREATE TABLE upload_changes (
+    id          bigserial PRIMARY KEY,
+    upload_id   bigint NOT NULL REFERENCES uploads(id) ON DELETE CASCADE,
+    table_name  text NOT NULL,
+    row_id      bigint NOT NULL,
+    op          text NOT NULL,                -- I — вставка, U — правка, D — удаление
+    before      jsonb,                        -- строка до изменения; у вставки пусто
+    CONSTRAINT upload_changes_op_check CHECK (op IN ('I','U','D'))
+);
+CREATE INDEX idx_upload_changes_upload ON upload_changes(upload_id, table_name, row_id);
 
 -- Кто ссылается на продукт — по выгрузке Ahrefs «Referring domains» (ADR-051).
 -- Отдельно от площадок: google.com и тысячи случайных доменов в «Площадки» не
@@ -862,6 +880,25 @@ BEGIN
 END
 $$;
 
+CREATE FUNCTION log_upload_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    upload bigint := NULLIF(current_setting('seo.upload_id', true), '')::bigint;
+BEGIN
+    IF upload IS NULL THEN
+        RETURN NULL;
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO upload_changes (upload_id, table_name, row_id, op)
+        VALUES (upload, TG_TABLE_NAME, NEW.id, 'I');
+    ELSE
+        INSERT INTO upload_changes (upload_id, table_name, row_id, op, before)
+        VALUES (upload, TG_TABLE_NAME, OLD.id, left(TG_OP, 1), to_jsonb(OLD));
+    END IF;
+    RETURN NULL;
+END
+$$;
+
 -- ---------- Триггеры ----------
 
 -- Смена статуса — строка истории; тот же статус ещё раз — нет (ADR-049). Строки
@@ -876,6 +913,109 @@ CREATE TRIGGER placements_status_insert AFTER INSERT ON placements
 CREATE TRIGGER placements_status_update AFTER UPDATE OF status ON placements
     FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
     EXECUTE FUNCTION log_placement_status_change();
+
+-- Журнал загрузки (ADR-060): вставка и удаление — строкой; правка — только
+-- настоящая, со сменой значения.
+CREATE TRIGGER auth_user_upload_log AFTER INSERT OR DELETE ON auth_user
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER auth_user_upload_log_update AFTER UPDATE ON auth_user
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER checks_upload_log AFTER INSERT OR DELETE ON checks
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER checks_upload_log_update AFTER UPDATE ON checks
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER country_shares_upload_log AFTER INSERT OR DELETE ON country_shares
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER country_shares_upload_log_update AFTER UPDATE ON country_shares
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER domain_settings_upload_log AFTER INSERT OR DELETE ON domain_settings
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER domain_settings_upload_log_update AFTER UPDATE ON domain_settings
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER gray_scans_upload_log AFTER INSERT OR DELETE ON gray_scans
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER gray_scans_upload_log_update AFTER UPDATE ON gray_scans
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER invoice_items_upload_log AFTER INSERT OR DELETE ON invoice_items
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER invoice_items_upload_log_update AFTER UPDATE ON invoice_items
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER invoices_upload_log AFTER INSERT OR DELETE ON invoices
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER invoices_upload_log_update AFTER UPDATE ON invoices
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER keyword_positions_upload_log AFTER INSERT OR DELETE ON keyword_positions
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER keyword_positions_upload_log_update AFTER UPDATE ON keyword_positions
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER keywords_upload_log AFTER INSERT OR DELETE ON keywords
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER keywords_upload_log_update AFTER UPDATE ON keywords
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER page_type_shares_upload_log AFTER INSERT OR DELETE ON page_type_shares
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER page_type_shares_upload_log_update AFTER UPDATE ON page_type_shares
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER placement_links_upload_log AFTER INSERT OR DELETE ON placement_links
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER placement_links_upload_log_update AFTER UPDATE ON placement_links
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER placement_status_changes_upload_log AFTER INSERT OR DELETE ON placement_status_changes
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER placement_status_changes_upload_log_update AFTER UPDATE ON placement_status_changes
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER placements_upload_log AFTER INSERT OR DELETE ON placements
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER placements_upload_log_update AFTER UPDATE ON placements
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER product_ref_domains_upload_log AFTER INSERT OR DELETE ON product_ref_domains
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER product_ref_domains_upload_log_update AFTER UPDATE ON product_ref_domains
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER product_sites_upload_log AFTER INSERT OR DELETE ON product_sites
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER product_sites_upload_log_update AFTER UPDATE ON product_sites
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER sellers_upload_log AFTER INSERT OR DELETE ON sellers
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER sellers_upload_log_update AFTER UPDATE ON sellers
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_country_metrics_upload_log AFTER INSERT OR DELETE ON site_country_metrics
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_country_metrics_upload_log_update AFTER UPDATE ON site_country_metrics
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_list_items_upload_log AFTER INSERT OR DELETE ON site_list_items
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_list_items_upload_log_update AFTER UPDATE ON site_list_items
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_lists_upload_log AFTER INSERT OR DELETE ON site_lists
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_lists_upload_log_update AFTER UPDATE ON site_lists
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_metrics_upload_log AFTER INSERT OR DELETE ON site_metrics
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_metrics_upload_log_update AFTER UPDATE ON site_metrics
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_notes_upload_log AFTER INSERT OR DELETE ON site_notes
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_notes_upload_log_update AFTER UPDATE ON site_notes
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_prices_upload_log AFTER INSERT OR DELETE ON site_prices
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_prices_upload_log_update AFTER UPDATE ON site_prices
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_status_changes_upload_log AFTER INSERT OR DELETE ON site_status_changes
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER site_status_changes_upload_log_update AFTER UPDATE ON site_status_changes
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER sites_upload_log AFTER INSERT OR DELETE ON sites
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER sites_upload_log_update AFTER UPDATE ON sites
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER upload_items_upload_log AFTER INSERT OR DELETE ON upload_items
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER upload_items_upload_log_update AFTER UPDATE ON upload_items
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
 
 -- ---------- Представления ----------
 

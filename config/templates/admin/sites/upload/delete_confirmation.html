@@ -1,0 +1,8 @@
+{% extends "admin/delete_confirmation.html" %}
+{% comment %}Отмена загрузки целиком по её журналу (ADR-060).{% endcomment %}
+{% block seo_protected_text %}Отменить загрузку «{{ object }}» сейчас нельзя:{% endblock %}
+{% block seo_question %}Отменить загрузку «{{ object }}»?{% endblock %}
+{% block seo_together %}База вернётся к состоянию до загрузки: записанное ею удалится, изменённое
+  вернётся как было. Загрузка и файл тоже удалятся — этот файл можно будет загрузить заново.{% endblock %}
+{% block seo_objects %}<ul id="deleted-objects">{{ deleted_objects|unordered_list }}</ul>{% endblock %}
+{% block seo_button %}Отменить загрузку{% endblock %}
