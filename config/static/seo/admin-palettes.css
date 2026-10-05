@@ -382,6 +382,262 @@ body.admin-interface #changelist .actions .button {
   padding: 4px 12px;
   font-size: 0.75rem;
 }
+body.admin-interface #changelist .actions .seo-btn {
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+}
+
+/* Строка действий списка — одной линией (просьба пользователя 05.10.2026).
+ *
+ * Было: кнопка, подпись, два выпадающих списка и «Выполнить» стояли каждый со
+ * своей высотой и отступом, строка разъезжалась. Стало: flex с одинаковым
+ * зазором, все контролы одной высоты (28 px) и с углами расцветки. Порядок
+ * слева направо — «Скопировать домены», выбор действия, «Выполнить», счётчик
+ * отмеченного: действия рядом друг с другом, а не через всю строку
+ * (bulk actions UX: одна группа, зазор, цель клика не меньше 24 px, WCAG 2.2).
+ */
+body.admin-interface #changelist .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+body.admin-interface #changelist .actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+body.admin-interface #changelist .actions select {
+  /* Не растягиваться на всю строку: выбор действия — такой же контрол, как кнопка. */
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 220px;
+  min-height: 28px;
+  margin: 0;
+  padding: 3px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  border-radius: var(--seo-radius);
+  background: var(--body-bg);
+  color: inherit;
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+body.admin-interface #changelist .actions select:focus-visible {
+  outline: 2px solid var(--seo-accent);
+  outline-offset: 1px;
+}
+body.admin-interface #changelist .actions .action-counter,
+body.admin-interface #changelist .actions .all,
+body.admin-interface #changelist .actions .question,
+body.admin-interface #changelist .actions .clear {
+  margin: 0;
+  color: var(--body-quiet-color);
+  font-size: 0.8125rem;
+}
+
+/* Пагинатор и выбор размера страницы — одной строкой (просьба 05.10.2026). */
+body.admin-interface .seo-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+body.admin-interface .seo-pagination .paginator { margin: 0; border: 0; padding: 10px 0; }
+body.admin-interface .seo-per-page { color: var(--body-quiet-color); font-size: 0.8125rem; }
+body.admin-interface .seo-per-page a,
+body.admin-interface .seo-per-page b { margin-left: 6px; }
+body.admin-interface .seo-per-page b { color: var(--body-fg); }
+
+/* Страницы списка — кнопками одного размера (просьба 05.10.2026: штатные
+ * «квадраты» темы читались плохо). Текущая страница — заливкой расцветки.
+ */
+body.admin-interface .paginator a,
+body.admin-interface .paginator .this-page,
+body.admin-interface .paginator .end {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  margin: 0 2px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  border-radius: var(--seo-radius);
+  background: transparent;
+  color: var(--seo-accent-text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+body.admin-interface .paginator a:hover {
+  border-color: var(--body-quiet-color);
+  background: var(--darkened-bg);
+}
+body.admin-interface .paginator .this-page {
+  border-color: var(--seo-accent);
+  background: var(--seo-accent);
+  color: var(--seo-on-accent);
+}
+body.admin-interface .paginator a.showall {
+  min-width: 0;
+  border: 0;
+  background: none;
+  text-decoration: underline;
+}
+
+/* Короткий пагинатор в строке действий — справа от «Выполнить». */
+body.admin-interface .seo-mini-pages { display: inline-flex; align-items: center; gap: 2px; }
+body.admin-interface .seo-mini-pages a,
+body.admin-interface .seo-mini-pages b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  border-radius: var(--seo-radius);
+  color: var(--seo-accent-text);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+body.admin-interface .seo-mini-pages b {
+  border-color: var(--seo-accent);
+  background: var(--seo-accent);
+  color: var(--seo-on-accent);
+}
+body.admin-interface .seo-mini-pages a:hover { background: var(--darkened-bg); }
+body.admin-interface .seo-mini-gap { color: var(--body-quiet-color); font-size: 0.75rem; }
+
+/* Фильтр с галочками: выпадающее меню со списком отметок. */
+body.admin-interface .seo-multi > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--seo-radius);
+  background: var(--body-bg);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  list-style: none;
+}
+body.admin-interface .seo-multi > summary::-webkit-details-marker { display: none; }
+/* Штатная админка и тема рисуют стрелку перед summary своих фильтров
+ * (`#changelist-filter details > summary::before`) — у нас она справа. */
+body.admin-interface #changelist-filter details.seo-multi > summary::before,
+body.admin-interface .module.filtered #changelist-filter details.seo-multi > summary::before {
+  content: none;
+}
+body.admin-interface .seo-multi > summary::after { content: "▾"; color: var(--body-quiet-color); }
+body.admin-interface .seo-multi[open] > summary::after { content: "▴"; }
+body.admin-interface .seo-multi-list {
+  max-height: 260px;
+  margin-top: 4px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  /* Не «таблетка» расцветки: у высокого списка такой радиус срезает крайние пункты. */
+  border-radius: 12px;
+  background: var(--body-bg);
+}
+body.admin-interface .seo-multi-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: inherit;
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+body.admin-interface .seo-multi-item:hover { background: var(--darkened-bg); }
+body.admin-interface .seo-multi-item .seo-multi-box {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-content: center;
+  box-sizing: border-box;
+  border: 1.5px solid var(--border-color);
+  border-radius: 5px;
+}
+body.admin-interface .seo-multi-item.is-on .seo-multi-box {
+  border-color: var(--seo-accent);
+  background: var(--seo-accent);
+}
+body.admin-interface .seo-multi-item.is-on .seo-multi-box::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--seo-on-accent);
+  clip-path: polygon(14% 44%, 0 65%, 44% 100%, 100% 16%, 80% 0, 43% 62%);
+}
+
+/* Чекбоксы — свои во всей админке: списки, формы, разбор, шаг «Колонки».
+ * Штатные рисует браузер по-своему в каждой расцветке; свой — 20 px, углы и
+ * цвет расцветки, видимая рамка фокуса, состояние «часть отмечена» у шапки.
+ */
+body.admin-interface input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  display: inline-grid;
+  place-content: center;
+  box-sizing: border-box;
+  border: 1.5px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--body-bg);
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+body.admin-interface input[type="checkbox"]::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  transform: scale(0);
+  transition: transform .12s ease-in-out;
+  background: var(--seo-on-accent);
+  clip-path: polygon(14% 44%, 0 65%, 44% 100%, 100% 16%, 80% 0, 43% 62%);
+}
+body.admin-interface input[type="checkbox"]:hover:not(:disabled) { border-color: var(--seo-accent); }
+body.admin-interface input[type="checkbox"]:checked,
+body.admin-interface input[type="checkbox"]:indeterminate {
+  border-color: var(--seo-accent);
+  background: var(--seo-accent);
+}
+body.admin-interface input[type="checkbox"]:checked::before { transform: scale(1); }
+body.admin-interface input[type="checkbox"]:indeterminate::before {
+  width: 11px;
+  height: 2px;
+  border-radius: 1px;
+  clip-path: none;
+  transform: scale(1);
+}
+body.admin-interface input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--seo-accent);
+  outline-offset: 2px;
+}
+body.admin-interface input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
+/* Клик по ячейке с чекбоксом — та же цель: 20 px плюс поля клетки дают 24+. */
+body.admin-interface #changelist td.action-checkbox,
+body.admin-interface #changelist th.action-checkbox-column { padding: 6px 8px; }
+
 body.admin-interface .numericrangefilter .controls { display: flex; gap: 8px; }
 body.admin-interface .submit-row .seo-btn + .seo-btn,
 body.admin-interface .submit-row .seo-run-btn + .seo-btn { margin-left: 8px; }

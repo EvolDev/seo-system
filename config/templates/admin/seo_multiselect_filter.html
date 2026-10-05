@@ -1,0 +1,21 @@
+{% comment %}
+Фильтр с галочками (config/admin.py, MultiChoiceFilter): выпадающее меню, в нём
+можно отметить несколько значений сразу — просьба пользователя 05.10.2026.
+Каждый пункт — ссылка, которая добавляет или снимает своё значение, поэтому
+меню работает и без скрипта; открытое состояние держит <details>.
+{% endcomment %}
+<div class="list-filter-dropdown seo-multifilter">
+  <h3{% if spec.values %} class="active"{% endif %}>{{ title|capfirst }}</h3>
+  <details class="seo-multi"{% if spec.values %} open{% endif %}>
+    <summary>
+      {% if spec.values %}отмечено: {{ spec.values|length }}{% elif spec.is_empty %}никто не отмечен{% else %}{{ spec.all_label }} — отмечены все{% endif %}
+    </summary>
+    <div class="seo-multi-list" role="group" aria-label="{{ title|capfirst }}">
+      {% for choice in choices %}
+        <a href="{{ choice.query_string|iriencode }}" class="seo-multi-item{% if choice.selected %} is-on{% endif %}">
+          <span class="seo-multi-box" aria-hidden="true"></span><span>{{ choice.display }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </details>
+</div>

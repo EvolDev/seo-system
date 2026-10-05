@@ -7,7 +7,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.sites.models import Product, ProductSite, Site, SiteMetric
+from apps.sites.models import Product, ProductSite, Seller, Site, SiteMetric, SitePrice
 
 pytestmark = pytest.mark.django_db
 
@@ -154,3 +154,33 @@ def test_add_site_with_existing_domain_shows_error(admin_client: Client, site: S
     response = admin_client.post(url, data)
     assert response.status_code == 200
     assert response.context["adminform"].form.errors["domain"]
+
+
+def test_offers_are_filtered_by_source_file(admin_client: Client, site: Site) -> None:
+    """Фильтр «из файла» в «Предложениях продавцов»: разобрать последствия загрузки.
+
+    Просьба пользователя 05.10.2026: отобрать цены неудачной загрузки и удалить
+    их пачкой, когда саму загрузку отменить уже нечем.
+    """
+    seller = Seller.objects.create(name="BackLink prov", currency="EUR")
+    other = Site.objects.create(domain="other.com")
+    SitePrice.objects.create(
+        site=site,
+        seller=seller,
+        placement_cents=20784,
+        extra={"Цена из размещения": "Clideo, a.csv"},
+    )
+    SitePrice.objects.create(
+        site=other,
+        seller=seller,
+        placement_cents=60299,
+        extra={"Цена из размещения": "Clideo, b.csv"},
+    )
+    url = reverse("admin:sites_siteprice_changelist")
+
+    page = admin_client.get(url, {"from_file": "Clideo, a.csv"})
+    assert [row.site_id for row in page.context["cl"].result_list] == [site.pk]
+    assert "Clideo, b.csv" in page.content.decode()  # второй файл — пункт фильтра
+
+    everything = admin_client.get(url)
+    assert everything.context["cl"].result_count == 2

@@ -161,8 +161,9 @@ def open_site_html(domain: str) -> SafeString:
 def copy_domain_html(domain: str) -> SafeString:
     """Кнопка «скопировать домен» — копирует seo/domain-tools.js."""
     return format_html(
-        '<button type="button" class="seo-icon-btn" data-copy="{}" title="Скопировать домен"'
-        ' aria-label="Скопировать {}">{}</button>',
+        '<button type="button" class="seo-icon-btn" data-copy="{}" data-domain="{}"'
+        ' title="Скопировать домен" aria-label="Скопировать {}">{}</button>',
+        domain,
         domain,
         domain,
         _COPY_ICON,

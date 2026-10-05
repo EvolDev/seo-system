@@ -45,6 +45,8 @@ price-review.html. Вкладки — ссылки; решения в строк
 {% else %}
   <div class="seo-toolbar">
     {% if can_decide %}<label><input type="checkbox" data-select-all> отметить все на странице</label>{% endif %}
+    <button type="button" class="seo-btn seo-copy-domains" data-copy-domains
+      title="Скопировать домены отмеченных строк — по одному на строке">Скопировать домены</button>
     <span>Порядок:
       {% for key, label in sorts.items %}
         {% if key == sort %}<b>{{ label }}</b>{% else %}<a href="?tab={{ tab }}&sort={{ key }}{% if not hide_done %}&all=1{% endif %}">{{ label }}</a>{% endif %}{% if not forloop.last %} · {% endif %}

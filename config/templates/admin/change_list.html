@@ -21,3 +21,16 @@
 {% endblock %}
 
 {% block filters %}{% saved_filters_column cl block.super %}{% endblock %}
+
+{% block pagination %}
+<div class="seo-pagination">
+  {{ block.super }}
+  {% if cl.per_page_choices %}
+    <span class="seo-per-page">На странице:
+      {% for choice in cl.per_page_choices %}
+        {% if choice.selected %}<b>{{ choice.size }}</b>{% else %}<a href="{{ choice.url }}">{{ choice.size }}</a>{% endif %}
+      {% endfor %}
+    </span>
+  {% endif %}
+</div>
+{% endblock %}

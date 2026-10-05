@@ -72,6 +72,8 @@ class UploadForm(forms.Form):
         queryset=Seller.objects.filter(is_collaborator=False).order_by("name"),
         required=False,
         empty_label="— выберите —",
+        # Продавцов полсотни: поле с поиском вместо длинного списка (seo/picker.js).
+        widget=forms.Select(attrs={"data-search": "Найти продавца…"}),
     )
     new_seller = forms.CharField(label="или новый продавец", required=False, max_length=200)
     # «От кого» у файла размещений — сотрудник: подставится в строки без своей колонки.
@@ -80,6 +82,7 @@ class UploadForm(forms.Form):
         queryset=User.objects.order_by("first_name", "username"),
         required=False,
         empty_label="— никто —",
+        widget=forms.Select(attrs={"data-search": "Найти сотрудника…"}),
     )
     new_employee = forms.CharField(label="или новый сотрудник", required=False, max_length=150)
     new_seller_currency = forms.ChoiceField(

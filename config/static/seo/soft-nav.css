@@ -40,6 +40,7 @@
 }
 .seo-toast-error { border-color: var(--error-fg, #ba2121); }
 .seo-toast-success { border-color: var(--seo-accent, #2a65a8); }
+.seo-toast-warning { border-color: #c7a000; }
 /* Действие в сообщении — «Отменить» после удаления набора фильтров (E9-10). */
 .seo-toast-action {
   margin-left: auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;

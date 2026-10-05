@@ -16,11 +16,12 @@
 консоль ошибкой, хотя ошибки нет).
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.views.main import PAGE_VAR, ChangeList
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -33,6 +34,9 @@ from config import deletion
 # упадёт при запуске. TYPE_CHECKING истинно только для mypy: он видит
 # параметризованный класс, а Python при запуске — обычный.
 if TYPE_CHECKING:
+    # Словарь пункта фильтра описан только в заглушках django-stubs.
+    from django.contrib.admin.filters import _ListFilterChoices
+
     _ModelAdmin = admin.ModelAdmin[Any]
     _TabularInline = admin.TabularInline[Any, Any]
     _StackedInline = admin.StackedInline[Any, Any]
@@ -87,7 +91,153 @@ PARTIAL_HEADER = "X-Seo-Partial"
 # ли она ещё под фильтры (нет — строка остаётся блёклой).
 ROW_PARAM = "_seo_row"
 ROW_MATCH_HEADER = "X-Seo-Row-Match"
+
+# Сколько строк на странице списка — выбором человека (просьба 05.10.2026).
+PER_PAGE_PARAM = "per_page"
+PER_PAGE_CHOICES = (50, 100, 250, 500)
 _ROW_ATTR = "seo_row"
+
+
+class MultiChoiceFilter(admin.SimpleListFilter):
+    """Фильтр с галочками: можно отметить несколько значений сразу.
+
+    Штатный фильтр админки — один выбор на поле. Здесь отмеченное живёт в
+    адресе через запятую (`?seller=3,7`), каждая галочка — ссылка, которая
+    добавляет или снимает своё значение (просьба пользователя 05.10.2026).
+    Наследник пишет `lookups()` и `queryset()`, значения берёт из `values()`.
+    """
+
+    template = "admin/seo_multiselect_filter.html"
+    all_label = "Все"
+    # «Все» — переключатель: отмечены все (параметра нет) → не отмечен никто.
+    # Пустому выбору нужен свой след в адресе, иначе он неотличим от «все».
+    none_token = "-"
+
+    def chosen(self) -> list[str]:
+        """Что стоит в адресе: параметр повторяется — `?seller=3&seller=7`.
+
+        Через запятую не пишем: значением бывает имя файла, а в нём запятая
+        («Clideo, Размещения Clideo через барыг.csv»).
+        """
+        name = self.parameter_name or ""
+        return [value for value in self.request.GET.getlist(name) if value]
+
+    def values(self) -> list[str]:
+        """Отмеченные значения."""
+        found = self.chosen()
+        return [] if found == [self.none_token] else found
+
+    def is_empty(self) -> bool:
+        """Снято всё: список пуст, пока не отметят кого-нибудь."""
+        return self.chosen() == [self.none_token]
+
+    def queryset(self, request: HttpRequest, queryset: Any) -> Any:
+        if self.is_empty():
+            return queryset.none()
+        values = self.values()
+        return self.narrow(queryset, values) if values else queryset
+
+    def narrow(self, queryset: Any, values: list[str]) -> Any:
+        """Отбор по отмеченным значениям — его пишет наследник."""
+        raise NotImplementedError
+
+    def choices(self, changelist: Any) -> "Iterator[_ListFilterChoices]":
+        """Пункты меню. Ничего не отмечено — значит показаны все, и галочки стоят у всех.
+
+        Так из полного списка убирают лишнего одним щелчком, а не отмечают
+        сорок пять нужных (просьба пользователя 05.10.2026).
+        """
+        chosen = self.values()
+        everything = not chosen and not self.is_empty()
+        yield {
+            "selected": everything,
+            # Отмечены все — «Все» снимает отметки; иначе возвращает все.
+            "query_string": (
+                changelist.get_query_string({self.parameter_name: self.none_token})
+                if everything
+                else changelist.get_query_string(remove=[self.parameter_name])
+            ),
+            "display": self.all_label,
+        }
+        for value, label in self.lookup_choices:
+            text = str(value)
+            picked = everything or text in chosen
+            if everything:
+                rest = [str(other) for other, _ in self.lookup_choices if str(other) != text]
+            elif picked:
+                rest = [v for v in chosen if v != text]
+            else:
+                rest = [*chosen, text]
+            yield {
+                "selected": picked,
+                "query_string": (
+                    changelist.get_query_string({self.parameter_name: rest})
+                    if rest
+                    else changelist.get_query_string(remove=[self.parameter_name])
+                ),
+                "display": label,
+            }
+
+
+class PerPageChangeList(ChangeList):
+    """Список с выбором размера страницы: `?per_page=50…500` рядом с пагинатором.
+
+    Админка берёт размер страницы из `list_per_page` админки — один на всех.
+    Здесь человек выбирает его сам, выбор живёт в адресе (значит, попадает в
+    «Мои фильтры» и в ссылку, которой можно поделиться). Чужой параметр админка
+    приняла бы за отбор по полю, поэтому он убирается из параметров фильтров.
+    """
+
+    def get_filters_params(self, params: Any = None) -> Any:
+        found = super().get_filters_params(params)
+        found.pop(PER_PAGE_PARAM, None)
+        return found
+
+    def get_results(self, request: HttpRequest) -> None:
+        chosen = request.GET.get(PER_PAGE_PARAM)
+        if chosen and chosen.isdigit() and int(chosen) in PER_PAGE_CHOICES:
+            self.list_per_page = int(chosen)
+        super().get_results(request)
+
+    def short_pages(self) -> list[dict[str, Any]]:
+        """Короткий пагинатор для строки действий: 1 · 2 · 3 … последняя.
+
+        Нужен наверху списка, чтобы не прокручивать таблицу до низа ради
+        перехода (просьба пользователя 05.10.2026). Текущая страница в наборе
+        всегда: иначе с десятой страницы непонятно, где находишься.
+        """
+        total = self.paginator.num_pages
+        if total < 2:
+            return []
+        numbers = sorted({1, 2, 3, self.page_num, total} & set(range(1, total + 1)))
+        pages: list[dict[str, Any]] = []
+        previous = 0
+        for number in numbers:
+            if number - previous > 1:
+                pages.append({"gap": True})
+            pages.append(
+                {
+                    "gap": False,
+                    "number": number,
+                    "current": number == self.page_num,
+                    "url": self.get_query_string({PAGE_VAR: number}),
+                }
+            )
+            previous = number
+        return pages
+
+    def per_page_choices(self) -> list[dict[str, Any]]:
+        """Пункты «по 50 / 100 / …»: смена размера возвращает на первую страницу."""
+        return [
+            {
+                "size": size,
+                "selected": size == self.list_per_page,
+                # Номер страницы убираем совсем: `p=0` для Django — несуществующая
+                # страница, и список сбрасывает вместе с ним все фильтры.
+                "url": self.get_query_string({PER_PAGE_PARAM: size}, [PAGE_VAR]),
+            }
+            for size in PER_PAGE_CHOICES
+        ]
 
 
 def _row_changelist(base: Any, row: int) -> Any:
@@ -173,6 +323,9 @@ class ModelAdmin(_ModelAdmin):
         if matches is not None:
             response[ROW_MATCH_HEADER] = "1" if matches else "0"
         return response
+
+    def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
+        return PerPageChangeList
 
     def get_changelist_instance(self, request: HttpRequest) -> Any:
         row = getattr(request, _ROW_ATTR, None)

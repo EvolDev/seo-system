@@ -1,0 +1,24 @@
+{% extends "admin/actions.html" %}
+{% comment %}
+Строка действий любого списка: слева от выбора действия — «Скопировать домены»
+(просьба пользователя 05.10.2026). Копирует домены отмеченных строк столбиком,
+по одному на строке; откуда берётся домен строки — seo/domain-tools.js.
+{% endcomment %}
+{% block actions-submit %}
+{{ block.super }}
+{% if cl.short_pages %}
+  <span class="seo-mini-pages">
+    {% for page in cl.short_pages %}
+      {% if page.gap %}<span class="seo-mini-gap">…</span>
+      {% elif page.current %}<b class="this-page">{{ page.number }}</b>
+      {% else %}<a href="{{ page.url|iriencode }}">{{ page.number }}</a>{% endif %}
+    {% endfor %}
+  </span>
+{% endif %}
+{% endblock %}
+
+{% block actions-form %}
+<button type="button" class="seo-btn seo-copy-domains" data-copy-domains
+  title="Скопировать домены отмеченных строк — по одному на строке">Скопировать домены</button>
+{{ block.super }}
+{% endblock %}
