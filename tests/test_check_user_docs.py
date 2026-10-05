@@ -122,8 +122,10 @@ def test_screens_map_most_specific_first(
         "title": "Как найти площадку и отфильтровать список",
     }
     assert site_list[-1]["url"] == "/docs/how-to/edit-in-panel/"
+    # Только про главную — первой; рабочий продукт — про главную и списки.
     assert screens["home"] == [
-        {"url": "/docs/how-to/home-stats/", "title": "Как смотреть статистику на главной"}
+        {"url": "/docs/how-to/home-stats/", "title": "Как смотреть статистику на главной"},
+        {"url": "/docs/how-to/working-product/", "title": "Как выбрать рабочий продукт"},
     ]
 
 

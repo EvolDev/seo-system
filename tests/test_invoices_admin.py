@@ -196,8 +196,9 @@ class TestListAndAction:
         cancelled = Invoice.objects.create(
             seller=seller, amount_cents=100, status=InvoiceStatus.CANCELLED
         )
+        # Счета без размещений — не у рабочего продукта: список всех продуктов (ADR-057).
         admin_client.post(
-            LIST_URL,
+            f"{LIST_URL}?product=all",
             {"action": "mark_paid_action", "_selected_action": [issued.pk, cancelled.pk]},
         )
         issued.refresh_from_db()

@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
 
+from apps.sites.models import Product
 from config.db import PgNow
 
 
@@ -50,3 +51,39 @@ class SavedFilter(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class UserSettings(models.Model):
+    """Личные настройки пользователя: рабочий продукт (E9-12, ADR-057).
+
+    Рабочий продукт — с ним открываются экраны с фильтром продукта и главная,
+    он подставлен в новые записи. Пусто — первый активный продукт. Строка
+    заводится при первом выборе в шапке. Удалили продукт (ADR-036) — выбор
+    пустеет, а не мешает удалению.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        models.PROTECT,
+        primary_key=True,
+        verbose_name="пользователь",
+        related_name="workspace_settings",
+    )
+    product = models.ForeignKey(
+        Product,
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="рабочий продукт",
+        related_name="+",
+        db_index=False,
+    )
+    updated_at = models.DateTimeField("изменено", db_default=PgNow())
+
+    class Meta:
+        db_table = "user_settings"
+        verbose_name = "настройки пользователя"
+        verbose_name_plural = "настройки пользователей"
+
+    def __str__(self) -> str:
+        return f"{self.user} · {self.product or '—'}"

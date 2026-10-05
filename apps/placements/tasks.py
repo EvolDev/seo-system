@@ -9,13 +9,19 @@
   запроса не будет. Ручная (`manual`, кнопка в карточке) проверяет всегда.
 - `indexation_alerts` — beat раз в сутки, после проверок: одно оповещение
   о статьях, которые не в индексе дольше срока.
+- `check_url_indexation` — адрес из поля «Адрес страницы» в «Размещениях»
+  (E9-12): итог — в кеш на `URL_RESULT_TTL` под ключом, который выдала
+  страница, только чтобы показать окошко. Никуда не пишется; повтор задачи
+  перезапишет тот же ключ.
 
 Как логика проверки устроена — `apps/placements/indexation.py`.
 """
 
 import logging
+from typing import Any
 
 from celery import shared_task
+from django.core.cache import cache
 from django.utils import timezone
 
 from apps.observability.models import TaskRun, TaskStatus
@@ -53,6 +59,21 @@ def check_indexation(placement_id: int, *, manual: bool = False) -> None:
         logger.info("проверка индексации уже не нужна", extra={"placement_id": placement_id})
         return
     indexation.check_placement(placement, manual=manual)
+
+
+# Сколько ждёт итог проверки адреса: страница спрашивает его, пока ждёт задачу.
+URL_RESULT_TTL = 15 * 60
+
+
+def url_result_key(key: str) -> str:
+    return f"url-indexation:{key}"
+
+
+@shared_task(base=QueueTask, name="check_url_indexation", throttle=SERP_THROTTLE)
+def check_url_indexation(url: str, key: str) -> None:
+    found = indexation.find_url(url)
+    result: dict[str, Any] = {"url": url, "indexed": found.indexed, "position": found.position}
+    cache.set(url_result_key(key), result, URL_RESULT_TTL)
 
 
 @shared_task(base=QueueTask, name="indexation_alerts")

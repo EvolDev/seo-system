@@ -210,8 +210,9 @@ def test_placements_upload_form_and_path(
     assert same_document(page)
     assert Placement.objects.filter(product__name="Clideo").count() == 2
 
-    # Форма снова — сразу с размещениями и Clideo, как в прошлый раз.
+    # Форма снова — сразу с размещениями, как в прошлый раз; продукт — рабочий
+    # из шапки (ADR-057), а не прошлый.
     page.goto(f"{live_server.url}/admin/sites/upload/add/")
     expect(page.locator("input[name=kind][value=placements]")).to_be_checked()
-    expect(page.locator("select[name=product] option:checked")).to_have_text("Clideo")
+    expect(page.locator("select[name=product] option:checked")).to_have_text("Convertio")
     expect(employee_row).to_be_visible()

@@ -15,6 +15,7 @@ from django.utils.safestring import SafeString
 
 from apps.sites.models import ProductRefDomain, Site
 from apps.sites.upload_admin import card_url
+from apps.workspace.products import WorkingProductFilter
 from config.admin import NoDeleteAdmin
 
 
@@ -45,7 +46,7 @@ class StateFilter(admin.SimpleListFilter):
 class ProductRefDomainAdmin(NoDeleteAdmin):
     list_display = ("domain", "product", "state_cell", "first_seen_at", "seen_on", "site_cell")
     list_display_links = None
-    list_filter = ("product", StateFilter)
+    list_filter = (WorkingProductFilter, StateFilter)
     search_fields = ("domain",)
     ordering = ("domain",)
     list_select_related = ("product",)

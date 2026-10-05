@@ -140,7 +140,8 @@ def test_month_report_from_placements(
     with page.expect_download() as download_info:
         window.locator("button", has_text="Excel").click()
     download = download_info.value
-    assert download.suggested_filename == "Размещения сентябрь 2026.xlsx"
+    # Список открыт с рабочим продуктом (ADR-057) — он и в имени файла.
+    assert download.suggested_filename == "Размещения Convertio сентябрь 2026.xlsx"
     path = tmp_path / "month.xlsx"
     download.save_as(path)
     book = load_workbook(path)

@@ -24,6 +24,10 @@
 подряд — в строке пометка `alert`, одна на серию неудач. Раз в сутки
 `report_alerts` собирает новые пометки в одно оповещение (событие
 GlitchTip, ADR-042); в Telegram их отправит E9-04.
+
+Проверка адреса из поля в «Размещениях» (E9-12, `find_url`) — тот же поиск, но
+без записи: ни в журнал, ни в размещение. Тратится только запрос к выдаче
+(`api_usage`).
 """
 
 import logging
@@ -33,6 +37,8 @@ from typing import Any
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 import sentry_sdk
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db import transaction
 from django.db.models import F, OuterRef, Q, QuerySet, Subquery
 from django.db.models.fields.json import KT
@@ -59,6 +65,20 @@ class Outcome:
     check: Check
     indexed: bool
     alert: bool
+
+
+@dataclass(frozen=True)
+class Found:
+    """Что дал поиск статьи в выдаче."""
+
+    position: int | None
+    method: str | None
+    queries: list[str]
+    seen: list[str]
+
+    @property
+    def indexed(self) -> bool:
+        return self.position is not None
 
 
 def normalize_url(url: str) -> str:
@@ -220,19 +240,14 @@ def check_placement(placement: Placement, *, manual: bool, now: datetime | None 
     url = placement.article_url
     if not url:
         raise ValueError(f"У размещения {placement.pk} нет адреса статьи")
-    result: dict[str, Any] = {"url": url, "manual": manual}
-    seen: list[str] = []
-    position = None
-    for method, query in (("site", search_query(url)), ("url", url_query(url))):
-        page = search(query, depth=DEPTH, fresh=True)
-        position = find_position(url, page)
-        result["queries"] = [*result.get("queries", []), query]
-        if position is not None:
-            result["found_by"] = method
-            break
-        seen += [found.url for found in page.results if found.url not in seen]
+    found = search_article(url)
+    result: dict[str, Any] = {"url": url, "manual": manual, "queries": found.queries}
+    if found.method is not None:
+        result["found_by"] = found.method
+    seen = found.seen
+    position = found.position
     now = now or timezone.now()
-    indexed = position is not None
+    indexed = found.indexed
     result["position"] = position
     schedule = indexation_schedule(placement.product_id)
 
@@ -273,6 +288,48 @@ def check_placement(placement: Placement, *, manual: bool, now: datetime | None 
         },
     )
     return Outcome(check=check, indexed=indexed, alert=alert)
+
+
+def search_article(url: str) -> Found:
+    """Ищет адрес в выдаче: `site:адрес`, не нашлось — сам адрес (ADR-042).
+
+    Выдача — всегда свежая (`fresh`), не из кеша; каждый запрос — строка
+    расхода `api_usage` (пишет `search`).
+    """
+    queries: list[str] = []
+    seen: list[str] = []
+    for method, query in (("site", search_query(url)), ("url", url_query(url))):
+        page = search(query, depth=DEPTH, fresh=True)
+        queries.append(query)
+        position = find_position(url, page)
+        if position is not None:
+            return Found(position=position, method=method, queries=queries, seen=seen)
+        seen += [found.url for found in page.results if found.url not in seen]
+    return Found(position=None, method=None, queries=queries, seen=seen)
+
+
+def page_url(raw: str) -> str:
+    """Адрес из поля «Адрес страницы»: без пробелов по краям, без схемы — `https://`.
+
+    Не адрес — `ValidationError` с текстом для окошка.
+    """
+    url = raw.strip()
+    if not url:
+        raise ValidationError("Вставьте адрес страницы.")
+    if "://" not in url:
+        url = f"https://{url}"
+    URLValidator(schemes=["http", "https"], message=f"Это не адрес страницы: {raw.strip()}")(url)
+    return url
+
+
+def find_url(url: str) -> Found:
+    """Проверка адреса из поля «Адрес страницы» (E9-12): только поиск, без записи."""
+    found = search_article(url)
+    logger.info(
+        "адрес проверен на индексацию",
+        extra={"url": url, "indexed": found.indexed, "position": found.position},
+    )
+    return found
 
 
 def failing_since(placement: Placement, now: datetime) -> datetime:

@@ -23,10 +23,13 @@ from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
+from uuid import uuid4
 
 from django.contrib import admin, messages
 from django.contrib.admin.utils import display_for_value
 from django.contrib.admin.views.main import ChangeList
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db.models import Exists, OuterRef, QuerySet
 from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
@@ -41,12 +44,13 @@ from apps.observability.models import Check, CheckStatus, Performer, TaskRun, Ta
 from apps.placements import export as placement_export
 from apps.placements import invoices
 from apps.placements.forms import PlacementForm
-from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE
+from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
-from apps.placements.tasks import check_indexation
+from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
 from apps.sites.models import Product
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
+from apps.workspace.products import ALL, WorkingProductFilter, working_product_id
 from config import export
 from config.admin import NoDeleteAdmin, StackedInline
 from config.assets import Css, Js
@@ -253,7 +257,7 @@ class PlacementAdmin(NoDeleteAdmin):
         "skip_checks",
     )
     list_filter = (
-        "product",
+        WorkingProductFilter,
         PublishedMonthFilter,
         "status",
         InvoiceFilter,
@@ -371,6 +375,17 @@ class PlacementAdmin(NoDeleteAdmin):
                 self.admin_site.admin_view(require_POST(self.check_indexation_view)),
                 name="placements_placement_check_indexation",
             ),
+            # Адрес из поля «Адрес страницы» над списком (E9-12).
+            path(
+                "check-url/",
+                self.admin_site.admin_view(require_POST(self.check_url_view)),
+                name="placements_placement_check_url",
+            ),
+            path(
+                "check-url/status/",
+                self.admin_site.admin_view(require_GET(self.check_url_status_view)),
+                name="placements_placement_check_url_status",
+            ),
         ]
         return own + super().get_urls()
 
@@ -453,6 +468,36 @@ class PlacementAdmin(NoDeleteAdmin):
                 state["history_html"] = self.indexation_history(placement)
             items[str(placement_id)] = state
         return JsonResponse({"items": items})
+
+    def check_url_view(self, request: HttpRequest) -> JsonResponse:
+        """Ставит проверку адреса из поля над списком: {"key", "task", "url"} (E9-12).
+
+        Тот же поиск, что у ↻, но ничего не записывает: итог показывает окошко.
+        """
+        if not self.has_view_permission(request):
+            return JsonResponse({"error": "Нет прав на просмотр размещений."}, status=403)
+        try:
+            url = page_url(request.POST.get("url", ""))
+        except ValidationError as error:
+            # 200, а не 400: это ответ человеку, а 4xx браузер пишет в консоль ошибкой.
+            return JsonResponse({"error": error.messages[0]})
+        key = uuid4().hex
+        # Нажатие — начало цепочки (ADR-025), как у кнопки ↻.
+        with bind_run_id(new_run_id()):
+            task = check_url_indexation.delay(url, key).id
+        return JsonResponse({"key": key, "task": task, "url": url})
+
+    def check_url_status_view(self, request: HttpRequest) -> JsonResponse:
+        """Итог проверки адреса `?key=…&task=…`: done с `indexed` или как идёт задача."""
+        if not self.has_view_permission(request):
+            return JsonResponse({"error": "Нет прав на просмотр размещений."}, status=403)
+        key = request.GET.get("key", "")
+        result = cache.get(url_result_key(key)) if key else None
+        if result is not None:
+            return JsonResponse({"state": "done", **result})
+        task = request.GET.get("task", "")
+        states = _task_states([task], task_name="check_url_indexation") if task else {}
+        return JsonResponse(states.get(task, {"state": "queued"}))
 
     def panel_title(self, obj: Placement) -> str:
         # Статус — кнопками в самой форме, в заголовке он лишний.
@@ -729,8 +774,11 @@ class PlacementAdmin(NoDeleteAdmin):
 def _export_name(request: HttpRequest) -> str:
     """«Размещения Convertio сентябрь 2026»: продукт и месяц из фильтров, без месяца — дата."""
     parts = ["Размещения"]
-    product_id = request.GET.get("product__id__exact") or ""
-    if product_id.isdigit():
+    # Продукт — как у фильтра: из адреса, без выбора — рабочий, «Все» — без имени.
+    product_id = request.GET.get(WorkingProductFilter.parameter_name) or ""
+    if not product_id:
+        product_id = str(working_product_id(request) or "")
+    if product_id != ALL and product_id.isdigit():
         name = Product.objects.filter(pk=int(product_id)).values_list("name", flat=True).first()
         if name:
             parts.append(name)
@@ -765,7 +813,9 @@ def _batch_urls() -> tuple[str, str]:
     )
 
 
-def _task_states(task_ids: list[str]) -> dict[str, dict[str, Any]]:
+def _task_states(
+    task_ids: list[str], task_name: str = "check_indexation"
+) -> dict[str, dict[str, Any]]:
     """Состояние проверок по строкам журнала запусков (config/queue.py), одним запросом.
 
     Строки нет — задача ещё ждёт в очереди (или её отложило ограничение
@@ -776,7 +826,7 @@ def _task_states(task_ids: list[str]) -> dict[str, dict[str, Any]]:
     if not task_ids:
         return {}
     runs = TaskRun.objects.filter(
-        task_name="check_indexation",
+        task_name=task_name,
         started_at__gte=timezone.now() - STATUS_LOOKBACK,
         payload__task_id__in=task_ids,
     ).order_by("id")

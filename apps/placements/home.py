@@ -3,7 +3,8 @@
 Данные — `apps.placements.stats`; здесь — то, что видит человек: подписи,
 высоты столбиков в процентах, ссылки и деления оси. Выбор продукта и года —
 ссылками на главную с параметрами `product` и `year`: переход без перезагрузки
-делает seo/soft-nav.js. Столбик — ссылка на «Размещения» за этот месяц.
+делает seo/soft-nav.js. Без `product` — рабочий продукт (ADR-057), «Все продукты» —
+`product=all`. Столбик — ссылка на «Размещения» за этот месяц.
 
 Цвета графиков — переменные `--seo-chart-*` расцветок (seo/admin-palettes.css,
 ADR-038): размещения — фиолетовый, траты по счетам и без счёта — пара «две
@@ -22,6 +23,7 @@ from django.utils import timezone
 from apps.placements import invoices, stats
 from apps.placements.models import Invoice, InvoiceStatus, Placement
 from apps.sites.models import Product
+from apps.workspace.products import ALL, working_product_id
 from config.export import month_name
 
 SHORT = ("янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
@@ -85,14 +87,15 @@ def context(request: HttpRequest) -> dict[str, Any]:
     current, previous = stats.this_and_previous(today, product_id)
 
     def home(**changes: Any) -> str:
-        params = {PRODUCT_PARAM: product_id, YEAR_PARAM: year, **changes}
+        params = {PRODUCT_PARAM: product_id or ALL, YEAR_PARAM: year, **changes}
         query = urlencode({key: value for key, value in params.items() if value is not None})
         return f"{reverse('admin:index')}?{query}" if query else reverse("admin:index")
 
     def placements(month: dt.date) -> str:
-        params: dict[str, Any] = {"month": f"{month:%Y-%m}"}
-        if product_id is not None:
-            params["product__id__exact"] = product_id
+        params: dict[str, Any] = {
+            "month": f"{month:%Y-%m}",
+            "product__id__exact": product_id or ALL,
+        }
         return f"{reverse('admin:placements_placement_changelist')}?{urlencode(params)}"
 
     due = invoices.seller_money(Invoice.objects.filter(status=InvoiceStatus.ISSUED))
@@ -114,13 +117,15 @@ def context(request: HttpRequest) -> dict[str, Any]:
             "label": "К оплате по счетам",
             "value": invoices.sums_text(due.due) or "€0",
             "note": f"счетов: {due.due_count}",
-            "url": reverse("admin:placements_invoice_changelist") + "?status__exact=issued",
+            # Сумма — по всем счетам, список — тоже, а не по рабочему продукту.
+            "url": reverse("admin:placements_invoice_changelist")
+            + f"?status__exact=issued&product={ALL}",
         },
     ]
     return {
         "home_stats": {
             "products": [
-                (None, "Все продукты", home(**{PRODUCT_PARAM: None}), product is None),
+                (None, "Все продукты", home(**{PRODUCT_PARAM: ALL}), product is None),
                 *(
                     (p.pk, p.name, home(**{PRODUCT_PARAM: p.pk}), p.pk == product_id)
                     for p in products
@@ -154,7 +159,12 @@ def context(request: HttpRequest) -> dict[str, Any]:
 
 
 def _product(request: HttpRequest, products: list[Product]) -> Product | None:
+    """Продукт статистики: из адреса, без выбора — рабочий (ADR-057), `all` — все."""
     value = request.GET.get(PRODUCT_PARAM) or ""
+    if value == ALL:
+        return None
+    if not value:
+        value = str(working_product_id(request) or "")
     return next((p for p in products if str(p.pk) == value), None)
 
 

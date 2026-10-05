@@ -24,6 +24,11 @@
  * 6. событие `seo:load` — наши скрипты навешивают обработчики на новое
  *    содержимое; перед заменой — `seo:unload`, снять старые.
  *
+ * Тот же список с другими фильтрами, сортировкой, страницей или поиском — не
+ * замена, а правка изменившегося, без плавной смены (E9-12, см. «Список на
+ * месте» ниже): поле поиска, «Действие» и колонка фильтров остаются теми же
+ * элементами, введённое в них не стирается.
+ *
  * Прокрутка: другой экран — наверх; тот же экран с другими фильтрами или
  * сортировкой — на месте; страницы списка — наверх; «Назад» — где была.
  * «Назад» перечитывает экран с сервера (решение пользователя 02.10.2026):
@@ -215,6 +220,7 @@
     var signal = controller.signal;
     var response;
     progress.start();
+    if (method === "GET" && sameList(url)) listLoading(true);
     try {
       response = await fetch(url, {
         method: method,
@@ -226,6 +232,7 @@
     } catch (error) {
       progress.done();
       if (error && error.name === "AbortError") return;
+      listLoading(false);
       // Сервер не ответил. Страница — обычным переходом (браузер покажет, что
       // не так); форму повторять нельзя — сообщение, введённое остаётся.
       if (method === "GET") {
@@ -245,6 +252,8 @@
       window.location.assign(response.url || url);
     } finally {
       progress.done();
+      // Следующий переход уже начался — бледность его, не наша.
+      if (seq === navigation) listLoading(false);
     }
   }
 
@@ -348,6 +357,8 @@
     var keepFilter = options.scroll === "keep" ? scrollTopOf("#changelist-filter") : null;
     var y = scrollTarget(options.scroll);
     var replaced = null;
+    // До записи в историю: сравниваем с адресом показанного сейчас.
+    var inPlace = listInPlace(doc, url);
 
     // Одинаковый адрес (щелчок по текущему пункту меню) — без новой записи,
     // как у браузера. «Назад» сюда уже перенёс историю — запись не трогаем.
@@ -359,9 +370,19 @@
     }
     shown = url;
 
+    if (inPlace) {
+      try {
+        if (refreshList(doc, url, options, y)) return;
+      } catch (error) {
+        // Правка не удалась — показываем целиком, как другой экран.
+        window.console.error("seoNav:", error);
+      }
+    }
+
     document.dispatchEvent(new CustomEvent("seo:unload"));
     var update = function () {
       replaced = swap(doc);
+      if (replaced) remember(doc.getElementById("content-start"));
       window.scrollTo(0, y);
       if (keepFilter !== null) setScrollTop("#changelist-filter", keepFilter);
     };
@@ -683,8 +704,298 @@
     return added;
   }
 
+  // ---------- Список на месте (E9-12) ----------
+  //
+  // Тот же список с другими фильтрами, сортировкой, страницей, поиском —
+  // правим только изменившееся: строки, счётчики, отметки и адреса фильтров.
+  // Остальное — те же элементы: введённое в поиске и «от — до», выбранное в
+  // «Действии» не стирается, фокус и прокрутка колонки фильтров на месте,
+  // экран не гаснет (без View Transitions — смена видна только там, где что-то
+  // поменялось).
+  //
+  // Сравниваем с тем, что сервер прислал в прошлый раз (pristine — нетронутая
+  // копия содержимого), а не с живой страницей: скрипты дописывают в неё своё
+  // (выбор страны, «Мои фильтры»), и это не изменения. liveOf — какой живой
+  // узел стоит на месте узла копии.
+  //
+  // Поле, значение которого сервер не менял (было и стало одно и то же),
+  // остаётся каким его сделал человек; поменял — ставится новое: «Показать
+  // все» очищает поиск, набор «Моих фильтров» ставит свой.
+  //
+  // Целиком (с переносом введённого по тому же правилу) заменяются: форма
+  // списка — строки, действия, страницы (штатный actions.js держит строки в
+  // замыкании и запускается заново), выбор страны (варианты держит в себе) и
+  // скрипты.
+
+  var WHOLE = "#changelist-form, [data-country-picker], script";
+  var pristine = null;
+  var liveOf = new WeakMap();
+
+  // Запомнить содержимое, которое сейчас на странице: source — оно же из ответа
+  // сервера (после замены), без source — копия самой страницы (первый показ:
+  // soft-nav.js выполняется раньше скриптов, которые её дописывают).
+  function remember(source) {
+    var content = document.getElementById("content-start");
+    if (!content) {
+      pristine = null;
+      return;
+    }
+    pristine = source || content.cloneNode(true);
+    liveOf = new WeakMap();
+    pair(pristine, content, liveOf);
+  }
+
+  // Два одинаково устроенных дерева — узел к узлу.
+  function pair(a, b, map) {
+    map.set(a, b);
+    for (var i = 0; i < a.childNodes.length && i < b.childNodes.length; i += 1) {
+      pair(a.childNodes[i], b.childNodes[i], map);
+    }
+  }
+
+  function isList(doc) {
+    return doc.body.classList.contains("change-list");
+  }
+
+  // Переход по адресу останется на этом же списке.
+  function sameList(url) {
+    return isList(document) && new URL(url, window.location.href).pathname === window.location.pathname;
+  }
+
+  function listInPlace(doc, url) {
+    if (!pristine || !isList(document) || !isList(doc)) return false;
+    var content = liveOf.get(pristine);
+    return Boolean(content && content.isConnected && doc.getElementById("content-start"))
+      && new URL(url, window.location.href).pathname === new URL(shown, window.location.href).pathname;
+  }
+
+  // Пока идёт запрос — строки бледнеют (seo/soft-nav.css): видно, что список
+  // сейчас сменится, а колонкой фильтров можно пользоваться дальше.
+  function listLoading(on) {
+    var form = document.getElementById("changelist-form");
+    if (form) form.classList.toggle("seo-list-loading", on);
+  }
+
+  function refreshList(doc, url, options, y) {
+    var fresh = doc.getElementById("content-start");
+    var context = { map: new WeakMap(), added: [], focus: null };
+    var active = document.activeElement;
+    document.dispatchEvent(new CustomEvent("seo:unload"));
+    document.title = doc.title;
+    copyAttributes(doc.body, document.body);
+    var form = document.getElementById("changelist-form");
+    if (!morph(pristine, fresh, context, active)) return false;
+    pristine = fresh;
+    liveOf = context.map;
+    if (options.scroll !== "keep") window.scrollTo(0, y);
+    if (context.focus) restoreFocus(context.focus);
+    // Новые узлы — их скрипты и виджеты, затем наши скрипты (seo:load) — сразу,
+    // до отрисовки: иначе мелькнёт, например, голый список стран.
+    var loaded = loadedScripts();
+    context.added.forEach(function (node) {
+      if (node.nodeName === "SCRIPT") runScript(node);
+      else runInlineScripts(node);
+      restartWidgets(node, loaded);
+    });
+    restoreFilters();
+    var formReplaced = document.getElementById("changelist-form") !== form;
+    document.dispatchEvent(new CustomEvent("seo:load", { detail: { url: url } }));
+    // Строки новые — штатные действия (отметки, «Выбрано N») настраиваются на них.
+    if (formReplaced) rerun("/admin/js/actions.js");
+    return true;
+  }
+
+  function runScript(old) {
+    var type = (old.getAttribute("type") || "").toLowerCase();
+    if (type && type !== "text/javascript" && type !== "module") return;
+    old.replaceWith(cloneScript(old));
+  }
+
+  // Ключ узла среди соседей: тег и id; текст и комментарии — по виду.
+  function keyOf(node) {
+    return node.nodeType === 1 ? node.nodeName + "#" + node.id : "#" + node.nodeType;
+  }
+
+  // Поправить живой узел — пару before (что было) — под after (что пришло).
+  // false — живого узла нет (его убрал скрипт): ставить надо новый.
+  function morph(before, after, context, active) {
+    var node = liveOf.get(before);
+    if (!node || !node.isConnected) return false;
+    if (before.isEqualNode(after)) {
+      keep(before, after, context.map);
+      return true;
+    }
+    if (keyOf(before) !== keyOf(after) || (after.nodeType === 1 && after.matches(WHOLE))) {
+      replaceNode(node, before, after, context, active);
+      return true;
+    }
+    context.map.set(after, node);
+    if (after.nodeType !== 1) {
+      node.nodeValue = after.nodeValue;
+      return true;
+    }
+    syncAttributes(before, after, node);
+    morphChildren(before, after, node, context, active);
+    syncValue(before, after, node);
+    return true;
+  }
+
+  // Поддерево не менялось: живые узлы те же, только теперь — пары нового ответа.
+  function keep(before, after, map) {
+    var node = liveOf.get(before);
+    if (node) map.set(after, node);
+    for (var i = 0; i < before.childNodes.length; i += 1) keep(before.childNodes[i], after.childNodes[i], map);
+  }
+
+  // Дети: пара — первый ещё не взятый прежний ребёнок с тем же ключом (порядок
+  // внутри ключа сохраняется). Узлы, которые дописали скрипты, стоят как стояли.
+  // Исключение — скрипт нарисовал то, что теперь прислал сервер (список наборов
+  // «Моих фильтров» после «Сохранить»): новое встаёт вместо нарисованного, а не
+  // рядом с ним.
+  function morphChildren(before, after, node, context, active) {
+    var queues = {};
+    var known = new Set();
+    Array.prototype.forEach.call(before.childNodes, function (child) {
+      var key = keyOf(child);
+      (queues[key] = queues[key] || []).push(child);
+      if (liveOf.get(child)) known.add(liveOf.get(child));
+    });
+    var drawn = {};
+    Array.prototype.forEach.call(node.children, function (child) {
+      if (!known.has(child)) (drawn[keyOf(child)] = drawn[keyOf(child)] || []).push(child);
+    });
+    var placed = null;
+    Array.prototype.forEach.call(after.childNodes, function (child) {
+      var queue = queues[keyOf(child)];
+      var old = queue && queue.length ? queue.shift() : null;
+      var live = null;
+      if (old && morph(old, child, context, active)) live = context.map.get(child);
+      if (!live) {
+        live = document.importNode(child, true);
+        pair(child, live, context.map);
+        if (live.nodeType === 1) context.added.push(live);
+        var stray = drawn[keyOf(child)] && drawn[keyOf(child)].shift();
+        if (stray) stray.replaceWith(live);
+      }
+      // На месте — не трогаем: перенос узла снял бы с поля фокус.
+      if (!(placed ? placed.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING
+        && live.parentNode === node : live.parentNode === node)) {
+        node.insertBefore(live, placed ? placed.nextSibling : node.firstChild);
+      }
+      placed = live;
+    });
+    Object.keys(queues).forEach(function (key) {
+      queues[key].forEach(function (old) {
+        var live = liveOf.get(old);
+        if (live && live.parentNode === node) live.remove();
+      });
+    });
+  }
+
+  // Атрибуты, которые сменил сервер; дописанные скриптами остаются.
+  function syncAttributes(before, after, node) {
+    Array.prototype.forEach.call(after.attributes, function (attr) {
+      if (before.getAttribute(attr.name) !== attr.value) node.setAttribute(attr.name, attr.value);
+    });
+    Array.prototype.forEach.call(before.attributes, function (attr) {
+      if (!after.hasAttribute(attr.name)) node.removeAttribute(attr.name);
+    });
+  }
+
+  function isField(node) {
+    return node.nodeType === 1 && /^(INPUT|SELECT|TEXTAREA)$/.test(node.nodeName)
+      && !/^(hidden|file|submit|button|reset|image)$/i.test(node.type || node.getAttribute("type") || "");
+  }
+
+  // Значение поля, как его прислал сервер (атрибуты, не то, что ввели).
+  function served(node) {
+    if (node.nodeName === "SELECT") {
+      var chosen = node.querySelector("option[selected]") || node.querySelector("option");
+      return chosen ? chosen.getAttribute("value") ?? chosen.textContent : "";
+    }
+    if (node.nodeName === "TEXTAREA") return node.textContent;
+    if (/^(checkbox|radio)$/i.test(node.getAttribute("type") || "")) return node.hasAttribute("checked");
+    return node.getAttribute("value") || "";
+  }
+
+  function entered(node) {
+    return /^(checkbox|radio)$/i.test(node.type) ? node.checked : node.value;
+  }
+
+  function setCurrent(node, value) {
+    if (/^(checkbox|radio)$/i.test(node.type)) node.checked = value;
+    else node.value = value;
+  }
+
+  // Поле осталось тем же элементом: сервер сменил значение — ставим новое,
+  // нет — остаётся введённое человеком. Поле без имени не данные, а
+  // переключатель (выпадающий фильтр, набор «Моих фильтров»): показывает то,
+  // что выбрано сейчас, — всегда как прислал сервер.
+  function syncValue(before, after, node) {
+    if (!isField(after)) return;
+    var value = served(after);
+    if (served(before) !== value || (!after.hasAttribute("name") && entered(node) !== value)) {
+      setCurrent(node, value);
+    }
+  }
+
+  // Узел заменяется новым; введённое в его поля — в новые поля, если сервер
+  // их значение не менял. Поля сопоставляются по имени и номеру среди
+  // одноимённых; отметки строк списка — нет: строки уже другие.
+  function replaceNode(node, before, after, context, active) {
+    var fresh = document.importNode(after, true);
+    pair(after, fresh, context.map);
+    var targets = byName(fieldsOf(after), fieldsOf(fresh));
+    var olds = byName(fieldsOf(before), null);
+    Object.keys(olds).forEach(function (name) {
+      olds[name].forEach(function (pairs, i) {
+        var old = pairs.served;
+        var live = liveOf.get(old);
+        var target = targets[name] && targets[name][i];
+        if (!live || !target) return;
+        if (live === active) context.focus = { node: target.live, from: live };
+        if (entered(live) !== served(old) && served(old) === served(target.served)) {
+          setCurrent(target.live, entered(live));
+        }
+      });
+    });
+    node.replaceWith(fresh);
+    context.added.push(fresh);
+  }
+
+  // Поля с данными, которые человек может править; отметки строк списка — не
+  // в счёт, переключатели без имени — тоже (см. syncValue).
+  function fieldsOf(root) {
+    if (root.nodeType !== 1) return [];
+    var all = Array.prototype.slice.call(root.querySelectorAll("input[name], select[name], textarea[name]"));
+    if (root.matches("input[name], select[name], textarea[name]")) all.unshift(root);
+    return all.filter(function (field) { return isField(field) && !field.closest("#result_list"); });
+  }
+
+  // Имя поля → [{served: поле из ответа, live: такое же поле на странице}] по порядку.
+  function byName(fields, lives) {
+    var map = {};
+    fields.forEach(function (field, i) {
+      var name = field.getAttribute("name");
+      (map[name] = map[name] || []).push({ served: field, live: lives ? lives[i] : null });
+    });
+    return map;
+  }
+
+  function restoreFocus(focus) {
+    var node = focus.node;
+    node.focus({ preventScroll: true });
+    try {
+      if (typeof focus.from.selectionStart === "number") {
+        node.setSelectionRange(focus.from.selectionStart, focus.from.selectionEnd);
+      }
+    } catch (error) { /* у поля нет выделения (select, число) */ }
+  }
+
   // Что делает filters.js: свёрнутые и раскрытые фильтры списка помнятся
   // в sessionStorage. Только для фильтров — без <details> в шапке.
+  // Фильтр, оставшийся на месте при правке списка, уже настроен — второй раз
+  // не трогаем.
   function restoreFilters() {
     var key = "django.admin.filtersState";
     var read = function () {
@@ -692,6 +1003,8 @@
     };
     var saved = read();
     document.querySelectorAll("#changelist-filter details[data-filter-title]").forEach(function (detail) {
+      if (detail.hasAttribute("data-seo-state")) return;
+      detail.setAttribute("data-seo-state", "");
       var title = detail.dataset.filterTitle;
       if (title in saved) detail.open = Boolean(saved[title]);
       detail.addEventListener("toggle", function () {
@@ -823,6 +1136,7 @@
 
   function start() {
     if (!off) {
+      remember();
       var current = window.history.state;
       var restoreY = current && current.seoNav ? current.scrollY : null;
       window.history.scrollRestoration = "manual";

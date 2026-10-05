@@ -79,6 +79,8 @@ TABLES = [
     "placement_status_changes",
     # E9-10
     "saved_filters",
+    # E9-12
+    "user_settings",
     # E1-09
     "product_ref_domains",
     # E1-14

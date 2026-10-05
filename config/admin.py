@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from django import forms
 from django.contrib import admin, messages
+from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.text import capfirst
@@ -111,6 +112,16 @@ def is_partial(request: HttpRequest) -> bool:
     return request.headers.get(PARTIAL_HEADER) == "1"
 
 
+def _has_product(model: type[models.Model]) -> bool:
+    """Есть ли у записи связь «продукт» — с продуктом из `products`."""
+    try:
+        field = model._meta.get_field("product")
+    except FieldDoesNotExist:
+        return False
+    related = field.related_model
+    return isinstance(related, type) and related._meta.db_table == "products"
+
+
 class ModelAdmin(_ModelAdmin):
     # Запись из списка открывается панелью справа (E9-11). Включается у
     # рабочих списков и справочников; у снимков — нет: новый замер там —
@@ -122,6 +133,17 @@ class ModelAdmin(_ModelAdmin):
     ) -> forms.Field | None:
         _short_text_input(db_field, kwargs)
         return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+    def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, Any]:
+        """Новая запись с полем «продукт» — сразу с рабочим продуктом (E9-12, ADR-057)."""
+        initial: dict[str, Any] = super().get_changeform_initial_data(request)
+        if "product" not in initial and _has_product(self.model):
+            from apps.workspace.products import working_product_id
+
+            working = working_product_id(request)
+            if working is not None:
+                initial["product"] = working
+        return initial
 
     # ---------- Панель записи ----------
 

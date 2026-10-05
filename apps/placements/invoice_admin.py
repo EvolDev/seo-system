@@ -30,8 +30,8 @@ from apps.placements import invoice_export, invoices
 from apps.placements.forms import InvoiceForm, InvoiceItemForm, InvoiceItemFormSet
 from apps.placements.models import Invoice, InvoiceItem, InvoiceStatus, Placement
 from apps.sites.display import domain_tools_html
-from apps.sites.models import Product
 from apps.sites.offers import money
+from apps.workspace.products import WorkingProductFilter
 from config import export
 from config.admin import NoDeleteAdmin, TabularInline
 from config.assets import Css, Js
@@ -94,20 +94,16 @@ class InvoiceItemInline(TabularInline):
         return not locked(obj) and super().has_delete_permission(request, obj)
 
 
-class InvoiceProductFilter(admin.SimpleListFilter):
-    """Продукт размещений счёта: счёт пачки может закрывать оба продукта."""
+class InvoiceProductFilter(WorkingProductFilter):
+    """Продукт размещений счёта: счёт пачки может закрывать оба продукта.
 
-    title = "продукт"
+    Без выбора — рабочий продукт (ADR-057), «Все» — явным выбором.
+    """
+
     parameter_name = "product"
 
-    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
-        return [(str(pk), name) for pk, name in Product.objects.values_list("pk", "name")]
-
-    def queryset(self, request: HttpRequest, queryset: QuerySet[Invoice]) -> Any:
-        value = self.value()
-        if not value or not value.isdigit():
-            return queryset
-        return queryset.filter(items__placement__product_id=int(value)).distinct()
+    def of_product(self, queryset: QuerySet[Any], product_id: int) -> QuerySet[Any]:
+        return queryset.filter(items__placement__product_id=product_id).distinct()
 
 
 class PaidMonthFilter(admin.SimpleListFilter):

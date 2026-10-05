@@ -13,6 +13,12 @@
  * Окна в правом нижнем углу: пока идёт — «Проверяю…» с ходом и последней
  * неудачной попыткой; в конце — итог: зелёное — всё в индексе, жёлтое —
  * не в индексе или пауза, красное — проверку выполнить не удалось.
+ *
+ * Проверка адреса (E9-12): поле «Адрес страницы» и «Проверить» справа от
+ * «Выполнить» в «Размещениях». Тот же поиск, но ничего не записывается: сервер
+ * ставит задачу (…/check-url/), скрипт спрашивает итог (…/check-url/status/) и
+ * показывает его окошком вверху справа — зелёным «В индексе» или красным
+ * «Не в индексе».
  */
 (function () {
   "use strict";
@@ -351,7 +357,110 @@
     );
   });
 
+  // ---------- Проверка адреса (E9-12) ----------
+
+  var VERDICT_MS = 10000;
+
+  function verdict(kind, title, text) {
+    var box = document.querySelector(".seo-verdicts");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "seo-verdicts";
+      box.setAttribute("role", "status");
+      box.setAttribute("aria-live", "polite");
+      document.body.appendChild(box);
+    }
+    var item = document.createElement("div");
+    item.className = "seo-verdict is-" + kind;
+    var body = document.createElement("div");
+    var head = document.createElement("strong");
+    head.textContent = title;
+    var line = document.createElement("span");
+    line.className = "seo-verdict-text";
+    line.textContent = text || "";
+    var close = document.createElement("button");
+    close.type = "button";
+    close.className = "seo-verdict-close";
+    close.setAttribute("aria-label", "Закрыть");
+    close.textContent = "×";
+    close.addEventListener("click", function () { item.remove(); });
+    body.appendChild(head);
+    body.appendChild(line);
+    item.appendChild(body);
+    item.appendChild(close);
+    box.insertBefore(item, box.firstChild);
+    setTimeout(function () { item.remove(); }, kind === "error" ? VERDICT_MS * 2 : VERDICT_MS);
+  }
+
+  // Поле и кнопка — в форме списка, которую правка списка на месте заменяет
+  // (seo/soft-nav.js): берём те, что на странице сейчас.
+  function urlButton() {
+    return document.querySelector('button[form="seo-url-check"]');
+  }
+
+  function urlBusy(on) {
+    var button = urlButton();
+    if (!button) return;
+    button.disabled = on;
+    button.classList.toggle("seo-btn-busy", on);
+  }
+
+  async function waitUrl(statusUrl, started) {
+    var query = "?key=" + encodeURIComponent(started.key) + "&task=" + encodeURIComponent(started.task);
+    var begin = Date.now();
+    for (;;) {
+      await sleep(Date.now() - begin < FAST_FOR_MS ? POLL_FAST_MS : POLL_SLOW_MS);
+      var state = await fetchJson(statusUrl + query);
+      if (state.state === "done" || state.state === "failed" || state.state === "waiting") return state;
+      if (Date.now() - begin > GIVE_UP_MS) {
+        return { state: "failed", error: "Ответа нет — проверьте, запущена ли очередь (воркер)." };
+      }
+    }
+  }
+
+  async function checkUrl(form) {
+    var input = document.querySelector('input[form="seo-url-check"]');
+    var button = urlButton();
+    if (!input || !button || button.disabled) return;
+    var url = input.value.trim();
+    if (!url) {
+      verdict("error", "Нечего проверять", "Вставьте адрес страницы.");
+      input.focus();
+      return;
+    }
+    var body = new FormData();
+    body.append("url", url);
+    urlBusy(true);
+    try {
+      var started = await fetchJson(form.getAttribute("action"), { method: "POST", body: body });
+      if (started.error) {
+        verdict("error", "Проверить не удалось", started.error);
+        return;
+      }
+      var state = await waitUrl(form.getAttribute("data-status-url"), started);
+      if (state.state === "done") {
+        verdict(state.indexed ? "yes" : "no", state.indexed ? "В индексе" : "Не в индексе", state.url);
+      } else if (state.state === "waiting") {
+        verdict("warning", "Проверка отложена",
+          (state.waiting && state.waiting.reason ? state.waiting.reason + " " : "")
+          + (state.waiting ? "Пойдёт после " + state.waiting.until + "." : ""));
+      } else {
+        verdict("error", "Проверить не удалось", state.error || "");
+      }
+    } catch (error) {
+      verdict("error", "Проверить не удалось", error.message);
+    } finally {
+      urlBusy(false);
+    }
+  }
+
   document.addEventListener("submit", function (event) {
+    var urlForm = event.target.closest && event.target.closest("form#seo-url-check");
+    if (urlForm) {
+      event.preventDefault();
+      checkUrl(urlForm);
+      return;
+    }
     // Кнопка в карточке.
     var card = event.target.closest("form[data-indexation-form]");
     if (card) {

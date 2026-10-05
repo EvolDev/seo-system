@@ -48,6 +48,12 @@
 .seo-toast-action:hover { text-decoration: underline; }
 .seo-toast-action:focus-visible { outline: 2px solid var(--seo-accent, #2a65a8); outline-offset: 2px; }
 
+/* Список на месте (E9-12): пока идёт запрос, строки и страницы бледнеют —
+   с задержкой, чтобы быстрый ответ не мигал. Колонка фильтров и поиск — нет. */
+#changelist-form .results, #changelist-form .paginator { transition: opacity 0.15s; }
+#changelist-form.seo-list-loading .results,
+#changelist-form.seo-list-loading .paginator { opacity: 0.5; transition: opacity 0.2s 0.15s; }
+
 @media (prefers-reduced-motion: reduce) {
   .seo-topbar, .seo-spin, .seo-btn-busy::after { animation: none; }
   .seo-topbar { transition: opacity 0.2s; }

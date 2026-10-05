@@ -1,0 +1,17 @@
+{% comment %}
+Рабочий продукт в шапке (E9-12, ADR-057). Выбор отправляет форму сам, «next» —
+адрес экрана на момент выбора: seo/product-switch.js. Имя поля — не «product»:
+в формах записей так зовут их собственное поле.
+{% endcomment %}
+<form class="seo-product-switch" method="post" action="{% url 'admin:working_product' %}">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+  <label title="Рабочий продукт: с ним открываются все экраны">
+    <span class="seo-product-label">Продукт</span>
+    <select name="working_product" aria-label="Рабочий продукт">
+      {% for product in products %}<option value="{{ product.pk }}"{% if product.pk == current %} selected{% endif %}>{{ product.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <noscript><button type="submit" class="seo-btn">OK</button></noscript>
+</form>

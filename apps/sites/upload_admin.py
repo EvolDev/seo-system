@@ -42,6 +42,7 @@ from apps.sites.tasks import upload_check, upload_write
 from apps.sites.uploads import filters, placements, review, service
 from apps.sites.uploads.apply import Part
 from apps.sites.uploads.columns import Confidence
+from apps.workspace.products import working_product_id
 from config.admin import NoDeleteAdmin
 from config.assets import Css
 from config.run_id import bind_run_id, new_run_id
@@ -764,21 +765,23 @@ def _catalog_context(upload: Upload) -> dict[str, Any]:
 def _last_choice(request: HttpRequest) -> dict[str, Any]:
     """Начальные значения формы — как в прошлой загрузке этого человека (E1-09).
 
-    Тип файла, продукт и страна выгрузки — те же, что в прошлый раз: подряд обычно
-    грузят одно и то же. Продавца не подставляем: прайс чужого продавца под прошлым
-    именем молча привязал бы цены не к тому.
+    Тип файла и страна выгрузки — те же, что в прошлый раз: подряд обычно грузят
+    одно и то же. Продукт — рабочий (ADR-057). Продавца не подставляем: прайс
+    чужого продавца под прошлым именем молча привязал бы цены не к тому.
     """
-    mine = Upload.objects.filter(author_id=request.user.pk).order_by("-created_at", "-pk")
-    last = mine.only("kind", "product_id", "country").first()
-    if last is None:
-        return {}
-    initial: dict[str, Any] = {"kind": last.kind}
-    product = (
-        last.product_id
-        or mine.filter(product__isnull=False).values_list("product_id", flat=True).first()
-    )
+    initial: dict[str, Any] = {}
+    product = working_product_id(request)
     if product is not None:
         initial["product"] = product
+    last = (
+        Upload.objects.filter(author_id=request.user.pk)
+        .order_by("-created_at", "-pk")
+        .only("kind", "country")
+        .first()
+    )
+    if last is None:
+        return initial
+    initial["kind"] = last.kind
     if last.kind == UploadKind.AHREFS_BATCH:
         initial["country"] = last.country or ""
     return initial

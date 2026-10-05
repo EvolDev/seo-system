@@ -1,4 +1,5 @@
-"""«Мои фильтры»: сохранить, удалить и вернуть набор (E9-10, ADR-050).
+"""«Мои фильтры»: сохранить, удалить и вернуть набор (E9-10, ADR-050);
+рабочий продукт из шапки (E9-12, ADR-057).
 
 Блок над колонкой фильтров (`seo/saved-filters.js`) шлёт POST и получает JSON:
 подпись для сообщения и наборы списка заново — селектор перерисовывается без
@@ -13,11 +14,15 @@ from django.contrib.admin.exceptions import NotRegistered
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponseRedirect, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
+from apps.sites.models import Product
 from apps.workspace.models import SavedFilter
+from apps.workspace.products import choose_product, without_product
 from apps.workspace.saved_filters import NAME_MAX, as_json, clean_query, sets_of
 
 
@@ -134,3 +139,28 @@ def restore_view(request: HttpRequest, pk: int) -> JsonResponse:
     return _answer(
         request, item.screen, restored=True, id=item.pk, message=f"Набор «{item.name}» возвращён."
     )
+
+
+def working_product_view(request: HttpRequest) -> HttpResponseRedirect:
+    """Выбор рабочего продукта в шапке: запомнить и вернуть на тот же экран.
+
+    Экран — без выбора продукта и номера страницы в адресе: список сразу
+    показывает новый рабочий продукт (seo/soft-nav.js — на месте, без
+    перезагрузки), а не продукт, выбранный в колонке раньше.
+    """
+    product = Product.objects.filter(pk=_number(request.POST.get("working_product"))).first()
+    if product is None:
+        raise Http404("Нет такого продукта.")
+    choose_product(request.user, product)  # type: ignore[arg-type]
+    target = request.POST.get("next", "")
+    if not target.startswith("/") or not url_has_allowed_host_and_scheme(
+        target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return HttpResponseRedirect(reverse("admin:index"))
+    path, _, query = target.partition("?")
+    rest = without_product(QueryDict(query))
+    return HttpResponseRedirect(f"{path}?{rest}" if rest else path)
+
+
+def _number(value: str | None) -> int:
+    return int(value) if value and value.isdigit() else 0

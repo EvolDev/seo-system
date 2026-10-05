@@ -1,0 +1,17 @@
+{% extends "admin/actions.html" %}
+{% comment %}
+Строка действий «Размещений»; справа — проверка адреса на индексацию (E9-12).
+Поле и кнопка стоят в строке действий, но принадлежат своей форме
+#seo-url-check (атрибут form): она — вне формы списка (change_list.html),
+Enter в поле не запускает действие над строками. Проверку ведёт
+seo/indexation.js, итог — окошко вверху справа.
+{% endcomment %}
+{% block actions %}
+{{ block.super }}
+<span class="seo-url-check">
+  <input type="text" name="url" form="seo-url-check" class="vTextField" placeholder="Адрес страницы"
+    aria-label="Адрес страницы для проверки индексации" autocomplete="off" spellcheck="false" inputmode="url">
+  <button type="submit" form="seo-url-check" class="seo-btn"
+    title="Есть ли страница в индексе Google — только окошко, никуда не записывается">Проверить</button>
+</span>
+{% endblock %}

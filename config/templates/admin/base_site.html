@@ -6,7 +6,7 @@
 этим именем — сначала наш (TEMPLATES["DIRS"]), затем тему, — поэтому extends
 продолжает её шаблон, а не этот же. Расцветки — config/static/seo/admin-palettes.css.
 {% endcomment %}
-{% load static seo_assets seo_docs %}
+{% load static seo_assets seo_docs working_product %}
 
 {% block title %}{% if title %}{{ title }} | {% endif %}SEO-система{% endblock %}
 
@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="{% asset 'seo/export.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/domain-tools.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/help.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/product-switch.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}
@@ -35,6 +36,7 @@
 <script src="{% asset 'seo/export.js' %}" defer></script>
 <script src="{% asset 'seo/domain-tools.js' %}" defer></script>
 <script src="{% asset 'seo/help.js' %}" defer></script>
+<script src="{% asset 'seo/product-switch.js' %}" defer></script>
 <script>
   // Расцветку ставим до первой отрисовки, иначе страница мигнёт чужими цветами.
   // Выбор помнит браузер; в первый раз — по настройке системы (светлая / тёмная).
@@ -63,8 +65,10 @@
 </script>
 {% endblock %}
 
+{# Рядом с названием — рабочий продукт, свой у каждого (E9-12, ADR-057). #}
 {% block branding %}
 <h1 id="site-name"><a href="{% url 'admin:index' %}"><span>SEO-система</span></a></h1>
+{% working_product_switch %}
 {% endblock %}
 
 {# «Документация» — в новой вкладке: рабочий экран остаётся как был (E9-07). #}

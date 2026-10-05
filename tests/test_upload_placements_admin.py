@@ -13,6 +13,7 @@ from django.urls import reverse
 from apps.observability.models import Check, CheckStatus, Performer
 from apps.placements.models import Placement
 from apps.sites.models import Product, Seller, Site, Upload, UploadKind, UploadStatus
+from apps.workspace.products import working_product_id
 
 pytestmark = pytest.mark.django_db
 
@@ -78,7 +79,8 @@ class TestForm:
         _post_file(admin_client, kind="placements", product=clideo.pk)
         page = admin_client.get(reverse("admin:sites_upload_add"))
         assert page.context["form"]["kind"].value() == "placements"
-        assert page.context["form"]["product"].value() == clideo.pk
+        # Продукт — не прошлый, а рабочий (ADR-057): не выбран — первый активный.
+        assert page.context["form"]["product"].value() == working_product_id(page.wsgi_request)
         # У другого человека — своё «в прошлый раз».
         other = User.objects.create_superuser("kate", password="x")
         client = Client()

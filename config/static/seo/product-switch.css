@@ -1,0 +1,30 @@
+/* Рабочий продукт в шапке, рядом с «SEO-система» (E9-12, ADR-057).
+   Цвета — от шапки расцветки: светлой и тёмной. */
+#branding { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.seo-product-switch { margin: 0; display: inline-flex; align-items: center; }
+.seo-product-switch label {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;
+  color: var(--admin-interface-header-text-color, #c4c7c5); font-size: 0.8125rem;
+}
+.seo-product-switch select {
+  appearance: none; -webkit-appearance: none;
+  height: 30px; min-width: 9em; margin: 0; padding: 0 30px 0 12px; cursor: pointer;
+  border-radius: var(--seo-radius, 8px);
+  border: 1px solid color-mix(in srgb, var(--admin-interface-header-link-color, #fff) 30%, transparent);
+  background-color: color-mix(in srgb, var(--admin-interface-header-link-color, #fff) 8%, transparent);
+  color: var(--admin-interface-header-link-color, #fff);
+  font: inherit; font-weight: 600;
+  /* Стрелка — цветом текста шапки. */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px; background-repeat: no-repeat;
+}
+.seo-product-switch select:hover {
+  border-color: color-mix(in srgb, var(--admin-interface-header-link-color, #fff) 55%, transparent);
+}
+.seo-product-switch select:focus-visible {
+  outline: 2px solid var(--admin-interface-header-link-hover-color, #a8c7fa); outline-offset: 1px;
+}
+/* Раскрытый список рисует система — цвета обычной страницы, а не шапки. */
+.seo-product-switch option { color: var(--body-fg, #333); background: var(--body-bg, #fff); }

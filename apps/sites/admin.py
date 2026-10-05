@@ -84,6 +84,7 @@ from apps.sites.models import (
     SiteStatus,
 )
 from apps.sites.status_history import site_history
+from apps.workspace.products import WorkingProductFilter, products_of, working_product_id
 from config import export
 from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline, is_partial
 from config.assets import Css, Js
@@ -608,7 +609,7 @@ class ProductSiteAdmin(NoDeleteAdmin):
     """
 
     list_display = ("site", "product", "status", "imported_undecided", "updated_at")
-    list_filter = ("product", "status", "imported_undecided")
+    list_filter = (WorkingProductFilter, "status", "imported_undecided")
     search_fields = ("site__domain",)
     readonly_fields = ("site", "product", "created_at", "updated_at")
     list_select_related = ("site", "product")
@@ -886,7 +887,7 @@ class GrayScanAdmin(SiteSnapshotAdmin):
 @admin.register(SiteAudit)
 class SiteAuditAdmin(SiteSnapshotAdmin):
     list_display = ("site", "product", "verdict", "score", "author", "created_at")
-    list_filter = ("product", "verdict", "author")
+    list_filter = (WorkingProductFilter, "verdict", "author")
     search_fields = ("site__domain",)
     list_select_related = ("site", "product")
     snapshot_key = ("site_id", "product_id")
@@ -997,26 +998,24 @@ def _euros(cents: int | None) -> str:
 
 
 class ProductFilter(admin.SimpleListFilter):
-    """Продукт, чьими глазами смотрим на площадки. Пункта «все» нет.
+    """Продукт, чьими глазами смотрим на площадки. Пункта «все» нет: одна
+    площадка у двух продуктов дала бы две строки с разными статусами (ADR-030).
 
-    Без выбора — первый активный продукт: одна площадка у двух продуктов
-    дала бы две строки с разными статусами (ADR-030).
+    Без выбора — рабочий продукт пользователя (ADR-057).
     """
 
     title = "продукт"
     parameter_name = "product"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
-        # Первый активный — из того же запроса: лишний запрос на страницу не нужен.
-        products = list(Product.objects.order_by("pk").values_list("pk", "name", "is_active"))
-        self.first_active = next((pk for pk, _, active in products if active), None)
-        return [(str(pk), name) for pk, name, _ in products]
+        self.working = working_product_id(request)
+        return [(str(pk), name) for pk, name, _ in products_of(request)]
 
     def value(self) -> str | None:
         value = super().value()
         if not value and self.lookup_choices:
-            first = self.first_active
-            value = str(first) if first is not None else self.lookup_choices[0][0]
+            known = any(pk == str(self.working) for pk, _ in self.lookup_choices)
+            value = str(self.working) if known else self.lookup_choices[0][0]
             # Запоминаем, чтобы не спрашивать базу второй раз при отрисовке.
             self.used_parameters[self.parameter_name] = value
         return str(value) if value is not None else None

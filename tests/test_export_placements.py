@@ -264,7 +264,8 @@ def test_totals_sheet(admin_client: Client, base: dict[str, Any]) -> None:
 
 
 def test_all_products_and_statuses(admin_client: Client, base: dict[str, Any]) -> None:
-    _, book = _book(admin_client)
+    # «Все» — явным выбором: без него — рабочий продукт (ADR-057).
+    _, book = _book(admin_client, product__id__exact="all")
     header = [cell.value for cell in next(book["Размещения"].iter_rows())]
     assert "Пример статьи на Convertio" in header and "Пример статьи на Clideo" in header
     rows = {(row["Target"], row["Продукт"]): row for row in _rows(book["Размещения"])}

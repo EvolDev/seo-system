@@ -10,6 +10,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from apps.keywords.models import Keyword, KeywordPosition
+from apps.workspace.products import WorkingProductFilter, product_filter
 from config.admin import NoDeleteAdmin, SnapshotAdmin
 
 
@@ -17,7 +18,7 @@ from config.admin import NoDeleteAdmin, SnapshotAdmin
 class KeywordAdmin(NoDeleteAdmin):
     panel = True
     list_display = ("keyword", "product", "tool", "page_type", "volume", "anchor_type", "is_active")
-    list_filter = ("product", "tool", "is_active", "anchor_type")
+    list_filter = (WorkingProductFilter, "tool", "is_active", "anchor_type")
     # Поиск нужен и выбору ключа у ссылки размещения.
     search_fields = ("keyword",)
     list_select_related = ("product",)
@@ -33,7 +34,7 @@ class KeywordPositionAdmin(SnapshotAdmin):
     """
 
     list_display = ("keyword", "position", "country", "source", "checked_at")
-    list_filter = ("keyword__product", "country", "source")
+    list_filter = (product_filter("keyword__product"), "country", "source")
     search_fields = ("keyword__keyword",)
     list_select_related = ("keyword",)
     autocomplete_fields = ("keyword",)

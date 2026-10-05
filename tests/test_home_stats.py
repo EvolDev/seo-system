@@ -123,7 +123,8 @@ def october(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_home_page(admin_client: Client, data: tuple[Product, Product], october: None) -> None:
     convertio, _ = data
-    response = admin_client.get(INDEX)
+    # «Все продукты» — явным выбором: без него — рабочий продукт (ADR-057).
+    response = admin_client.get(INDEX, {"product": "all"})
     s = response.context["home_stats"]
     assert s["year"] == 2026
     labels = [(t["label"], t["value"], t["note"]) for t in s["tiles"]]
@@ -131,7 +132,11 @@ def test_home_page(admin_client: Client, data: tuple[Product, Product], october:
     assert labels[1] == ("Потрачено в октябре", "≈€100", "в сентябре: €863")
     assert labels[2] == ("К оплате по счетам", "€181", "счетов: 1")
     september = s["placed"].bars[8]
-    assert september.url == reverse("admin:placements_placement_changelist") + "?month=2026-09"
+    assert (
+        september.url
+        == reverse("admin:placements_placement_changelist")
+        + "?month=2026-09&product__id__exact=all"
+    )
     assert september.labeled and september.text == "3"
     assert s["placed"].bars[9].current
     spent = s["spent"].bars[8]
@@ -145,7 +150,8 @@ def test_home_page(admin_client: Client, data: tuple[Product, Product], october:
     # Выбор продукта — ссылками с продуктом и годом; выбранный — залит.
     assert f"?product={convertio.pk}&amp;year=2026" in page
     chips = page.split('class="seo-stats-products"')[1].split("</div>")[0]
-    assert 'class="seo-btn seo-btn-primary" href="/admin/?year=2026" aria-current="true"' in chips
+    chosen = 'class="seo-btn seo-btn-primary" href="/admin/?product=all&amp;year=2026"'
+    assert f'{chosen} aria-current="true"' in chips
 
 
 def test_home_product_and_year(

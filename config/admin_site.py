@@ -129,6 +129,12 @@ class SeoAdminSite(admin.AdminSite):
                 self.admin_view(require_POST(views.restore_view)),
                 name="saved_filters_restore",
             ),
+            # Рабочий продукт в шапке (E9-12, ADR-057).
+            path(
+                "working-product/",
+                self.admin_view(require_POST(views.working_product_view)),
+                name="working_product",
+            ),
         ]
         return own + super().get_urls()
 
