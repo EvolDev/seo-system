@@ -1,0 +1,116 @@
+{% extends "admin/base_site.html" %}
+{% load seo_assets %}
+{% comment %}
+Слияние продавцов графом (E1-17): узлы — отмеченные продавцы, стрелки сходятся
+в главного. Клик по узлу делает его главным — это единственное действие;
+наведение (и переход табом) показывает карточку с подробностями, чтобы
+отличить тёзок. Узел несёт минимум для выбора: имя, валюта, цены, рабочие
+цены, размещения, последняя цена — по этим же числам предлагается главный.
+
+Порядок на экране — как в разборе дублей: сначала выбор главного, потом
+предпросмотр «что получится», потом необратимое действие. Граф рисуется
+сервером (SVG в процентах), seo/seller-merge.js только переставляет стрелки и
+подписи после щелчка — без скрипта экран остаётся рабочим: у каждого узла
+radio-кнопка.
+{% endcomment %}
+
+{% block extrahead %}{{ block.super }}
+<link rel="stylesheet" href="{% asset 'seo/seller-merge.css' %}">
+<script src="{% asset 'seo/seller-merge.js' %}" defer></script>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Начало</a>
+  &rsaquo; <a href="{{ back_url }}">Продавцы</a>
+  &rsaquo; Объединить
+</div>
+{% endblock %}
+
+{% block content %}
+<form method="post" class="seo-merge" data-merge>
+  {% csrf_token %}
+  <p class="seo-lead">
+    Щёлкните по продавцу, которого оставляем, — стрелки покажут, кто в него сольётся.
+    Наведите на любого, чтобы увидеть подробности. Галочкой «не сливать» можно вывести
+    кого-то из слияния.
+  </p>
+
+  <div class="seo-merge-graph" data-graph>
+    <svg class="seo-merge-arrows" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      {% for node in nodes %}
+        <line class="seo-merge-arrow" data-arrow="{{ node.facts.seller.pk }}"
+              x1="{{ node.x }}" y1="{{ node.y }}" x2="50" y2="50"></line>
+      {% endfor %}
+    </svg>
+
+    {% for node in nodes %}
+      <div class="seo-merge-node{% if node.facts.seller.pk == suggested %} is-target{% endif %}"
+           style="left: {{ node.x }}%; top: {{ node.y }}%"
+           data-node="{{ node.facts.seller.pk }}">
+        <label class="seo-merge-pick">
+          <input type="radio" name="target" value="{{ node.facts.seller.pk }}"
+                 {% if node.facts.seller.pk == suggested %}checked{% endif %} data-target>
+          <span class="seo-merge-card" tabindex="0" aria-describedby="seo-merge-tip-{{ node.facts.seller.pk }}">
+            <b class="seo-merge-name">{{ node.facts.seller.name }}</b>
+            <span class="seo-merge-role">главный</span>
+            <span class="seo-merge-nums">
+              <span><b>{{ node.facts.prices }}</b> цен</span>
+              <span><b>{{ node.facts.working }}</b> рабочих</span>
+              <span><b>{{ node.facts.placements }}</b> размещений</span>
+            </span>
+            <span class="seo-merge-sub">
+              {{ node.facts.seller.currency }}{% if node.facts.last_price %} · последняя цена {{ node.facts.last_price|date:"d.m.Y" }}{% endif %}
+            </span>
+          </span>
+        </label>
+        <div class="seo-merge-tip" id="seo-merge-tip-{{ node.facts.seller.pk }}" role="tooltip">
+          <b>{{ node.facts.seller.name }}</b>
+          <dl>
+            <dt>Цены</dt><dd>{{ node.facts.prices }}, рабочих — {{ node.facts.working }}</dd>
+            <dt>Размещения</dt><dd>{{ node.facts.placements }}</dd>
+            <dt>Счета</dt><dd>{{ node.facts.invoices }}</dd>
+            <dt>Замеры метрик</dt><dd>{{ node.facts.metrics }}</dd>
+            <dt>Загрузки</dt><dd>{{ node.facts.uploads }}</dd>
+            <dt>Валюта</dt><dd>{{ node.facts.seller.currency }}</dd>
+            {% if node.facts.seller.contacts %}<dt>Контакты</dt><dd>{{ node.facts.seller.contacts }}</dd>{% endif %}
+            {% if node.facts.seller.is_collaborator %}<dt>Каталог</dt><dd>Collaborator</dd>{% endif %}
+          </dl>
+          <label class="seo-merge-skip">
+            <input type="checkbox" name="skip" value="{{ node.facts.seller.pk }}" data-skip>
+            не сливать этого
+          </label>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="seo-merge-result">
+    <h2>Что получится</h2>
+    <p>
+      Всё переедет к <b data-result-name>{{ facts.0.seller.name }}</b>:
+      цены, замеры метрик, загрузки, размещения и счета слитых. Рабочая цена площадки
+      и строки разбора загрузок останутся на своих местах — у строк меняется только продавец.
+      Одинаковые цены (та же площадка, услуга, дата и сумма) схлопнутся в одну.
+      Контакты и заметки слитых допишутся в заметки главного.
+    </p>
+    {% if currencies|length > 1 %}
+      <p class="seo-merge-conflict">
+        Валюты расходятся ({{ currencies|join:", " }}) — выберите, какая останется:
+        <select name="currency">
+          {% for code in currencies %}<option value="{{ code }}">{{ code }}</option>{% endfor %}
+        </select>
+      </p>
+    {% endif %}
+    <label class="seo-merge-keep">
+      <input type="checkbox" name="keep" value="yes"> оставить слитых продавцов пустыми, не удалять
+    </label>
+  </div>
+
+  <div class="submit-row">
+    <button type="submit" class="default seo-run-btn">Объединить</button>
+    <a class="seo-btn" href="{{ back_url }}">Отмена</a>
+  </div>
+  <p class="seo-hint">Слияние необратимо: отменить его нечем, вернуть можно только из копии базы.</p>
+</form>
+{% endblock %}

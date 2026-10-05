@@ -10,6 +10,7 @@ ADR-043; правила смены цены — `apps/sites/offers.py`. Серо
 """
 
 import datetime as dt
+import math
 from collections.abc import Iterable, Iterator
 from collections.abc import Set as AbstractSet
 from contextlib import suppress
@@ -44,7 +45,7 @@ from apps.content.domain_settings import gray_terms, gray_zones
 from apps.content.models import DomainSetting
 from apps.placements import invoices
 from apps.placements.models import Invoice, InvoiceStatus, Placement
-from apps.sites import ahrefs_domains, countries, gray_scan, offers
+from apps.sites import ahrefs_domains, countries, gray_scan, offers, sellers
 from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
@@ -87,7 +88,14 @@ from apps.sites.status_history import site_history
 from apps.workspace import card as card_sections
 from apps.workspace.products import WorkingProductFilter, products_of, working_product_id
 from config import export
-from config.admin import RecordAdmin, SnapshotAdmin, TabularInline, is_partial
+from config.admin import (
+    MultiChoiceFilter,
+    PerPageChangeList,
+    RecordAdmin,
+    SnapshotAdmin,
+    TabularInline,
+    is_partial,
+)
 from config.assets import Css, Js
 from config.export import attachment
 from config.forms import ChoiceButtons
@@ -724,6 +732,86 @@ class SellerAdmin(RecordAdmin):
         fields = tuple(field for field in fields if field != "invoices_block")
         return (*fields, "invoices_block") if obj is not None else fields
 
+    actions = ("merge_action",)
+
+    @admin.action(description="Объединить продавцов…", permissions=["change"])
+    def merge_action(
+        self, request: HttpRequest, queryset: models.QuerySet[Seller]
+    ) -> HttpResponse | None:
+        """Отмеченные продавцы — на экран слияния: дубли из разных выгрузок."""
+        ids = sorted(queryset.values_list("pk", flat=True))
+        if len(ids) < 2:
+            self.message_user(request, "Отметьте хотя бы двоих.", messages.WARNING)
+            return None
+        chosen = "&".join(f"id={pk}" for pk in ids)
+        return HttpResponseRedirect(f"{reverse('admin:sites_seller_merge')}?{chosen}")
+
+    def get_urls(self) -> list[URLPattern]:
+        own = [
+            path(
+                "merge/",
+                self.admin_site.admin_view(self.merge_view),
+                name="sites_seller_merge",
+            ),
+        ]
+        return own + super().get_urls()
+
+    def merge_view(self, request: HttpRequest) -> HttpResponse:
+        """Граф слияния: клик по узлу делает его главным, наведение — карточка.
+
+        GET — граф и предпросмотр, POST — само слияние одной транзакцией.
+        """
+        if not self.has_change_permission(request):
+            return HttpResponse(status=403)
+        ids = [int(value) for value in request.GET.getlist("id") if value.isdigit()]
+        chosen = sellers.facts(ids)
+        back = reverse("admin:sites_seller_changelist")
+        if len(chosen) < 2:
+            self.message_user(request, "Отметьте хотя бы двоих продавцов.", messages.WARNING)
+            return HttpResponseRedirect(back)
+        if request.method == "POST":
+            return self._merge(request, chosen, back)
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Объединить продавцов",
+            "opts": self.opts,
+            "facts": chosen,
+            "nodes": _merge_nodes(chosen),
+            "suggested": max(chosen, key=lambda item: item.weight).seller.pk,
+            "currencies": sorted({item.seller.currency for item in chosen}),
+            "back_url": back,
+        }
+        return TemplateResponse(request, "admin/sites/seller/merge.html", context)
+
+    def _merge(self, request: HttpRequest, chosen: list[sellers.Facts], back: str) -> HttpResponse:
+        by_id = {item.seller.pk: item.seller for item in chosen}
+        target = by_id.get(_int(request.POST.get("target")))
+        skipped = {_int(value) for value in request.POST.getlist("skip")}
+        if target is None:
+            self.message_user(request, "Выберите главного продавца.", messages.WARNING)
+            return HttpResponseRedirect(request.get_full_path())
+        sources = [s for pk, s in by_id.items() if pk != target.pk and pk not in skipped]
+        try:
+            report = sellers.merge(
+                target,
+                sources,
+                delete_sources=request.POST.get("keep") != "yes",
+                currency=request.POST.get("currency") or None,
+            )
+        except sellers.MergeError as error:
+            self.message_user(request, str(error), messages.ERROR)
+            return HttpResponseRedirect(request.get_full_path())
+        text = (
+            f"Объединено в «{report.target.name}»: цен — {report.prices}"
+            f" (дублей схлопнуто {report.duplicates}), размещений — {report.placements},"
+            f" счетов — {report.invoices}, замеров — {report.metrics},"
+            f" загрузок — {report.uploads}."
+        )
+        if report.deleted:
+            text += f" Слитых продавцов удалено: {len(report.sources)}."
+        self.message_user(request, text, messages.SUCCESS)
+        return HttpResponseRedirect(back)
+
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Seller]:
         # Счётчики одним запросом на весь список, а не запросом на строку.
         working = (
@@ -857,6 +945,49 @@ class SiteMetricAdmin(SiteSnapshotAdmin):
     autocomplete_fields = ("site", "seller")
 
 
+class PriceSellerFilter(MultiChoiceFilter):
+    """Продавцы предложений — галочками, можно отметить нескольких."""
+
+    title = "продавец"
+    parameter_name = "seller"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        sellers = Seller.objects.order_by("name").values_list("pk", "name")
+        return [(str(pk), name) for pk, name in sellers]
+
+    def narrow(self, queryset: Any, values: list[str]) -> Any:
+        if not all(value.isdigit() for value in values):
+            return queryset.none()
+        return queryset.filter(seller_id__in=[int(value) for value in values])
+
+
+class PriceFileFilter(MultiChoiceFilter):
+    """Из какого файла цена: загрузка размещений пишет имя файла в «прочие данные».
+
+    По нему разбирают последствия неудачной загрузки: отобрать её цены и удалить
+    отмеченные, если загрузку уже не отменить (ADR-060, просьба 05.10.2026).
+    """
+
+    title = "из файла"
+    parameter_name = "from_file"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        found = (
+            SitePrice.objects.annotate(source_file=KT("extra__Цена из размещения"))
+            .exclude(source_file__isnull=True)
+            .values_list("source_file", flat=True)
+            .distinct()
+            .order_by("source_file")
+        )
+        return [(str(value), str(value)) for value in found]
+
+    def narrow(self, queryset: Any, values: list[str]) -> Any:
+        found = models.Q()
+        for value in values:
+            found |= models.Q(**{"extra__Цена из размещения": value})
+        return queryset.filter(found)
+
+
 @admin.register(SitePrice)
 class SitePriceAdmin(SiteSnapshotAdmin):
     """Предложения продавцов. Новое — «Сохранить как новый объект» или «Добавить».
@@ -872,8 +1003,15 @@ class SitePriceAdmin(SiteSnapshotAdmin):
         "price",
         "checked_at",
         "reviewed_at",
+        "from_file",
     )
-    list_filter = ("seller", "placement_type", "source")
+    list_filter = (
+        PriceSellerFilter,
+        "placement_type",
+        "source",
+        PriceFileFilter,
+        ("checked_at", admin.DateFieldListFilter),
+    )
     search_fields = ("site__domain", "seller__name")
     list_select_related = ("site", "seller")
     autocomplete_fields = ("site", "seller")
@@ -885,6 +1023,11 @@ class SitePriceAdmin(SiteSnapshotAdmin):
     @admin.display(description="цена услуги", ordering="placement_cents")
     def price(self, obj: SitePrice) -> str:
         return offers.money(obj.placement_cents, obj.currency)
+
+    @admin.display(description="из файла")
+    def from_file(self, obj: SitePrice) -> str:
+        """Файл загрузки, из которого цена: по нему её и отбирают фильтром."""
+        return str((obj.extra or {}).get("Цена из размещения", ""))
 
     def save_model(self, request: HttpRequest, obj: SitePrice, form: Any, change: bool) -> None:
         if not change:
@@ -1197,12 +1340,12 @@ class OffersFilter(admin.SimpleListFilter):
         return queryset
 
 
-class SellerFilter(admin.SimpleListFilter):
+class SellerFilter(MultiChoiceFilter):
     """Площадки, которые предлагает продавец: есть хоть одна его цена.
 
-    У имени — сколько площадок продавца в списке при остальных выбранных
-    фильтрах: «Athena Smith (12)». Продавцы без площадок в таком списке не
-    показываются, кроме выбранного.
+    Отметить можно нескольких сразу (галочки). У имени — сколько площадок
+    продавца в списке при остальных выбранных фильтрах: «Athena Smith (12)».
+    Продавцы без площадок в таком списке не показываются, кроме отмеченных.
     """
 
     title = "продавец"
@@ -1219,11 +1362,14 @@ class SellerFilter(admin.SimpleListFilter):
         if self._counted is None:
             self._counted = self._counts(changelist)
         counts = self._counted
+        picked = set(self.values())
         items = super().choices(changelist)
         yield next(items)  # «Все»
         for (value, _), choice in zip(self.lookup_choices, items, strict=True):
             count = counts.get(int(value), 0)
-            if count or choice["selected"]:
+            # Продавца без площадок показываем, только если его отметили сами:
+            # «отмечены все» по умолчанию — не причина показывать всю сорокапятку.
+            if count or str(value) in picked:
                 yield {**choice, "display": f"{choice['display']} ({count})"}
 
     def _counts(self, changelist: Any) -> dict[int, int]:
@@ -1255,13 +1401,12 @@ class SellerFilter(admin.SimpleListFilter):
         )
         return dict(found)
 
-    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
-        value = self.value()
-        if not value:
-            return queryset
-        if not value.isdigit():
+    def narrow(self, queryset: Any, values: list[str]) -> Any:
+        if not all(value.isdigit() for value in values):
             return queryset.none()
-        offered = SitePrice.objects.filter(site_id=OuterRef("site_id"), seller_id=int(value))
+        offered = SitePrice.objects.filter(
+            site_id=OuterRef("site_id"), seller_id__in=[int(value) for value in values]
+        )
         return queryset.filter(Exists(offered))
 
 
@@ -1433,6 +1578,29 @@ class LanguageFilter(admin.SimpleListFilter):
         return queryset.filter(language=value) if value else queryset
 
 
+def _int(value: str | None) -> int:
+    """Число из формы; не число — 0, такого продавца среди выбранных нет."""
+    return int(value) if value and value.isdigit() else 0
+
+
+def _merge_nodes(chosen: "list[sellers.Facts]") -> list[dict[str, Any]]:
+    """Положение узлов графа: по кругу, главный — в середине (шаблон рисует SVG)."""
+    count = len(chosen)
+    nodes = []
+    for index, item in enumerate(chosen):
+        angle = 2 * math.pi * index / count - math.pi / 2
+        # Строками, а не числами: по-русски шаблон напечатал бы «50,0», а SVG и
+        # CSS понимают только точку.
+        nodes.append(
+            {
+                "facts": item,
+                "x": f"{50 + 34 * math.cos(angle):.2f}",
+                "y": f"{50 + 34 * math.sin(angle):.2f}",
+            }
+        )
+    return nodes
+
+
 class SellerActionForm(helpers.ActionForm):
     """Поле «продавец» рядом с выбором действия — для «Зафиксировать продавца…»."""
 
@@ -1441,10 +1609,11 @@ class SellerActionForm(helpers.ActionForm):
         required=False,
         label="продавец",
         empty_label="продавец…",
+        widget=forms.Select(attrs={"data-search": "Найти продавца…"}),
     )
 
 
-class OffersChangeList(ChangeList):
+class OffersChangeList(PerPageChangeList):
     """Список «Площадок», который заодно достаёт предложения строк страницы.
 
     Одним запросом на страницу: подсказка «все цены» и «ещё N» в колонке

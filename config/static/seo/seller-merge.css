@@ -1,0 +1,155 @@
+/* Граф слияния продавцов (E1-17).
+ *
+ * Главный — в середине, остальные по кругу, стрелки сходятся в него. Цвета —
+ * переменные расцветки (admin-palettes.css), поэтому экран выглядит одинаково
+ * во всех четырёх. Цель клика у карточки — больше 24 px (WCAG 2.2), подсказка
+ * открывается и наведением, и переходом табом.
+ */
+
+.seo-merge { max-width: 1100px; }
+.seo-merge .seo-lead { margin: 0 0 16px; }
+
+.seo-merge-graph {
+  position: relative;
+  height: 560px;
+  margin: 0 0 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--darkened-bg);
+}
+
+.seo-merge-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* Линия в процентах растянута по ширине, поэтому толщина — в пикселях экрана
+ * (non-scaling-stroke). Направление показывает бегущий пунктир: стрелка-маркер
+ * в растянутой системе координат превращается в кляксу.
+ */
+.seo-merge-arrow {
+  stroke: var(--seo-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 7 7;
+  opacity: .65;
+  transition: opacity .15s;
+  vector-effect: non-scaling-stroke;
+  animation: seo-merge-flow 1.1s linear infinite;
+}
+.seo-merge-arrow.is-off { opacity: 0; animation: none; }
+@keyframes seo-merge-flow {
+  from { stroke-dashoffset: 14; }
+  to { stroke-dashoffset: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seo-merge-arrow { animation: none; }
+}
+
+.seo-merge-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  transition: left .25s ease, top .25s ease;
+}
+/* Наведённый — поверх всех, иначе его карточка уходит под главного. */
+.seo-merge-node:hover,
+.seo-merge-node:focus-within { z-index: 20; }
+.seo-merge-pick { display: block; margin: 0; cursor: pointer; }
+.seo-merge-pick input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+
+.seo-merge-card {
+  display: grid;
+  gap: 4px;
+  width: 210px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--body-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+  text-align: left;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.seo-merge-card:hover { border-color: var(--seo-accent); transform: translateY(-1px); }
+.seo-merge-card:focus-visible { outline: 2px solid var(--seo-accent); outline-offset: 3px; }
+
+.seo-merge-name { font-size: 0.9375rem; line-height: 1.25; overflow-wrap: anywhere; }
+.seo-merge-role {
+  display: none;
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--seo-accent);
+  color: var(--seo-on-accent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.seo-merge-nums { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.75rem; }
+.seo-merge-nums b { font-weight: 600; }
+.seo-merge-sub { color: var(--body-quiet-color); font-size: 0.6875rem; }
+
+/* Главный — крупнее и с заливкой: видно, куда всё едет. */
+.seo-merge-node.is-target { z-index: 3; }
+.seo-merge-node.is-target .seo-merge-card {
+  width: 250px;
+  border-color: var(--seo-accent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--seo-accent) 30%, transparent);
+}
+.seo-merge-node.is-target .seo-merge-role { display: inline-block; }
+
+/* Выведенный из слияния — бледный и перечёркнутый. */
+.seo-merge-node.is-skipped .seo-merge-card { opacity: .45; }
+.seo-merge-node.is-skipped .seo-merge-name { text-decoration: line-through; }
+
+/* Карточка подробностей — при наведении и при переходе табом. */
+.seo-merge-tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  z-index: 5;
+  width: 260px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  transform: translateX(-50%);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--body-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+  font-size: 0.75rem;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .12s;
+}
+.seo-merge-node:hover .seo-merge-tip,
+.seo-merge-node:focus-within .seo-merge-tip { opacity: 1; visibility: visible; }
+.seo-merge-tip dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  margin: 8px 0 0;
+}
+.seo-merge-tip dt { color: var(--body-quiet-color); }
+.seo-merge-tip dd { margin: 0; }
+.seo-merge-skip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  cursor: pointer;
+}
+
+.seo-merge-result {
+  margin: 0 0 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+}
+.seo-merge-result h2 { margin: 0 0 8px; font-size: 1rem; }
+.seo-merge-result p { margin: 0 0 10px; }
+.seo-merge-conflict select { margin-left: 6px; }
+.seo-merge-keep { display: flex; align-items: center; gap: 8px; }

@@ -233,6 +233,75 @@ class TestFilters:
         assert _domains(admin_client, list="all", writing="no") == {"no-writing.com"}
 
 
+class TestSellerMultiFilter:
+    """Фильтр продавцов — галочками, несколько сразу (просьба 05.10.2026)."""
+
+    @pytest.fixture
+    def two_sellers(self, convertio: Product, offer: OfferFactory) -> tuple[Seller, Seller]:
+        hub = Seller.objects.create(name="LinkHub Media", currency="USD")
+        quiet = Seller.objects.create(name="Quiet Links", currency="USD")
+        offer(_site("hub.com"), 10000, seller=hub, working=False)
+        offer(_site("quiet.com"), 10000, seller=quiet, working=False)
+        _site("nobody.com")
+        return hub, quiet
+
+    def test_two_sellers_at_once(
+        self, admin_client: Client, two_sellers: tuple[Seller, Seller]
+    ) -> None:
+        hub, quiet = two_sellers
+        assert _domains(admin_client, list="all", seller=str(hub.pk)) == {"hub.com"}
+        response = admin_client.get(URL, {"list": "all", "seller": [str(hub.pk), str(quiet.pk)]})
+        both = {row.domain for row in response.context["cl"].result_list}
+        assert both == {"hub.com", "quiet.com"}
+
+    def test_without_choice_everything_is_checked(
+        self, admin_client: Client, two_sellers: tuple[Seller, Seller]
+    ) -> None:
+        # Ничего не выбрано — показаны все, и галочки стоят у всех: так из полного
+        # списка убирают лишнего одним щелчком.
+        response = admin_client.get(URL, {"list": "all"})
+        spec = next(s for s in response.context["cl"].filter_specs if isinstance(s, SellerFilter))
+        items = list(spec.choices(response.context["cl"]))
+        assert all(item["selected"] for item in items)
+        assert len(_domains(admin_client, list="all")) == 3
+
+    def test_all_again_unchecks_everyone(
+        self, admin_client: Client, two_sellers: tuple[Seller, Seller]
+    ) -> None:
+        response = admin_client.get(URL, {"list": "all", "seller": "-"})
+        spec = next(s for s in response.context["cl"].filter_specs if isinstance(s, SellerFilter))
+        items = list(spec.choices(response.context["cl"]))
+        assert not any(item["selected"] for item in items)
+        assert len(response.context["cl"].result_list) == 0
+
+
+class TestPerPage:
+    """Сколько строк на странице — выбором человека (просьба 05.10.2026)."""
+
+    @pytest.fixture
+    def many(self, convertio: Product) -> None:
+        for number in range(120):
+            _site(f"site{number}.com", dr=number % 100)
+
+    @pytest.mark.usefixtures("many")
+    def test_default_is_hundred(self, admin_client: Client) -> None:
+        response = admin_client.get(URL, {"list": "all"})
+        assert len(response.context["cl"].result_list) == 100
+        assert "На странице:" in response.content.decode()
+
+    @pytest.mark.usefixtures("many")
+    def test_chosen_size_applies(self, admin_client: Client) -> None:
+        response = admin_client.get(URL, {"list": "all", "per_page": "50"})
+        assert len(response.context["cl"].result_list) == 50
+
+    @pytest.mark.usefixtures("many")
+    def test_unknown_size_is_ignored_and_filters_still_work(self, admin_client: Client) -> None:
+        # Чужой параметр админка приняла бы за отбор по полю — список бы упал.
+        response = admin_client.get(URL, {"list": "all", "per_page": "7", "language": "en"})
+        assert response.status_code == 200
+        assert len(response.context["cl"].result_list) == 100
+
+
 class TestSearch:
     def test_full_url_finds_site(self, admin_client: Client, convertio: Product) -> None:
         _site("example.com")
