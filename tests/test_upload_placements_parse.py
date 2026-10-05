@@ -50,6 +50,19 @@ def _table(tmp_path: Path, rows: Sequence[Sequence[object]], name: str = "clideo
     return read_table(path, is_header=looks_like_placements_header)
 
 
+def _csv_table(
+    tmp_path: Path, rows: Sequence[Mapping[str, object]], name: str = "clideo.csv"
+) -> Table:
+    """Тот же лист, выгруженный в csv: формата у ячеек нет, всё приходит строками."""
+    lines = [";".join(HEADERS)]
+    for row in rows:
+        cells = _row_of(row)
+        lines.append(";".join("" if cell is None else str(cell) for cell in cells))
+    path = tmp_path / name
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return read_table(path, is_header=looks_like_placements_header)
+
+
 def _row_of(cells: Mapping[str, object]) -> list[object]:
     row: list[object] = [None] * len(HEADERS)
     for header, value in cells.items():
@@ -313,6 +326,47 @@ class TestParse:
             "«Итог цена»: 197.393 → 197,39",
             "«Цена размещ»: 4.330.755 → 4330,76",
         ]
+
+    def test_three_digits_after_the_comma_are_cents_in_csv(self, tmp_path: Path) -> None:
+        """Выгрузка того же листа в csv: формата ячейки нет, роль запятой — по файлу.
+
+        «241,258» рядом с «311,81» и «13,16» — это 241,26 €, а не 241 258 €:
+        разряды в таком файле отделены пробелом. Оплачено строкой 18 файла
+        «Размещения Clideo через барыг» (05.10.2026): 228,098 + 13,16 = 241,258.
+        """
+        table = _csv_table(
+            tmp_path,
+            [
+                {"Target": "a.com", "Итог цена": "311,81", "Цена написания": "13,16"},
+                {
+                    "Target": "b.com",
+                    "Итог цена": "241,258",
+                    "Цена размещ": "228,098",
+                    "Цена написания": "13,16",
+                    "Traffic": "4 086 679",
+                },
+            ],
+        )
+        parsed = parse_placements(table, _mapping(table), product_domain=CLIDEO)
+        first, second = parsed.records
+        assert first.paid_cents == 31181
+        assert (second.paid_cents, second.price_cents, second.writing_cents) == (
+            24126,
+            22810,
+            1316,
+        )
+        assert [issue.message for issue in parsed.issues[records.PRICE_FIXED]] == [
+            "«Итог цена»: 241,258 → 241,26",
+            "«Цена размещ»: 228,098 → 228,10",
+        ]
+
+    def test_comma_is_thousands_without_a_decimal_comma_in_the_file(self, tmp_path: Path) -> None:
+        """Нет в файле ни одной «311,81» — запятая остаётся разделителем разрядов."""
+        table = _csv_table(tmp_path, [{"Target": "a.com", "Итог цена": "1,200"}])
+        parsed = parse_placements(table, _mapping(table), product_domain=CLIDEO)
+        [record] = parsed.records
+        assert record.paid_cents == 120_000
+        assert records.PRICE_FIXED not in parsed.issues
 
     def test_duplicate_rows(self, tmp_path: Path) -> None:
         parsed = _parse(

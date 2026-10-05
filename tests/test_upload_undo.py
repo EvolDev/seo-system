@@ -8,7 +8,9 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -90,6 +92,70 @@ def _written(product: Product, rows: Sequence[Mapping[str, str]], name: str = "a
 
 def _site_state(site: Site, product: Product) -> str:
     return str(ProductSite.objects.get(site=site, product=product).status)
+
+
+class TestDeletedBetween:
+    """Строку, на которую ссылалась загрузка, удалили руками до отмены.
+
+    Оплачено 05.10.2026: пользователь снял цены неудачной загрузки в
+    «Предложениях продавцов», а потом нажал «Отменить загрузку» — отмена
+    возвращала площадке рабочую цену, которой уже нет, и падала с ошибкой
+    внешнего ключа.
+    """
+
+    def test_undo_survives_a_deleted_working_price(self, clideo: Product) -> None:
+        site = Site.objects.create(domain="tomsguide.com")
+        old_price = SitePrice.objects.create(
+            site=site,
+            # Тот же продавец, что в файле: его цена и становится рабочей заново.
+            seller=Seller.objects.create(name="Athena Smith"),
+            placement_cents=9900,
+            source=MetricSource.CSV_IMPORT,
+            checked_at=start_of_day(dt.date(2026, 8, 1)),
+            reviewed_at=timezone.now(),
+        )
+        site.price = old_price
+        site.save(update_fields=["price"])
+
+        upload = _written(clideo, [TOMSGUIDE])  # загрузка сменит рабочую цену
+        site.refresh_from_db()
+        assert site.price_id != old_price.pk
+
+        # Цену сняли руками в «Предложениях продавцов» — там удаление идёт через config.deletion.
+        deletion.delete({SitePrice: [old_price.pk]})
+
+        undo.undo(upload)
+
+        site.refresh_from_db()
+        assert site.price_id is None  # вернуть удалённую цену нечем, но отмена прошла
+        assert not Placement.objects.filter(product=clideo).exists()
+
+
+class TestAnalyze:
+    """После записи и отмены — `ANALYZE` тронутых таблиц.
+
+    Оплачено 05.10.2026: после файла размещений «Площадки» открывались
+    48 секунд вместо одной, пока статистика планировщика не обновилась.
+    """
+
+    def test_write_analyzes_touched_tables(self, clideo: Product) -> None:
+        with CaptureQueriesContext(connection) as queries:
+            _written(clideo, [TOMSGUIDE])
+        assert {"placements", "sites", "site_prices"} <= _analyzed(queries)
+
+    def test_undo_analyzes_touched_tables(self, clideo: Product) -> None:
+        upload = _written(clideo, [TOMSGUIDE])
+        with CaptureQueriesContext(connection) as queries:
+            undo.undo(upload)
+        assert {"placements", "sites"} <= _analyzed(queries)
+
+
+def _analyzed(queries: CaptureQueriesContext) -> set[str]:
+    return {
+        query["sql"].removeprefix("ANALYZE ").strip('"')
+        for query in queries.captured_queries
+        if query["sql"].startswith("ANALYZE ")
+    }
 
 
 class TestUndo:

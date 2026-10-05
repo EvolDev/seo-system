@@ -37,7 +37,7 @@ from django.contrib.auth.models import User
 from django.db import connection, models, transaction
 
 from apps.sites.models import Upload, UploadStatus
-from config import deletion
+from config import db, deletion
 
 # Отмена по журналу пишет историю статусов от своего run_id — потом её стирает.
 _HISTORY_TABLES = ("site_status_changes", "placement_status_changes")
@@ -124,10 +124,21 @@ def undo(upload: Upload) -> Report:
         later = later_uploads(locked)
         if later:
             raise Blocked(later)
+        # Имена таблиц — пока журнал цел: отмена удаляет его вместе с загрузкой.
+        tables = _tables(locked.pk)
         report = _run(locked)
         path = Path(settings.UPLOADS_DIR) / locked.file_path
         transaction.on_commit(lambda: path.unlink(missing_ok=True))
+    db.analyze(tables)
     return report
+
+
+def _tables(upload_id: int) -> list[str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT table_name FROM upload_changes WHERE upload_id = %s", [upload_id]
+        )
+        return sorted(name for (name,) in cursor.fetchall())
 
 
 # --- Отмена ---
@@ -208,6 +219,9 @@ def _journal(cursor: Any, upload_id: int) -> tuple[dict[str, list[int]], dict[st
 
 def _restore(cursor: Any, table: str, rows: list[Any]) -> None:
     """Строки — какими были до загрузки: есть в таблице — правка, удалены — вставка."""
+    rows = _without_dead_refs(table, rows)
+    if not rows:
+        return
     quote = connection.ops.quote_name
     columns = [c for c in _columns(cursor, table) if c != "id"]
     target = ", ".join(quote(c) for c in columns)
@@ -224,6 +238,46 @@ def _restore(cursor: Any, table: str, rows: list[Any]) -> None:
         f" WHERE NOT EXISTS (SELECT 1 FROM {name} AS x WHERE x.id = r.id)",
         [data],
     )
+
+
+def _without_dead_refs(table: str, rows: list[Any]) -> list[Any]:
+    """Ссылки на строки, которых больше нет, — в NULL; строку без них — не возвращаем.
+
+    Между загрузкой и отменой строку могли удалить руками: 05.10.2026
+    пользователь снял цены неудачной загрузки в «Предложениях продавцов», и
+    отмена другой загрузки упала — она возвращала площадке рабочую цену,
+    которой уже нет. Необязательная ссылка (рабочая цена площадки) просто
+    очищается; если без ссылки строка не живёт, её не восстанавливаем.
+    """
+    model = _model(table)
+    alive: dict[str, set[Any]] = {}
+    optional: dict[str, bool] = {}
+    for column_field in model._meta.concrete_fields:
+        if not column_field.is_relation or column_field.related_model is None:
+            continue
+        column = column_field.attname
+        wanted = {row[column] for row in rows if row.get(column)}
+        if not wanted:
+            continue
+        found = column_field.related_model._base_manager.filter(pk__in=wanted)
+        alive[column] = set(found.values_list("pk", flat=True))
+        optional[column] = bool(column_field.null)
+    if not alive:
+        return rows
+    kept = []
+    for row in rows:
+        skip = False
+        for column, ids in alive.items():
+            value = row.get(column)
+            if not value or value in ids:
+                continue
+            if optional[column]:
+                row[column] = None
+            else:
+                skip = True
+        if not skip:
+            kept.append(row)
+    return kept
 
 
 def _columns(cursor: Any, table: str) -> list[str]:

@@ -81,6 +81,7 @@ nav:
       - how-to/choose-anchor.md
       - how-to/upload-anchors.md
       - how-to/delete-and-undo.md
+      - how-to/merge-sellers.md
   - Справочник:
       - reference/index.md
       - reference/statuses.md

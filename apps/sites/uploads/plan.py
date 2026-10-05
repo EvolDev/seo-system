@@ -8,7 +8,9 @@
   первая цена сама: публикация, если она есть в строке, иначе вставка;
 - тот же продавец за ту же услугу — рабочая цена сама переходит на новую,
   на сколько бы та ни изменилась: цены в евро плывут с курсом. Пока по
-  площадке заявка в работе, рабочая не двигается — решает человек;
+  площадке заявка в работе, рабочая не двигается — решает человек. Цена
+  старее рабочей рабочей не становится: файл размещений несёт даты
+  размещений, и апрельская цена не отменяет октябрьскую (05.10.2026);
 - другой продавец или другая услуга — ждёт решения. Не ждёт, если этот
   продавец уже присылал цену, её разобрали, и она изменилась не больше
   порога `OFFER_RECHECK`;
@@ -63,6 +65,7 @@ class OfferState:
     currency: str
     reviewed: bool
     eur_cents: int | None
+    checked_at: dt.datetime | None = None  # дата снимка: назад рабочая не двигается
 
 
 @dataclass
@@ -194,6 +197,7 @@ def classify(
     site: SiteState | None,
     record_has_gp: bool,
     recheck_pct: float,
+    at: dt.datetime | None = None,
 ) -> Decision:
     """Куда попадёт предложение и нужно ли решение человека. Правило — в начале модуля."""
     first_service = service == PlacementType.GUEST_POST or not record_has_gp
@@ -206,10 +210,14 @@ def classify(
     frozen = site is not None and site.frozen
     same_price = working.cents == cents and working.currency == currency
     if working.seller_id == seller_id and working.service == service:
+        # Снимок старее рабочего — это история, а не новая цена: рабочую не трогаем.
+        stale = at is not None and working.checked_at is not None and at < working.checked_at
+        moves = not frozen and not stale
         if same_price:
             # Та же цена — рабочая переходит на свежий снимок: дата цены актуальная.
-            return Decision(ReviewGroup.SAME, needs_decision=False, becomes_working=not frozen)
-        return Decision(ReviewGroup.CHANGED, needs_decision=frozen, becomes_working=not frozen)
+            return Decision(ReviewGroup.SAME, needs_decision=False, becomes_working=moves)
+        group = ReviewGroup.SAME if stale else ReviewGroup.CHANGED
+        return Decision(group, needs_decision=frozen and not stale, becomes_working=moves)
 
     if working.service != service:
         group = ReviewGroup.OTHER_SERVICE
@@ -258,6 +266,7 @@ def build_plan(
                 site=site,
                 record_has_gp=has_gp,
                 recheck_pct=recheck_pct,
+                at=start_of_day(prices_date),
             )
             items.append(PlanItem(record, PlacementType(service), cents, eur, site, decision))
     return Plan(
@@ -360,6 +369,7 @@ def _state(offer: SitePrice, rates: dict[str, Decimal]) -> OfferState:
         currency=offer.currency,
         reviewed=offer.reviewed_at is not None,
         eur_cents=to_eur_cents(cents, offer.currency, rates) if cents is not None else None,
+        checked_at=offer.checked_at,
     )
 
 

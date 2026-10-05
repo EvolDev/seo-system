@@ -106,6 +106,35 @@ def test_cheaper_reseller_price_waits_for_decision(clideo: Product, collaborator
     assert upload.result["offers_review"] == 1
 
 
+def test_older_price_does_not_replace_the_working_one(clideo: Product) -> None:
+    """Цена того же продавца, но старее рабочей, — история, а не новая цена.
+
+    Оплачено 05.10.2026: файл размещений с апрельскими датами сделал рабочей
+    апрельскую цену барыги вместо его же октябрьской.
+    """
+    site = Site.objects.create(domain="tomsguide.com")
+    seller = Seller.objects.create(name="Athena Smith", currency="EUR")
+    fresh = SitePrice.objects.create(
+        site=site,
+        seller=seller,
+        placement_cents=30000,
+        source=MetricSource.CSV_IMPORT,
+        checked_at=start_of_day(dt.date(2026, 10, 4)),
+        reviewed_at=timezone.now(),
+    )
+    site.price = fresh
+    site.save(update_fields=["price"])
+
+    upload = _written(clideo, [ROW])  # та же услуга того же продавца, но 14.09.2026
+
+    site.refresh_from_db()
+    assert site.price_id == fresh.pk  # рабочая не уехала назад
+    item = UploadItem.objects.get(upload=upload)
+    assert not item.auto_applied
+    assert not item.needs_decision  # и вопроса не задаём: это просто история
+    assert SitePrice.objects.filter(site=site, seller=seller).count() == 2
+
+
 def test_site_without_price_takes_it(clideo: Product) -> None:
     upload = _written(clideo, [ROW])
     site = Site.objects.get(domain="tomsguide.com")

@@ -120,7 +120,7 @@
         <p class="seo-hint">Похоже, потерялся десятичный разделитель. Исправьте в файле и загрузите его снова — уже записанное не задвоится.</p>
       </div>
     {% endif %}
-    {% include "admin/sites/upload/_placement_issues.html" with title="Три цифры после точки — прочитано как евро и центы" rows=summary.prices_fixed total=summary.prices_fixed_total %}
+    {% include "admin/sites/upload/_placement_issues.html" with title="Три цифры после разделителя — прочитано как евро и центы" rows=summary.prices_fixed total=summary.prices_fixed_total %}
     {% include "admin/sites/upload/_placement_issues.html" with title="Перепутаны анкор и ссылка — исправлено" rows=summary.links_swapped total=summary.links_swapped_total %}
     {% include "admin/sites/upload/_placement_issues.html" with title="Вместо ссылки не адрес — ссылка не запишется" rows=summary.links_not_url total=summary.links_not_url_total %}
     {% include "admin/sites/upload/_placement_issues.html" with title="Ссылки не на домен продукта — запишутся" rows=summary.links_foreign total=summary.links_foreign_total %}

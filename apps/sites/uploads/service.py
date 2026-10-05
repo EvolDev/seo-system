@@ -52,6 +52,7 @@ from apps.sites.uploads.placement_columns import PField
 from apps.sites.uploads.placement_records import ParsedPlacements, parse_placements
 from apps.sites.uploads.plan import Plan, build_plan, start_of_day
 from apps.sites.uploads.records import Parsed, parse_price_list
+from config import db
 from config.changes import bind_change
 
 logger = logging.getLogger(__name__)
@@ -423,7 +424,26 @@ def write(
             return
         with journal(upload):
             _write(upload, action, parts, spec)
+    analyze(upload_id)
     logger.info("загрузка записана", extra={"upload_id": upload_id, "action": action})
+
+
+def analyze(upload_id: int) -> None:
+    """После записи — `ANALYZE` таблиц, которые тронула эта загрузка.
+
+    Какие именно, говорит журнал загрузки (ADR-060); у выгрузки Ahrefs то же
+    самое делалось и раньше, внутри записи (ADR-051).
+    """
+    db.analyze(touched_tables(upload_id))
+
+
+def touched_tables(upload_id: int) -> list[str]:
+    """Таблицы из журнала загрузки — имена туда кладёт триггер."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT table_name FROM upload_changes WHERE upload_id = %s", [upload_id]
+        )
+        return sorted(name for (name,) in cursor.fetchall())
 
 
 @contextmanager

@@ -577,6 +577,7 @@ class _Planner:
             site=state,
             record_has_gp=False,
             recheck_pct=self.recheck_pct,
+            at=checked_at,
         )
         row.becomes_working = row.decision.becomes_working
         row.ref_price_id = state.working.id if state is not None and state.working else None

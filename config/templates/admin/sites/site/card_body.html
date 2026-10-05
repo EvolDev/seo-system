@@ -93,7 +93,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
       {% if offer_rows %}
       <div class="seo-table-wrap">
         <table class="seo-card-table">
-          <thead><tr><th>Продавец</th><th>Услуга</th><th class="seo-right">Цена</th><th>К рабочей</th><th>Написание</th><th>Анонс</th>{% if has_gray_price %}<th>Серая</th>{% endif %}<th>Дата</th><th></th></tr></thead>
+          <thead><tr><th>Продавец</th><th>Услуга</th><th class="seo-right">Цена</th><th>Разница</th><th>Написание</th><th>Анонс</th>{% if has_gray_price %}<th>Серая</th>{% endif %}<th>Дата</th><th></th></tr></thead>
           <tbody>
           {% for row in offer_rows %}
             <tr class="{% if row.is_working %}seo-working{% endif %}">

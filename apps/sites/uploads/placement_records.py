@@ -54,6 +54,11 @@ _STATUSES: dict[str, PlacementStatus] = {
 _YES = {"да", "yes", "y", "true", "1", "+", "в индексе", "indexed"}
 _NO = {"нет", "no", "n", "false", "0", "-", "не в индексе", "not indexed"}
 _HEADER_DATE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})")
+# Деньги строки файла — по ним видно, какую роль играет запятая в этом файле.
+MONEY_FIELDS = (PField.PAID, PField.PRICE, PField.WRITING, PField.ANNOUNCE)
+# «311,81» — запятая десятичная; «241,258» — она же, но с лишней цифрой центов.
+_TWO_AFTER_COMMA = re.compile(r"^\d+,\d{1,2}$")
+_THREE_AFTER_COMMA = re.compile(r"^\d{1,3},\d{3}$")
 _DATE_FORMATS = ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%d/%m/%Y")
 # Число Excel вместо даты: 45 000 — 2023 год, 60 000 — 2064-й.
 _EXCEL_DAYS = (30_000, 60_000)
@@ -150,6 +155,7 @@ def parse_placements(
         for c in table.columns
         if mapping.get(c.key) not in (None, PField.EXTRA, PField.SKIP, PField.INDEXED)
     }
+    decimal_comma = _comma_is_decimal(table, columns)
     marks = [c for c in table.columns if mapping.get(c.key) == PField.INDEXED]
     extra = [
         c for c in table.columns if mapping.get(c.key, PField.EXTRA) == PField.EXTRA and c.filled
@@ -158,7 +164,9 @@ def parse_placements(
     seen: dict[tuple[str, str], list[int]] = {}
     for row in table.rows:
         try:
-            record = _row(row, columns, marks, extra, product_domain, parsed)
+            record = _row(
+                row, columns, marks, extra, product_domain, parsed, decimal_comma=decimal_comma
+            )
         except ValueError as error:
             parsed.errors.append(RowError(row.line, str(error)))
             continue
@@ -252,6 +260,8 @@ def _row(
     extra: Sequence[Column],
     product_domain: str,
     parsed: ParsedPlacements,
+    *,
+    decimal_comma: bool = False,
 ) -> PlacementRecord:
     def cell(f: PField) -> object:
         column = columns.get(f)
@@ -272,7 +282,7 @@ def _row(
     except ValueError as error:
         parsed.issue(BAD_DATE, record, f"{error} — оставлена пустой")
 
-    money = _money_reader(cell, columns, record, parsed)
+    money = _money_reader(cell, columns, record, parsed, decimal_comma=decimal_comma)
     record.paid_cents = money(PField.PAID)
     record.price_cents = money(PField.PRICE)
     record.writing_cents = money(PField.WRITING)
@@ -375,6 +385,8 @@ def _money_reader(
     columns: Mapping[PField, Column],
     record: PlacementRecord,
     parsed: ParsedPlacements,
+    *,
+    decimal_comma: bool = False,
 ) -> Callable[[PField], int | None]:
     def read(f: PField) -> int | None:
         if f not in columns:
@@ -386,9 +398,37 @@ def _money_reader(
             message = f"«{columns[f].header}»: {value.shown} → {_euros(cents)}"
             parsed.issue(PRICE_FIXED, record, message)
             return cents
+        if decimal_comma and isinstance(value, str) and _THREE_AFTER_COMMA.match(value.strip()):
+            # То же самое в выгрузке в csv: формата ячейки там нет, и «241,258» —
+            # это 241,26 €, раз в этом же файле запятая стоит в «311,81».
+            cents = _decimal_cents(value.strip())
+            parsed.issue(PRICE_FIXED, record, f"«{columns[f].header}»: {value} → {_euros(cents)}")
+            return cents
         return _read(lambda: values.parse_money(value, free_is_zero=True), columns[f])
 
     return read
+
+
+def _comma_is_decimal(table: Table, columns: Mapping[PField, Column]) -> bool:
+    """В денежных колонках файла запятая — десятичный разделитель, а не разряды.
+
+    Признак — «311,81» или «13,16» хоть в одной денежной ячейке: разряды так не
+    пишут. Тогда и «241,258» в том же файле — 241,26 €, а не 241 258 €
+    (xlsx отличает их по формату ячейки, csv-выгрузка — нет).
+    """
+    money = [columns[f] for f in MONEY_FIELDS if f in columns]
+    if not money:
+        return False
+    return any(
+        isinstance(value, str) and _TWO_AFTER_COMMA.match(value.strip())
+        for row in table.rows
+        for value in (row.get(column.index) for column in money)
+    )
+
+
+def _decimal_cents(value: str) -> int:
+    """«241,258» → 24126 центов: запятая десятичная, округление до цента."""
+    return int((Decimal(value.replace(",", ".")) * 100).quantize(Decimal(1), ROUND_HALF_UP))
 
 
 def grouped_cents(value: Grouped) -> int:

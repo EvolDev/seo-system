@@ -4,10 +4,32 @@
 как логи и `run_id` (ADR-025).
 """
 
+import logging
+from collections.abc import Iterable
 from typing import Any
 
-from django.db import models
+from django.db import connection, models
 from django.db.backends.base.base import BaseDatabaseWrapper
+
+logger = logging.getLogger(__name__)
+
+
+def analyze(tables: Iterable[str]) -> None:
+    """`ANALYZE` названных таблиц: после массовой записи статистика устаревает.
+
+    Планировщик по старой статистике выбирает плохой план, и запрос к
+    представлению, который шёл секунду, идёт минуту (05.10.2026: «Площадки»
+    после загрузки размещений — 48 секунд). Автоочистка дошла бы и сама, но
+    человек открывает экран раньше неё. Имена берутся из журнала загрузки,
+    то есть из самой базы, и всё равно экранируются.
+    """
+    names = sorted(set(tables))
+    if not names:
+        return
+    with connection.cursor() as cursor:
+        for name in names:
+            cursor.execute(f"ANALYZE {connection.ops.quote_name(name)}")
+    logger.info("статистика обновлена", extra={"tables": names})
 
 
 class PgEnumField(models.TextField):  # type: ignore[type-arg]
