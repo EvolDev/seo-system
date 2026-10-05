@@ -37,8 +37,25 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright install --with-deps chromium
 COPY . .
 
+# Пользовательская документация для раздела «Документация» (E9-07, ADR-056).
+# Сайт собирается при сборке образа: битая ссылка роняет сборку, и сломанная
+# документация не доезжает до прода. Своя стадия — пересобирается, только когда
+# менялась документация. Порядок важен: mkdocs build очищает папку сайта, карты
+# проверщика для интерфейса пишутся после. Папка — в /opt, а не в /app: /app
+# локально подменяет папка проекта с хоста, и собранный сайт был бы не виден.
+FROM base AS docs
+COPY mkdocs.yml ./
+COPY user-docs user-docs
+COPY tools/check_user_docs.py tools/
+COPY docs/06-BACKLOG.md docs/15-USER-DOCS.md docs/
+RUN mkdocs build --strict --site-dir /opt/user-docs \
+    && python tools/check_user_docs.py \
+        --screens-out /opt/user-docs/screens.json \
+        --whatsnew-out /opt/user-docs/whatsnew.json
+
 # Приложение — последняя цель, её собирает `docker build` без --target.
 FROM base AS app
+COPY --from=docs /opt/user-docs /opt/user-docs
 COPY . .
 
 EXPOSE 8000

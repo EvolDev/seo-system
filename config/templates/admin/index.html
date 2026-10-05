@@ -3,7 +3,8 @@
 Главная (E9-08, E1-14): вход в работу и обзор на одном экране, на всю ширину.
 Сверху — карточки экранов «Работы» одной строкой; под ними — статистика:
 плитки «этот месяц» колонкой слева и два графика рядом (admin/home_stats.html);
-внизу — остальные группы меню и последние действия компактными списками.
+внизу — остальные группы меню, последние действия компактными списками и
+«Что нового» — верхний раздел журнала изменений со своей прокруткой (E9-07).
 Штатная колонка Django шириной 600px и правая колонка «Последние действия»
 выключены (coltype, sidebar): из-за них всё вытягивалось вниз.
 Данные — config/admin_site.py (SeoAdminSite.index), вид — seo/home.css.
@@ -61,6 +62,13 @@
       </ul>
       {% endif %}
     </div>
+    {% if whats_new %}
+    <section class="home-group home-news" aria-label="Что нового">
+      <h2>Что нового <span class="home-news-version">· {% if whats_new.released %}версия {{ whats_new.version }}{% else %}ещё не на рабочем сервере{% endif %}</span></h2>
+      <div class="home-news-body">{{ whats_new.html }}</div>
+      <a class="home-news-all" href="{% url 'user_docs_page' 'changelog/' %}" target="_blank" rel="noopener">Весь журнал изменений →</a>
+    </section>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

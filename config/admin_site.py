@@ -136,16 +136,19 @@ class SeoAdminSite(admin.AdminSite):
         self, request: HttpRequest, extra_context: dict[str, Any] | None = None
     ) -> TemplateResponse:
         # Главная — вход в работу, а не список всех таблиц: карточки экранов
-        # группы «Работа» с парой чисел, ниже — остальные группы меню.
+        # группы «Работа» с парой чисел, ниже — остальные группы меню и «Что нового».
         groups = self.get_app_list(request)
         work = next((group for group in groups if group["app_label"] == WORK), None)
         # Статистика размещений и трат по месяцам (E1-14): модуль — внутри функции,
         # этот читается до того, как готовы модели.
         from apps.placements import home
+        from config import user_docs
 
         context = {
             "home_cards": _home_cards(work["models"]) if work else [],
             "home_app_list": [group for group in groups if group["app_label"] != WORK],
+            # «Что нового» — верхний раздел журнала изменений (E9-07).
+            "whats_new": user_docs.whats_new(),
             **home.context(request),
             **(extra_context or {}),
         }

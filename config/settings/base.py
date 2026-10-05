@@ -81,7 +81,12 @@ TEMPLATES = [
             ],
             # {% asset %} — адрес нашей статики с версией (config/assets.py).
             # {% export_tools cl %} — окно выгрузки над списком (config/export_tags.py).
-            "libraries": {"seo_assets": "config.assets", "seo_export": "config.export_tags"},
+            # {% screen_help %} — кнопка «?» со справкой по экрану (config/user_docs.py).
+            "libraries": {
+                "seo_assets": "config.assets",
+                "seo_export": "config.export_tags",
+                "seo_docs": "config.user_docs",
+            },
         },
     },
 ]
@@ -126,6 +131,13 @@ STATICFILES_DIRS = [BASE_DIR / "config" / "static"]
 # в media: внутри цены и контакты, по адресу их не раздаём. Воркер видит ту же
 # папку — локально это каталог проекта, в проде — общий том (E10-01).
 UPLOADS_DIR = BASE_DIR / "uploads"
+
+# Собранная пользовательская документация — раздел «Документация» по адресу
+# /docs/ (E9-07, ADR-056). Собирается при сборке образа (Dockerfile, стадия
+# docs), поэтому не в каталоге проекта: /app локально — папка с хоста. После
+# правки user-docs/ раздел обновит `make up`; писать и смотреть страницы на
+# ходу — `make docs-serve`.
+USER_DOCS_ROOT = Path("/opt/user-docs")
 
 # В schema.sql первичные ключи — bigserial.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

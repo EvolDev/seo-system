@@ -6,7 +6,9 @@
 (ссылки рядом с заголовком: текст, адрес, открыть в панели),
 panel_full_url (полная страница); panel_title_url — заголовок ссылкой в
 новую вкладку (сайт площадки), panel_title_tools — значки после заголовка.
+«?» — справка по экрану записи (E9-07), страницы — по адресу панели.
 {% endcomment %}
+{% load seo_docs %}
 <header class="seo-panel-head">
   <div class="seo-panel-heading">
     <h2 class="seo-panel-title">{% if panel_title_url %}<a href="{{ panel_title_url }}" target="_blank" rel="noopener noreferrer" title="Открыть сайт в новой вкладке">{{ panel_title }}</a>{% else %}{{ panel_title }}{% endif %}{% if panel_title_tools %} {{ panel_title_tools }}{% endif %}</h2>
@@ -15,6 +17,7 @@ panel_full_url (полная страница); panel_title_url — заголо
   <div class="seo-panel-tools">
     {% for text, url, in_panel in panel_links %}<a href="{{ url }}"{% if in_panel %} data-panel{% endif %}>{{ text }}</a>{% endfor %}
     {% if panel_full_url %}<a href="{{ panel_full_url }}" title="Эта запись отдельной страницей">Открыть полностью</a>{% endif %}
+    {% screen_help %}
     <button type="button" class="seo-panel-close" data-panel-close aria-label="Закрыть панель" title="Закрыть (Esc)">✕</button>
   </div>
 </header>

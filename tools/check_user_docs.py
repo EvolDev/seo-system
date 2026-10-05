@@ -3,7 +3,8 @@
 
 Запуск из корня репозитория (в контейнере — `make docs-check`):
     python tools/check_user_docs.py
-    python tools/check_user_docs.py --screens-out site/screens.json
+    python tools/check_user_docs.py --screens-out site/screens.json \
+        --whatsnew-out site/whatsnew.json
     python tools/check_user_docs.py --root /путь/к/копии   # для тестов
 
 Что проверяет:
@@ -20,6 +21,13 @@
 
 Якоря в ссылках не проверяет — это делает `mkdocs build --strict`.
 
+Для раздела «Документация» в интерфейсе (E9-07) пишет рядом с собранным
+сайтом два файла — запускать после `mkdocs build`, сборка очищает папку:
+  --screens-out   карта «экран → страницы» для кнопки «?»: адрес и название,
+                  сначала страницы только про этот экран;
+  --whatsnew-out  «Что нового» на главной: верхний непустой раздел журнала
+                  изменений, уже в HTML, ссылки — адресами в /docs/.
+
 Код выхода 1 при любой ошибке — так проверку можно ставить в pre-commit и CI.
 """
 
@@ -33,6 +41,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import markdown
 import yaml
 
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
@@ -45,6 +54,9 @@ TASK_RE = re.compile(r"\bE\d+-\d+[a-z]?\b")
 VERSION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
 LINK_RE = re.compile(r"\]\(([^)#\s]+\.md)(#[^)]*)?\)")
 FRONT_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+# Адрес раздела «Документация» в интерфейсе (15-USER-DOCS.md §3.1, E9-07):
+# от него считаются адреса страниц в картах для интерфейса.
+DOCS_URL = "/docs/"
 
 
 class Report:
@@ -178,19 +190,84 @@ def check_changelog(report: Report, path: Path) -> None:
             report.warn(path, f"запись без ID задачи: {entry[:70]}")
 
 
-def write_screens(metas: dict[str, dict[str, Any]], out: Path) -> None:
-    screens: dict[str, list[str]] = {}
+def page_url(rel: str) -> str:
+    """Адрес страницы в интерфейсе: `how-to/x.md` → `/docs/how-to/x/`.
+
+    Так MkDocs раскладывает сайт при `use_directory_urls`: страница — папка с
+    index.html, а `index.md` раздела — сама папка раздела.
+    """
+    parts = rel.removesuffix(".md").split("/")
+    if parts[-1] == "index":
+        parts.pop()
+    return DOCS_URL + "".join(f"{part}/" for part in parts)
+
+
+def write_screens(metas: dict[str, dict[str, Any]], nav: list[str], out: Path) -> None:
+    """Карта «экран → страницы» для кнопки «?» (E9-07).
+
+    Первыми — страницы, которые только про этот экран: у «Площадок» это «Как
+    найти площадки» (`screens: [site_list]`), а не общая инструкция про
+    панель с восемью экранами. Дальше — по порядку навигации.
+    """
+    order = {f: i for i, f in enumerate(nav)}
+    found: dict[str, list[tuple[int, int, dict[str, str]]]] = {}
     for f, meta in metas.items():
-        url = "/" + f.removesuffix(".md").removesuffix("index").rstrip("/") + "/"
-        for s in meta.get("screens") or []:
-            screens.setdefault(str(s), []).append(url.replace("//", "/"))
+        screens = [str(s) for s in meta.get("screens") or []]
+        page = {"url": page_url(f), "title": str(meta.get("title", f))}
+        for s in screens:
+            found.setdefault(s, []).append((len(screens), order.get(f, len(order)), page))
+    result = {
+        screen: [page for _count, _place, page in sorted(pages, key=lambda x: x[:2])]
+        for screen, pages in found.items()
+    }
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(screens, ensure_ascii=False, indent=2), encoding="utf-8")
+    out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def latest_changes(changelog: Path) -> dict[str, Any]:
+    """Верхний раздел журнала, в котором есть записи (E9-07).
+
+    На рабочем сервере это последняя выпущенная версия: при выкатке «[Не
+    выпущено]» становится версией, а над ней появляется новый, пустой. До
+    первого выпуска и на машине разработчика — «Не выпущено»: что уже
+    сделано, но ещё не выкачено. Ссылки на страницы — адресами в интерфейсе.
+    """
+    text = FRONT_RE.sub("", changelog.read_text(encoding="utf-8"), count=1)
+    heads = list(re.finditer(r"^## \[([^\]]+)\].*$", text, re.M))
+    for i, head in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        body = text[head.end() : end].strip()
+        if not re.search(r"^- ", body, re.M):
+            continue
+        body = LINK_RE.sub(_link_to_page, body)
+        name = head.group(1)
+        return {
+            "version": name,
+            "released": name != "Не выпущено",
+            "html": markdown.markdown(body),
+        }
+    return {"version": None, "released": False, "html": ""}
+
+
+def _link_to_page(m: re.Match[str]) -> str:
+    """`](how-to/x.md#y)` → `](/docs/how-to/x/#y)`; внешние ссылки как есть."""
+    link, anchor = m.group(1), m.group(2) or ""
+    if link.startswith(("http://", "https://")):
+        return m.group(0)
+    return f"]({page_url(link)}{anchor})"
+
+
+def write_whatsnew(changelog: Path, out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(latest_changes(changelog), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--screens-out", help="записать карту экран → страница в JSON")
+    ap.add_argument("--whatsnew-out", help="записать «Что нового» из журнала в JSON")
     ap.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="корень репозитория")
     args = ap.parse_args(argv)
 
@@ -224,7 +301,9 @@ def main(argv: list[str] | None = None) -> int:
         report.err(mkdocs, f"страница `{f}` не добавлена в nav")
 
     if args.screens_out:
-        write_screens(metas, Path(args.screens_out))
+        write_screens(metas, in_nav, Path(args.screens_out))
+    if args.whatsnew_out and changelog.exists():
+        write_whatsnew(changelog, Path(args.whatsnew_out))
 
     for w in report.warnings:
         print(f"предупреждение  {w}")

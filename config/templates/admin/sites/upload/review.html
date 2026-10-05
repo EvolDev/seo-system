@@ -5,6 +5,7 @@ price-review.html. Вкладки — ссылки; решения в строк
 без перезагрузки (seo/uploads.js), клавиши J/K, A, S, X, O, отмена — U.
 Домен открывает карточку площадки панелью справа (seo/panel.js).
 {% endcomment %}
+{% load seo_docs %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
 {% block breadcrumbs %}{% include "admin/sites/upload/_crumbs.html" %}{% endblock %}
@@ -14,7 +15,7 @@ price-review.html. Вкладки — ссылки; решения в строк
 {% include "admin/sites/upload/_steps.html" %}
 <div class="seo-rev-head">
   <div>
-    <h1>{{ title }}</h1>
+    <h1>{{ title }}{% screen_help %}</h1>
     <div class="seo-sub">
       {{ upload.file_name }} · {{ upload.get_kind_display }}
       {% if upload.site_list %} · рабочий список <a href="{{ sites_url }}">«{{ upload.site_list.name }}»</a> · <a href="{% url 'admin:sites_sitelist_ahrefs' upload.site_list_id %}">домены для Ahrefs</a>{% endif %}

@@ -4,6 +4,7 @@
 документов, с которыми сверяется проверщик, и портит в ней одно место.
 """
 
+import json
 import re
 import shutil
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 from django.conf import settings
 
-from tools.check_user_docs import main
+from tools.check_user_docs import latest_changes, main, page_url
 
 ROOT: Path = settings.BASE_DIR
 
@@ -95,3 +96,122 @@ def test_changelog_without_unreleased_fails(
     code, out = _run(docs_root, capsys)
     assert code == 1
     assert "нет раздела `## [Не выпущено]`" in out
+
+
+# ---------- Карты для раздела «Документация» в интерфейсе (E9-07) ----------
+
+
+def test_page_url() -> None:
+    assert page_url("index.md") == "/docs/"
+    assert page_url("reference/index.md") == "/docs/reference/"
+    assert page_url("how-to/find-sites.md") == "/docs/how-to/find-sites/"
+    # «index» в конце имени — не страница раздела.
+    assert page_url("how-to/reindex.md") == "/docs/how-to/reindex/"
+
+
+def test_screens_map_most_specific_first(
+    docs_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "site" / "screens.json"
+    assert main(["--root", str(docs_root), "--screens-out", str(out)]) == 0, capsys.readouterr()
+    screens = json.loads(out.read_text(encoding="utf-8"))
+    site_list = screens["site_list"]
+    # Только про «Площадки» — первой, общая инструкция про панель — последней.
+    assert site_list[0] == {
+        "url": "/docs/how-to/find-sites/",
+        "title": "Как найти площадку и отфильтровать список",
+    }
+    assert site_list[-1]["url"] == "/docs/how-to/edit-in-panel/"
+    assert screens["home"] == [
+        {"url": "/docs/how-to/home-stats/", "title": "Как смотреть статистику на главной"}
+    ]
+
+
+def test_screens_map_ties_follow_nav(
+    docs_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Две страницы с одним экраном — в порядке навигации, а не по алфавиту.
+    _replace(docs_root / "mkdocs.yml", "      - reference/api-spend.md\n", "")
+    _replace(
+        docs_root / "mkdocs.yml",
+        "      - reference/index.md\n",
+        "      - reference/index.md\n      - reference/api-spend.md\n",
+    )
+    page = docs_root / "user-docs/reference/background-tasks.md"
+    _replace(page, "screens: [task_runs]", "screens: [api_usage]")
+    out = tmp_path / "screens.json"
+    assert main(["--root", str(docs_root), "--screens-out", str(out)]) == 0, capsys.readouterr()
+    urls = [p["url"] for p in json.loads(out.read_text(encoding="utf-8"))["api_usage"]]
+    assert urls == ["/docs/reference/api-spend/", "/docs/reference/background-tasks/"]
+
+
+CHANGELOG = """---
+title: Журнал изменений
+---
+
+# Журнал изменений
+
+## [Не выпущено]
+
+### Добавлено
+
+## [2026.10.05]
+
+### Добавлено
+
+- Проверка индексации **по расписанию** (E2-03,
+  [инструкция](how-to/check-indexation.md#schedule)).
+- Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/) (E0-04).
+
+### Исправлено
+
+- Список не моргает (E9-08, [Статусы](reference/index.md)).
+
+## [2026.09.30]
+
+### Добавлено
+
+- Старое (E1-01).
+"""
+
+
+def test_whatsnew_top_section_with_entries(tmp_path: Path) -> None:
+    changelog = tmp_path / "changelog.md"
+    changelog.write_text(CHANGELOG, encoding="utf-8")
+    news = latest_changes(changelog)
+    # Пустой «Не выпущено» сразу после выкатки пропускается.
+    assert news["version"] == "2026.10.05"
+    assert news["released"] is True
+    html = news["html"]
+    assert "<h3>Добавлено</h3>" in html and "<h3>Исправлено</h3>" in html
+    assert "<strong>по расписанию</strong>" in html
+    assert '<a href="/docs/how-to/check-indexation/#schedule">инструкция</a>' in html
+    assert '<a href="/docs/reference/">Статусы</a>' in html
+    assert '<a href="https://keepachangelog.com/ru/1.1.0/">' in html
+    assert "Старое" not in html
+
+
+def test_whatsnew_unreleased_before_first_release(tmp_path: Path) -> None:
+    changelog = tmp_path / "changelog.md"
+    changelog.write_text(
+        CHANGELOG.replace(
+            "## [Не выпущено]\n\n### Добавлено\n",
+            "## [Не выпущено]\n\n### Добавлено\n\n- Раздел «Документация» (E9-07).\n",
+        ),
+        encoding="utf-8",
+    )
+    news = latest_changes(changelog)
+    assert news["version"] == "Не выпущено"
+    assert news["released"] is False
+    assert "Раздел «Документация»" in news["html"]
+    assert "по расписанию" not in news["html"]
+
+
+def test_whatsnew_file_written(
+    docs_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "whatsnew.json"
+    assert main(["--root", str(docs_root), "--whatsnew-out", str(out)]) == 0, capsys.readouterr()
+    news = json.loads(out.read_text(encoding="utf-8"))
+    assert news["version"] == "Не выпущено"
+    assert news["html"].startswith("<h3>")

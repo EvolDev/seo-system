@@ -1,0 +1,75 @@
+/* «?» у названия экрана и в шапке панели (E9-07, ADR-056): кружок цвета
+   ссылок, меню страниц — как «Оформление»: под кнопкой, у правого края.
+   Кнопка живёт внутри заголовка — шрифт, регистр и жирность сбрасываются. */
+.seo-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin: 0 0 0 8px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: none;
+  color: var(--admin-interface-generic-link-color, var(--link-fg));
+  font: 600 12px/1 var(--font-family-primary, sans-serif);
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: normal;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.seo-help:hover,
+.seo-help:focus-visible,
+.seo-help[aria-expanded="true"] {
+  background: var(--admin-interface-generic-link-color, var(--link-fg));
+  color: var(--body-bg);
+  text-decoration: none;
+}
+.seo-panel-tools .seo-help,
+.seo-panel-tools .seo-help-menu .seo-help { margin-left: 0; }
+
+.seo-help-menu { position: relative; display: inline-block; vertical-align: middle; }
+.seo-help-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--hairline-color);
+  border-radius: 10px;
+  background: var(--body-bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+  font: 400 13px/1.35 var(--font-family-primary, sans-serif);
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+}
+.seo-help-list[hidden] { display: none; }
+/* В шапке панели «?» у правого края — меню раскрывается влево. */
+.seo-panel-tools .seo-help-list { left: auto; right: 0; }
+.seo-help-head {
+  padding: 4px 10px 6px;
+  color: var(--body-quiet-color);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.seo-help-list a {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--body-fg);
+  white-space: normal;
+}
+.seo-help-list a:hover,
+.seo-help-list a:focus-visible { background: var(--darkened-bg); text-decoration: none; }

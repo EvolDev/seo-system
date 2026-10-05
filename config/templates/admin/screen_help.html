@@ -1,0 +1,18 @@
+{% comment %}
+Кнопка «?» — справка по открытому экрану (E9-07, ADR-056): у названия экрана и
+в шапке панели записи. Одна страница про экран — сразу ссылка на неё, несколько
+— меню, сначала страницы только про этот экран. Документация открывается в
+новой вкладке. Тег и данные — config/user_docs.py, меню — seo/help.js.
+Внутри заголовка — только строчные элементы (span), блочным там не место.
+{% endcomment %}
+{% if help_pages|length == 1 %}{% with page=help_pages.0 %}
+<a class="seo-help" href="{{ page.url }}" target="_blank" rel="noopener" title="Справка: {{ page.title }}" aria-label="Справка: {{ page.title }}">?</a>
+{% endwith %}{% elif help_pages %}
+<span class="seo-help-menu" data-seo-help>
+<button type="button" class="seo-help" aria-haspopup="true" aria-expanded="false" title="Справка по этому экрану" aria-label="Справка по этому экрану">?</button>
+<span class="seo-help-list" role="menu" hidden>
+<span class="seo-help-head">Справка по экрану</span>
+{% for page in help_pages %}<a href="{{ page.url }}" target="_blank" rel="noopener" role="menuitem">{{ page.title }}</a>{% endfor %}
+</span>
+</span>
+{% endif %}

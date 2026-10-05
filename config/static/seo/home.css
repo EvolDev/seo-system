@@ -25,5 +25,18 @@ body.admin-interface.dashboard #content { width: auto; max-width: 1680px; }
 .home-group li { margin: 0; padding: 3px 0; list-style: none; font-size: 13px; line-height: 1.35; }
 .home-recent li { display: flex; flex-direction: column; }
 
+/* «Что нового» (E9-07) — шире соседних колонок и со своей прокруткой: записей в
+   журнале десятки, а главная должна помещаться на экран без прокрутки. */
+.home-news { grid-column: span 2; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.home-news-version { font-weight: 400; text-transform: none; letter-spacing: normal; }
+.home-news-body { max-height: 13rem; overflow: auto; padding-right: 8px; font-size: 13px; line-height: 1.4; }
+.home-news-body h3 { margin: 6px 0 2px; padding: 0; background: none; font-size: 12px; font-weight: 600;
+  color: var(--body-fg); }
+.home-news-body h3:first-child { margin-top: 0; }
+.home-news-body ul { margin: 0 0 4px; padding-left: 16px; }
+.home-news-body li { padding: 2px 0; list-style: disc; font-size: 13px; }
+.home-news-body strong { font-weight: 600; }
+.home-news-all { font-size: 13px; }
+
 /* Мелкие пояснения — приглушённым цветом, как в списках. */
 .seo-home .seo-sub { color: var(--body-quiet-color); font-size: 12px; }

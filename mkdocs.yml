@@ -22,6 +22,18 @@ theme:
     - scheme: slate
       toggle: { icon: material/weather-sunny, name: Светлая тема }
 
+# Раздел «Документация» в интерфейсе (E9-07): логотип и название в шапке ведут
+# обратно в систему. Значок у страницы в навигации Material ставит по полю
+# status; у черновиков он прячется (stylesheets/extra.css): до первого выпуска
+# черновики — все страницы, и значок ничего не различал бы.
+extra:
+  homepage: /admin/
+  status:
+    deprecated: Устарело
+
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search:
       lang: [ru, en]

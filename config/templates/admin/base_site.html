@@ -6,9 +6,12 @@
 этим именем — сначала наш (TEMPLATES["DIRS"]), затем тему, — поэтому extends
 продолжает её шаблон, а не этот же. Расцветки — config/static/seo/admin-palettes.css.
 {% endcomment %}
-{% load static seo_assets %}
+{% load static seo_assets seo_docs %}
 
 {% block title %}{% if title %}{{ title }} | {% endif %}SEO-система{% endblock %}
+
+{# «?» у названия экрана — справка по нему в разделе «Документация» (E9-07). #}
+{% block content_title %}{% if title %}<h1>{{ title }}{% screen_help %}</h1>{% endif %}{% endblock %}
 
 {% block extrastyle %}{{ block.super }}
 <link rel="stylesheet" href="{% asset 'seo/admin-palettes.css' %}">
@@ -17,6 +20,7 @@
 <link rel="stylesheet" href="{% asset 'seo/saved-filters.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/export.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/domain-tools.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/help.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}
@@ -24,12 +28,13 @@
 {# записи — панелью справа поверх списка (E9-11, ADR-048); «Мои фильтры» #}
 {# над колонкой фильтров списков (E9-10, ADR-050); окно выгрузки в Excel #}
 {# над списками (E1-06, ADR-053); значки «открыть сайт» и «скопировать» у #}
-{# домена (E2-06). #}
+{# домена (E2-06); меню «?» — справка по экрану (E9-07, ADR-056). #}
 <script src="{% asset 'seo/soft-nav.js' %}" defer></script>
 <script src="{% asset 'seo/panel.js' %}" defer></script>
 <script src="{% asset 'seo/saved-filters.js' %}" defer></script>
 <script src="{% asset 'seo/export.js' %}" defer></script>
 <script src="{% asset 'seo/domain-tools.js' %}" defer></script>
+<script src="{% asset 'seo/help.js' %}" defer></script>
 <script>
   // Расцветку ставим до первой отрисовки, иначе страница мигнёт чужими цветами.
   // Выбор помнит браузер; в первый раз — по настройке системы (светлая / тёмная).
@@ -62,7 +67,9 @@
 <h1 id="site-name"><a href="{% url 'admin:index' %}"><span>SEO-система</span></a></h1>
 {% endblock %}
 
-{% block userlinks %}{{ block.super }}
+{# «Документация» — в новой вкладке: рабочий экран остаётся как был (E9-07). #}
+{% block userlinks %}<a href="{% url 'user_docs' %}" target="_blank" rel="noopener" title="Документация — в новой вкладке">Документация</a> /
+{{ block.super }}
 <details class="palette-switch" id="palette-switch">
   <summary title="Сменить расцветку"><span class="palette-dot"></span>Оформление</summary>
   <div class="palette-menu">
