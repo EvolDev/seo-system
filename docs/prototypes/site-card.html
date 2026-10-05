@@ -1,0 +1,366 @@
+<!doctype html>
+<!-- Прототип карточки площадки в панели справа (E9-13, план 05.10.2026).
+     Открыть в браузере; данные — со скрина пользователя, продавцы выдуманы.
+     Переключатель «Тёмная / Светлая» — вверху слева. Разделы сворачиваются щелчком
+     по заголовку; в прототипе выбор помнит браузер, в системе — пользователь. -->
+<html lang="ru" data-theme="dark">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карточка площадки — прототип</title>
+<style>
+:root{
+  --bg:#ffffff;--page:#f3f4f6;--panel:#ffffff;--card:#f7f8fa;--card-2:#eef0f3;--line:#e1e4e8;--line-strong:#c9ced5;
+  --fg:#1c2127;--fg-2:#3d4650;--muted:#6b7480;--link:#1a66c9;--accent:#1a66c9;--accent-fg:#fff;--accent-soft:#e6f0fb;
+  --green:#17803a;--green-soft:#e3f3e8;--red:#c4302b;--red-soft:#fbe9e8;--amber:#8a5a00;--amber-soft:#fff3d1;
+  --blue-soft:#e7effa;--violet:#6b46c1;--violet-soft:#efe9fb;
+  --shadow:-12px 0 32px rgba(20,30,45,.18);
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#1b1b1d;--page:#131314;--panel:#1e1f20;--card:#262729;--card-2:#2e3033;--line:#36383b;--line-strong:#4a4d52;
+  --fg:#e6e7e9;--fg-2:#c4c7c5;--muted:#9a9ea4;--link:#a8c7fa;--accent:#a8c7fa;--accent-fg:#062e6f;--accent-soft:#233148;
+  --green:#6dd58c;--green-soft:#173524;--red:#ff8a80;--red-soft:#3d1d1b;--amber:#f2c14e;--amber-soft:#3a2f12;
+  --blue-soft:#20304a;--violet:#c3a6ff;--violet-soft:#2e2545;
+  --shadow:-12px 0 32px rgba(0,0,0,.55);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--page);color:var(--fg);font:14px/1.45 var(--font)}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+/* Подложка — список «Площадок» за панелью, бледно. */
+.under{position:fixed;inset:0;padding:24px 32px;opacity:.35;pointer-events:none}
+.under .bar{height:44px;border-radius:8px;background:var(--card);margin-bottom:10px}
+.under .row{height:38px;border-bottom:1px solid var(--line)}
+.theme{position:fixed;top:12px;left:12px;z-index:5;display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px}
+.theme button{border:0;background:none;padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--muted)}
+.theme button[aria-pressed="true"]{background:var(--accent-soft);color:var(--fg)}
+
+/* ---------- Панель ---------- */
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(860px,100vw);background:var(--panel);box-shadow:var(--shadow);
+  display:flex;flex-direction:column;border-left:1px solid var(--line)}
+.head{padding:16px 24px 0;border-bottom:1px solid var(--line);background:var(--panel)}
+.titlerow{display:flex;align-items:center;gap:10px}
+.title{font-size:20px;font-weight:600;letter-spacing:.005em;margin:0}
+.ico{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:6px;color:var(--muted);border:1px solid transparent;cursor:pointer;background:none}
+.ico:hover{border-color:var(--line);color:var(--fg)}
+.spacer{flex:1}
+.headlink{font-size:13px}
+.close{font-size:20px;line-height:1}
+
+/* Главное о площадке: подпись над значением, 6 плиток в ряд. */
+.facts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:14px 0 12px}
+.fact{background:var(--card);border-radius:8px;padding:8px 10px;min-width:0}
+.fact dt{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 2px}
+.fact dd{margin:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fact dd small{display:block;font-size:12px;font-weight:400;color:var(--muted)}
+.flag{display:inline-block;width:16px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:4px;background:linear-gradient(#000 33%,#d00 33% 66%,#fc0 66%)}
+.zone{display:inline-block;padding:0 7px;border-radius:999px;font-size:13px}
+.zone.red{background:var(--red-soft);color:var(--red)}
+.zone.green{background:var(--green-soft);color:var(--green)}
+
+/* Решение по продуктам: рабочий — крупно, остальные — строкой ниже. */
+.decision{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:12px}
+.prod{font-weight:600}
+.status{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-weight:600;font-size:13px}
+.status::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.s-new{background:var(--blue-soft);color:var(--link)}
+.s-ok{background:var(--green-soft);color:var(--green)}
+.s-no{background:var(--red-soft);color:var(--red)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line-strong);
+  background:none;color:var(--link);font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--accent-soft)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.small{height:26px;padding:0 10px;font-size:12px}
+.quiet{color:var(--muted);font-size:13px}
+.others{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--fg-2);padding-bottom:10px}
+.others b{font-weight:600}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--violet-soft);color:var(--violet)}
+
+/* Переход к разделу — вкладками-якорями под шапкой. */
+.jump{display:flex;gap:2px;margin:0 -8px}
+.jump a{padding:9px 10px 10px;font-size:13px;color:var(--muted);border-bottom:2px solid transparent}
+.jump a:hover{color:var(--fg);text-decoration:none}
+.jump a.on{color:var(--fg);border-bottom-color:var(--accent)}
+.count{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:999px;background:var(--card-2);color:var(--fg-2);font-size:11px;text-align:center}
+
+.body{flex:1;overflow:auto;padding:20px 24px 40px;display:flex;flex-direction:column;gap:20px}
+
+/* Раздел — карточка с заголовком и действием справа. */
+.sec{background:var(--card);border-radius:12px;padding:16px 18px}
+.sec-h{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.sec-h h2{margin:0;font-size:15px;font-weight:600}
+.sec-h .spacer{flex:1}
+/* Свернуть — щелчком по заголовку; свёрнутый раздел показывает сводку. */
+.toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;background:none;border:0;padding:0;cursor:pointer;text-align:left;color:inherit}
+.toggle .chev{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;color:var(--muted);transition:transform .15s}
+.toggle:hover .chev{background:var(--card-2);color:var(--fg)}
+.sec.closed .toggle .chev{transform:rotate(-90deg)}
+.summary{display:none;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sec.closed .summary{display:inline}
+.sec.closed .sec-h{margin:0}
+.sec.closed .sec-body{display:none}
+.sec.closed{padding-block:12px}
+.all{margin-left:auto;align-self:center;font-size:12.5px;background:none;border:0;color:var(--link);cursor:pointer;padding:0 8px}
+.hint{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+
+/* Цена */
+.working{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.price-big{font-size:22px;font-weight:700}
+.price-eur{color:var(--muted);font-size:15px}
+.kv{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 14px;font-size:13px}
+.kv span{color:var(--muted)}
+.kv b{font-weight:600;color:var(--fg)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tr.is-working td{background:var(--green-soft)}
+tr.is-working td:first-child{border-radius:8px 0 0 8px}
+tr.is-working td:last-child{border-radius:0 8px 8px 0}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.chip.green{background:var(--green-soft);color:var(--green)}
+.chip.blue{background:var(--blue-soft);color:var(--link)}
+.down{color:var(--green);font-weight:600}
+.up{color:var(--red);font-weight:600}
+.right{text-align:right}
+details.more{margin-top:12px}
+details.more summary{cursor:pointer;color:var(--link);font-size:13px;list-style:none}
+details.more summary::before{content:"▸ ";color:var(--muted)}
+details.more[open] summary::before{content:"▾ "}
+
+/* Заметки: поле сверху, лента — новые сверху; у каждой — кто, к какому продукту, когда. */
+.composer{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.composer textarea{width:100%;min-height:64px;resize:vertical;padding:10px 12px;border-radius:10px;border:1px solid var(--line-strong);background:var(--panel)}
+.composer textarea::placeholder{color:var(--muted)}
+.composer .row{display:flex;align-items:center;gap:10px}
+.composer select{height:30px;border-radius:999px;border:1px solid var(--line-strong);background:var(--panel);padding:0 12px}
+.feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.note{display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px}
+.ava{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:14px;background:var(--accent-soft);color:var(--link)}
+.ava.sys{background:var(--card-2);color:var(--muted);font-size:16px}
+.bubble{background:var(--panel);border:1px solid var(--line);border-radius:4px 12px 12px 12px;padding:10px 14px}
+.who{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.who b{font-size:14px}
+.when{color:var(--muted);font-size:12.5px}
+.text{font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+.note.sys .bubble{background:none;border-style:dashed}
+.note.sys .text{color:var(--fg-2);font-size:13px}
+
+/* Серость */
+.gray-now{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.gray-big{font-size:22px;font-weight:700}
+.warn{background:var(--amber-soft);color:var(--amber);border-radius:8px;padding:8px 12px;font-size:13px;margin:0 0 12px}
+.measure{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.field input{width:120px;height:32px;border-radius:8px;border:1px solid var(--line-strong);background:var(--panel);padding:0 10px;font-size:14px;color:var(--fg)}
+.result{font-weight:600;padding-bottom:6px}
+
+dl.data{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0;font-size:13px}
+dl.data dt{color:var(--muted)}
+dl.data dd{margin:0;font-weight:600}
+.src{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+</style>
+
+<div class="theme" role="group" aria-label="Тема прототипа">
+  <button type="button" data-t="dark" aria-pressed="true">Тёмная</button>
+  <button type="button" data-t="light" aria-pressed="false">Светлая</button>
+</div>
+
+<div class="under" aria-hidden="true">
+  <div class="bar"></div><div class="bar" style="width:60%"></div>
+  <div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div>
+</div>
+
+<aside class="panel" aria-label="Карточка площадки">
+  <header class="head">
+    <div class="titlerow">
+      <h1 class="title"><a href="#" style="color:inherit">hochgepokert.com</a></h1>
+      <button class="ico" title="Открыть сайт">↗</button>
+      <button class="ico" title="Скопировать домен">⧉</button>
+      <span class="spacer"></span>
+      <a class="headlink" href="#">Факты о площадке</a>
+      <button class="ico" title="Справка по экрану">?</button>
+      <button class="ico close" title="Закрыть (Esc)">×</button>
+    </div>
+
+    <dl class="facts">
+      <div class="fact"><dt>DR</dt><dd class="num">81</dd></div>
+      <div class="fact"><dt>Трафик</dt><dd class="num">7 303<small>замер 02.10.2026</small></dd></div>
+      <div class="fact"><dt>Топ-регион</dt><dd class="num"><span class="flag"></span>DE 4 709</dd></div>
+      <div class="fact"><dt>Язык</dt><dd>de</dd></div>
+      <div class="fact"><dt>Серость</dt><dd><span class="zone red">100 %</span><small>02.10.2026</small></dd></div>
+      <div class="fact"><dt>Рабочая цена</dt><dd class="num">€490<small>$550 · публикация</small></dd></div>
+    </dl>
+
+    <div class="decision">
+      <span class="prod">Convertio</span>
+      <span class="status s-new">Новая</span>
+      <button class="btn small">Сменить статус</button>
+      <a href="#" class="quiet">история (2)</a>
+      <span class="badge" title="По выгрузке Ahrefs от 02.10.2026">ссылается на Convertio с 14.09.2026</span>
+    </div>
+    <div class="others">
+      <span>Clideo: <b>Новая</b> · <a href="#">сменить</a></span>
+    </div>
+
+    <nav class="jump" aria-label="Разделы карточки">
+      <a href="#price" class="on">Цена и предложения<span class="count">1</span></a>
+      <a href="#notes">Заметки<span class="count">3</span></a>
+      <a href="#gray">Серость</a>
+      <a href="#data">Данные из файлов<span class="count">1</span></a>
+      <button type="button" class="all" data-all>Свернуть все</button>
+    </nav>
+  </header>
+
+  <div class="body">
+    <section class="sec" id="price" data-key="price">
+      <div class="sec-h">
+        <button class="toggle" aria-expanded="true"><span class="chev">▾</span><h2>Цена и предложения</h2><span class="summary">€490 · LinkHub Media · предложений: 2, новое: 1</span></button>
+        <button class="btn small">＋ Добавить предложение</button>
+      </div>
+      <div class="sec-body">
+      <div class="working">
+        <span class="price-big num">$550</span><span class="price-eur num">≈ €490</span>
+        <span class="chip green">рабочая</span>
+        <span class="quiet">публикация · LinkHub Media · цена от 02.10.2026</span>
+      </div>
+      <div class="kv">
+        <div><span>Написание:</span> <b>не предлагает — пишем сами</b></div>
+        <div><span>Анонс:</span> <b>нет</b></div>
+      </div>
+      <table>
+        <thead><tr><th>Продавец</th><th>Услуга</th><th class="right">Цена</th><th>К рабочей</th><th>Написание</th><th>Анонс</th><th>Дата</th><th></th></tr></thead>
+        <tbody>
+          <tr class="is-working"><td><b>LinkHub Media</b></td><td>публикация</td><td class="right num"><b>$550</b> <span class="quiet">≈ €490</span></td><td><span class="chip green">рабочая</span></td><td>—</td><td>нет</td><td class="quiet num">02.10.2026</td><td></td></tr>
+          <tr><td>Collaborator <span class="chip blue">новое</span></td><td>публикация</td><td class="right num"><b>€540</b></td><td><span class="up">▲ €50</span></td><td>€20</td><td>—</td><td class="quiet num">04.10.2026</td><td class="right"><button class="btn small">Сделать рабочей</button></td></tr>
+        </tbody>
+      </table>
+      <details class="more"><summary>История цен (0)</summary><p class="quiet">Старых цен нет.</p></details>
+      <p class="hint">Последнее предложение каждого продавца по каждой услуге, дешёвые в евро — первыми. Сравниваем цену размещения; написание и анонс — справочно.</p>
+      </div>
+    </section>
+
+    <section class="sec" id="notes" data-key="notes">
+      <div class="sec-h"><button class="toggle" aria-expanded="true"><span class="chev">▾</span><h2>Заметки <span class="count">3</span></h2><span class="summary">последняя — rodzedrim, сегодня, 12:45</span></button></div>
+      <div class="sec-body">
+      <form class="composer" onsubmit="return false">
+        <textarea placeholder="Написать заметку… Ctrl+Enter — добавить" aria-label="Текст заметки"></textarea>
+        <div class="row">
+          <select aria-label="Продукт заметки"><option>Convertio</option><option>Clideo</option><option>Без продукта</option></select>
+          <button class="btn primary">Добавить заметку</button>
+        </div>
+      </form>
+      <ol class="feed">
+        <li class="note">
+          <div class="ava" aria-hidden="true">R</div>
+          <div class="bubble">
+            <div class="who"><b>rodzedrim</b><span class="chip blue">Convertio</span><time class="when" title="05.10.2026 12:45">сегодня, 12:45</time></div>
+            <div class="text">эту заметку вообще не видно</div>
+          </div>
+        </li>
+        <li class="note">
+          <div class="ava" aria-hidden="true">K</div>
+          <div class="bubble">
+            <div class="who"><b>kate</b><time class="when" title="03.10.2026 18:02">3 октября, 18:02</time></div>
+            <div class="text">Просили не ставить ссылку в первый абзац. Анонс в соцсетях — за отдельные деньги, договориться при заявке.</div>
+          </div>
+        </li>
+        <li class="note sys">
+          <div class="ava sys" aria-hidden="true">⚙</div>
+          <div class="bubble">
+            <div class="who"><b>Система</b><span class="quiet">загрузка «прайс LinkHub 02.10»</span><time class="when" title="02.10.2026 22:32">2 октября, 22:32</time></div>
+            <div class="text">Рабочая цена: €520 → €490 (LinkHub Media, публикация)</div>
+          </div>
+        </li>
+      </ol>
+      <p class="hint">Заметки не правятся и не удаляются — это история. Смена рабочей цены и отказ попадают сюда сами.</p>
+      </div>
+    </section>
+
+    <section class="sec" id="gray" data-key="gray">
+      <div class="sec-h">
+        <button class="toggle" aria-expanded="true"><span class="chev">▾</span><h2>Серость в Google</h2><span class="summary">100 % · красная · 02.10.2026</span></button>
+        <a class="btn small" href="#">Google: всего страниц ↗</a>
+        <a class="btn small" href="#">Google: серые темы ↗</a>
+      </div>
+      <div class="sec-body">
+      <div class="gray-now">
+        <span class="gray-big zone red">100 %</span>
+        <span>58 из 58 · <b>красная зона</b></span>
+        <span class="quiet">замер 02.10.2026 · расширение</span>
+      </div>
+      <p class="warn">Слов в запросе серости без OR: 33. Google учитывает первые 32 — остальные может не учесть.</p>
+      <form class="measure" onsubmit="return false">
+        <label class="field">Всего страниц<input type="number" inputmode="numeric"></label>
+        <label class="field">Серых<input type="number" inputmode="numeric"></label>
+        <span class="result quiet">—</span>
+        <button class="btn primary">Сохранить замер</button>
+      </form>
+      <details class="more"><summary>История замеров (1)</summary><p class="quiet">02.10.2026 · 100 % (58 из 58) · расширение</p></details>
+      <p class="hint">Числа «About N results» подставляет расширение браузера; без него впишите руками. Условия запроса: 29 — <a href="#">править в «Настройках»</a>.</p>
+      </div>
+    </section>
+
+    <section class="sec" id="data" data-key="data">
+      <div class="sec-h"><button class="toggle" aria-expanded="true"><span class="chev">▾</span><h2>Данные из файлов</h2><span class="summary">LinkHub Media · 2 поля</span></button></div>
+      <div class="sec-body">
+      <div class="src">LinkHub Media · прайс от 02.10.2026</div>
+      <dl class="data"><dt>Symbol</dt><dd>Usd</dd><dt>Sponsored</dt><dd>yes</dd></dl>
+      </div>
+    </section>
+  </div>
+</aside>
+
+<script>
+document.querySelectorAll(".theme button").forEach(function (b) {
+  b.addEventListener("click", function () {
+    document.documentElement.dataset.theme = b.dataset.t;
+    document.querySelectorAll(".theme button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+  });
+});
+// Свёрнутые разделы — общие для всех карточек; в системе их помнит пользователь
+// (в базе), здесь — браузер.
+var KEY = "proto-card-closed";
+function closedSet() { try { return new Set(JSON.parse(localStorage.getItem(KEY)) || []); } catch (e) { return new Set(); } }
+function save() {
+  var keys = Array.from(document.querySelectorAll(".sec.closed")).map(function (s) { return s.dataset.key; });
+  try { localStorage.setItem(KEY, JSON.stringify(keys)); } catch (e) { /* не запомнится */ }
+  var all = document.querySelector("[data-all]");
+  all.textContent = keys.length === document.querySelectorAll(".sec").length ? "Развернуть все" : "Свернуть все";
+}
+function setOpen(sec, open) {
+  sec.classList.toggle("closed", !open);
+  sec.querySelector(".toggle").setAttribute("aria-expanded", String(open));
+}
+var closedKeys = closedSet();
+document.querySelectorAll(".sec").forEach(function (sec) {
+  setOpen(sec, !closedKeys.has(sec.dataset.key));
+  sec.querySelector(".toggle").addEventListener("click", function () {
+    setOpen(sec, sec.classList.contains("closed"));
+    save();
+  });
+});
+save();
+document.querySelector("[data-all]").addEventListener("click", function () {
+  var open = this.textContent === "Развернуть все";
+  document.querySelectorAll(".sec").forEach(function (sec) { setOpen(sec, open); });
+  save();
+});
+document.querySelectorAll(".jump a").forEach(function (a) {
+  a.addEventListener("click", function (e) {
+    e.preventDefault();
+    var sec = document.querySelector(a.getAttribute("href"));
+    // Переход к свёрнутому разделу разворачивает его.
+    if (sec.classList.contains("closed")) { setOpen(sec, true); save(); }
+    sec.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelectorAll(".jump a").forEach(function (x) { x.classList.toggle("on", x === a); });
+  });
+});
+</script>
+</html>
