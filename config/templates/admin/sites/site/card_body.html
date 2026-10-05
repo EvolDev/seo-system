@@ -1,146 +1,201 @@
-{% load l10n seo_assets %}
+{% load l10n seo_assets seo_docs %}
 {% comment %}
-Карточка площадки (E1-07, ADR-043): метрики, статусы по продуктам с историей
-смен (E1-13, ADR-049), рабочая цена, предложения продавцов, история цен,
-прочие данные, заметки, серость в Google (E2-06). Одна и та же разметка — в
-панели справа (panel — запрос панели, seo/panel.js, E9-11) и на отдельной
-странице card.html. Формы с data-card-form панель отправляет сама и
-показывает обновлённую карточку; без скрипта они уходят обычным путём.
-Ссылки с data-panel («Факты о площадке», «сменить» у статуса) открывают
-запись в той же панели.
+Карточка площадки (E1-07, ADR-043; раскладка — E9-13, ADR-058, прототип
+docs/prototypes/site-card.html). Одна и та же разметка — в панели справа (panel —
+запрос панели, seo/panel.js, E9-11) и на отдельной странице card.html.
+
+Шапка закреплена вверху: домен, плитки «подпись над значением», решение по
+продуктам (рабочий продукт пользователя — первым), переходы к разделам. Ниже —
+разделы блоками; щелчок по заголовку сворачивает раздел до строки со сводкой.
+Свёрнутые — у пользователя в базе, на все карточки (closed, seo/site-card.js).
+
+Формы с data-card-form панель отправляет сама и показывает обновлённую
+карточку; без скрипта они уходят обычным путём. Ссылки с data-panel («Факты о
+площадке», «Сменить статус») открывают запись в той же панели.
 {% endcomment %}{% if panel %}<link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/status-history.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/gray.css' %}">
-{% include "admin/panel_head.html" %}{% endif %}
-<div class="seo-card-content">
-  <div class="seo-card-summary">
-    <div class="seo-sub">
-      {% if latest %}DR {{ latest.dr|default:"—" }}{{ metrics_mark }} · трафик {{ latest.organic_traffic|default:"—" }}{% if latest.metrics_at %} · замер {{ latest.metrics_at|date:"d.m.Y" }}{% endif %}{% else %}Метрик нет{% endif %}
+<link rel="stylesheet" href="{% asset 'flags/sprite-hq.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/site-card.css' %}">{% endif %}
+<div class="seo-card" data-site-card data-sections-url="{% url 'admin:card_sections' %}">
+<header class="seo-panel-head seo-card-head">
+  <div class="seo-card-titlerow">
+    {# В панели — h2 (h1 у списка под ней), отдельной страницей — h1. #}
+    <{{ panel|yesno:"h2,h1" }} class="seo-panel-title seo-card-title"><a href="{{ panel_title_url }}" target="_blank" rel="noopener noreferrer" title="Открыть сайт в новой вкладке">{{ site.domain }}</a> {{ panel_title_tools }}</{{ panel|yesno:"h2,h1" }}>
+    <div class="seo-panel-tools">
+      <a href="{{ change_url }}"{% if panel %} data-panel{% endif %}>Факты о площадке</a>
+      {% if panel %}<a href="{{ panel_full_url }}" title="Карточка отдельной страницей">Открыть полностью</a>{% endif %}
+      {% screen_help %}
+      {% if panel %}<button type="button" class="seo-panel-close" data-panel-close aria-label="Закрыть панель" title="Закрыть (Esc)">✕</button>{% endif %}
     </div>
-    {% for status in statuses %}
-    <div class="seo-card-status">
-      {{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.reject_reason %} — {{ status.row.reject_reason }}{% endif %}
-      {% if can_change %}<a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
-      {% if status.ref %}
-        <div class="seo-sub">{% if status.ref.is_linking %}ссылается на {{ status.row.product.name }}{% if status.ref.first_seen_at %} с {{ status.ref.first_seen_at|date:"d.m.Y" }}{% endif %} — по выгрузке Ahrefs от {{ status.ref.seen_on|date:"d.m.Y" }}{% elif status.ref.lost_at %}ссылка на {{ status.row.product.name }} пропала {{ status.ref.lost_at|date:"d.m.Y" }} — по Ahrefs{% else %}ссылки на {{ status.row.product.name }} нет в выгрузке Ahrefs с {{ status.ref.missing_since|date:"d.m.Y" }}{% endif %}</div>
-      {% endif %}
-      {% if status.history %}
-      <details class="seo-status-history">
-        <summary>история ({{ status.history|length }})</summary>
-        <ul class="seo-status-list">
-          {% for change in status.history %}<li><span class="seo-sub">{{ change.when }}</span> {{ change.change }} · <span class="seo-sub">{{ change.who }}</span></li>{% endfor %}
-        </ul>
-      </details>
-      {% endif %}
-    </div>
-    {% endfor %}
-    {% if not panel %}<div><a href="{{ change_url }}">Факты о площадке</a></div>{% endif %}
   </div>
+
+  <dl class="seo-card-facts">
+    <div class="seo-card-fact"><dt>DR</dt><dd>{% if latest and latest.dr is not None %}{{ latest.dr|unlocalize }}{{ metrics_mark }}{% else %}—{% endif %}</dd></div>
+    <div class="seo-card-fact"><dt>Трафик</dt><dd>{{ traffic_text }}{% if latest.metrics_at %}<small>замер {{ latest.metrics_at|date:"d.m.Y" }}</small>{% endif %}</dd></div>
+    <div class="seo-card-fact"><dt>Топ-регион</dt><dd>{% if latest.top_geo %}{{ geo_flag }}{{ latest.top_geo|upper }}{% if geo_traffic_text %} {{ geo_traffic_text }}{% endif %}{% else %}—{% endif %}</dd></div>
+    <div class="seo-card-fact"><dt>Язык</dt><dd>{{ latest.language|default:site.language|default:"—" }}</dd></div>
+    <div class="seo-card-fact"><dt>Серость</dt><dd>{% if gray.latest %}<span class="seo-card-zone seo-gray-{{ gray.latest.zone|default:'none' }}"{% if gray.latest.zone %} title="{{ gray.latest.zone_title }}"{% endif %}>{{ gray.latest.percent }}</span><small>{{ gray.latest.day }}</small>{% else %}—<small>замеров нет</small>{% endif %}</dd></div>
+    <div class="seo-card-fact"><dt>Рабочая цена</dt><dd>{% if working %}{{ working_eur }}<small>{% if working_original %}{{ working_original }} · {% endif %}{{ working.get_placement_type_display }}</small>{% else %}—<small>не выбрана</small>{% endif %}</dd></div>
+  </dl>
+
+  {% if statuses %}
+  {% with main=statuses.0 %}
+  <div class="seo-card-decision">
+    <span class="seo-card-product">{{ main.row.product.name }}</span>
+    <span class="seo-card-status seo-tone-{{ main.tone }}">{{ main.row.get_status_display }}</span>
+    {% if main.row.reject_reason %}<span class="seo-card-reason">{{ main.row.reject_reason }}</span>{% endif %}
+    {% if can_change %}<a class="seo-btn seo-btn-small" href="{{ main.change_url }}" data-panel="{{ main.decision_url }}" title="Решение по площадке у {{ main.row.product.name }}">Сменить статус</a>{% endif %}
+    {% include "admin/sites/site/card_status_extra.html" with status=main %}
+  </div>
+  {% endwith %}
+  {% if statuses|length > 1 %}
+  <div class="seo-card-others">
+    {% for status in statuses|slice:"1:" %}
+    <span class="seo-card-other">{{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.reject_reason %} — {{ status.row.reject_reason }}{% endif %}{% if can_change %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
+      {% include "admin/sites/site/card_status_extra.html" %}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="seo-card-decision"><span class="seo-sub">Решений по продуктам нет.</span></div>
+  {% endif %}
+
+  <nav class="seo-card-jump" aria-label="Разделы карточки">
+    <a href="#card-price" data-jump="price">Цена и предложения{% if offer_rows %}<span class="seo-card-count">{{ offer_rows|length }}</span>{% endif %}</a>
+    <a href="#card-notes" data-jump="notes">Заметки{% if notes %}<span class="seo-card-count">{{ notes|length }}</span>{% endif %}</a>
+    <a href="#card-gray" data-jump="gray">Серость</a>
+    <a href="#card-data" data-jump="data">Данные из файлов{% if extras %}<span class="seo-card-count">{{ extras|length }}</span>{% endif %}</a>
+    <button type="button" class="seo-card-all" data-card-all>{% if closed|length == 4 %}Развернуть все{% else %}Свернуть все{% endif %}</button>
+  </nav>
+</header>
+
+<div class="seo-card-sections">
+  <section class="seo-card-sec{% if 'price' in closed %} seo-closed{% endif %}" id="card-price" data-section="price">
+    <div class="seo-card-sec-h">
+      <h3><button type="button" class="seo-card-toggle" aria-expanded="{% if 'price' in closed %}false{% else %}true{% endif %}" aria-controls="card-price-body"><span class="seo-card-chev" aria-hidden="true"></span><span class="seo-card-sec-name">Цена и предложения</span><span class="seo-card-sec-summary">{{ price_summary }}</span></button></h3>
+      {% if can_change %}<a class="seo-btn seo-btn-small" href="{{ add_offer_url }}">＋ Добавить предложение</a>{% endif %}
+    </div>
+    <div class="seo-card-sec-body" id="card-price-body">
+      {% if working %}
+      <div class="seo-card-working">
+        <span class="seo-card-big">{{ working_price|default:"—" }}</span>
+        <span class="seo-chip seo-down">рабочая</span>
+        <span class="seo-sub">{{ working.get_placement_type_display }} · {{ working.seller }} · цена от {{ working.checked_at|date:"d.m.Y" }}</span>
+      </div>
+      <div class="seo-card-kv">
+        <span>Написание: <b>{% if working_writing %}{{ working_writing }}{% else %}не предлагает — пишем сами{% endif %}</b></span>
+        <span>Анонс: <b>{{ working_announce }}</b></span>
+      </div>
+      {% else %}
+      <p class="seo-sub">Рабочей цены нет — выберите предложение ниже.</p>
+      {% endif %}
+      {% if offer_rows %}
+      <div class="seo-table-wrap">
+        <table class="seo-card-table">
+          <thead><tr><th>Продавец</th><th>Услуга</th><th class="seo-right">Цена</th><th>К рабочей</th><th>Написание</th><th>Анонс</th>{% if has_gray_price %}<th>Серая</th>{% endif %}<th>Дата</th><th></th></tr></thead>
+          <tbody>
+          {% for row in offer_rows %}
+            <tr class="{% if row.is_working %}seo-working{% endif %}">
+              <td><b>{{ row.offer.seller_name }}</b>{% if row.pending and not row.is_working %} <span class="seo-chip seo-info">новое</span>{% endif %}</td>
+              <td>{{ row.offer.get_placement_type_display }}</td>
+              <td class="seo-right">{{ row.price }}</td>
+              <td>{% if row.is_working %}<span class="seo-chip seo-down">рабочая</span>{% elif row.other_service %}<span class="seo-flat">другая услуга</span>{% elif row.delta %}{{ row.delta }}{% endif %}</td>
+              <td>{{ row.writing|default:"—" }}</td>
+              <td>{{ row.announce }}</td>
+              {% if has_gray_price %}<td>{{ row.gray }}</td>{% endif %}
+              <td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td>
+              <td class="seo-right">
+                {% if can_change and not row.is_working %}
+                <form method="post" action="{{ fix_url }}" data-card-form>{% csrf_token %}
+                  <input type="hidden" name="offer" value="{{ row.offer.pk|unlocalize }}">
+                  <button type="submit" class="seo-btn seo-btn-small">Сделать рабочей</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if can_change and has_pending %}
+      <form method="post" action="{{ keep_url }}" data-card-form class="seo-inline-form">{% csrf_token %}
+        <button type="submit" class="seo-btn seo-btn-small">Оставить как есть</button>
+        <span class="seo-sub">снять пометки «новое», рабочую цену не менять</span>
+      </form>
+      {% endif %}
+      {% else %}
+      <p class="seo-sub">Предложений нет.</p>
+      {% endif %}
+      <details class="seo-card-more">
+        <summary>История цен ({{ history|length }})</summary>
+        {% if history %}
+        <div class="seo-table-wrap">
+          <table class="seo-card-table"><tbody>
+          {% for row in history %}
+            <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{{ row.price }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
+          {% endfor %}
+          </tbody></table>
+        </div>
+        {% else %}
+        <p class="seo-sub">Старых цен нет.</p>
+        {% endif %}
+      </details>
+      <p class="seo-card-hint">Последнее предложение каждого продавца по каждой услуге, дешёвые в евро — первыми. Сравниваем только цену размещения одной услуги; написание и анонс — справочно.</p>
+    </div>
+  </section>
+
+  <section class="seo-card-sec{% if 'notes' in closed %} seo-closed{% endif %}" id="card-notes" data-section="notes">
+    <div class="seo-card-sec-h">
+      <h3><button type="button" class="seo-card-toggle" aria-expanded="{% if 'notes' in closed %}false{% else %}true{% endif %}" aria-controls="card-notes-body"><span class="seo-card-chev" aria-hidden="true"></span><span class="seo-card-sec-name">Заметки{% if notes %} <span class="seo-card-count">{{ notes|length }}</span>{% endif %}</span><span class="seo-card-sec-summary">{{ notes_summary }}</span></button></h3>
+    </div>
+    <div class="seo-card-sec-body" id="card-notes-body">
+      {% if can_change %}
+      <form method="post" action="{{ note_url }}" data-card-form class="seo-note-form">{% csrf_token %}
+        <textarea name="body" rows="2" required placeholder="Написать заметку… Ctrl+Enter — добавить" aria-label="Текст заметки"></textarea>
+        <div class="seo-note-row">
+          <select name="product" aria-label="Продукт заметки">
+            {% for product in products %}<option value="{{ product.pk|unlocalize }}"{% if product.pk == note_product %} selected{% endif %}>{{ product.name }}</option>{% endfor %}
+            <option value=""{% if not note_product %} selected{% endif %}>Без продукта</option>
+          </select>
+          <button type="submit" class="seo-btn seo-btn-primary seo-btn-small">Добавить заметку</button>
+        </div>
+      </form>
+      {% endif %}
+      <ol class="seo-note-feed">
+        {% for note in notes %}
+        <li class="seo-note{% if note.system %} seo-note-system{% endif %}">
+          <span class="seo-note-ava" aria-hidden="true">{% if note.system %}⚙{% else %}{{ note.letter }}{% endif %}</span>
+          <div class="seo-note-bubble">
+            <div class="seo-note-who"><b>{{ note.who }}</b>{% if note.product %}<span class="seo-chip seo-info">{{ note.product }}</span>{% endif %}{% if note.source %}<span class="seo-sub">{{ note.source }}</span>{% endif %}<time datetime="{{ note.iso }}" title="{{ note.when_full }}">{{ note.when }}</time></div>
+            <div class="seo-note-text">{{ note.body }}</div>
+          </div>
+        </li>
+        {% empty %}
+        <li class="seo-sub">Заметок нет.</li>
+        {% endfor %}
+      </ol>
+      <p class="seo-card-hint">Заметки не правятся и не удаляются: это история. Смена рабочей цены и отказ попадают сюда сами.</p>
+    </div>
+  </section>
 
   {% include "admin/sites/site/card_gray.html" %}
 
-  <section>
-    <h3>Рабочая цена</h3>
-    {% if working %}
-    <div class="seo-card-working">{{ working_price|default:"—" }} · {{ working.get_placement_type_display }} · {{ working.seller }} <span class="seo-sub">цена от {{ working.checked_at|date:"d.m.Y" }}</span></div>
-    <div class="seo-sub">Написание: {% if working_writing %}{{ working_writing }}{% else %}не предлагает — пишем сами{% endif %} · анонс: {{ working_announce }}</div>
-    {% else %}
-    <p class="seo-sub">Нет — выберите предложение ниже.</p>
-    {% endif %}
-  </section>
-
-  <section>
-    <h3>Предложения продавцов</h3>
-    {% if offer_rows %}
-    <div class="seo-table-wrap">
-      <table class="seo-card-table">
-        <thead><tr><th>Продавец</th><th>Услуга</th><th>Цена</th><th>К рабочей</th><th>Написание</th><th>Анонс</th><th>Серая</th><th>Дата</th><th></th></tr></thead>
-        <tbody>
-        {% for row in offer_rows %}
-          <tr class="{% if row.is_working %}seo-working{% endif %}">
-            <td>{{ row.offer.seller_name }}{% if row.pending and not row.is_working %} <span class="seo-chip seo-info">новое</span>{% endif %}</td>
-            <td>{{ row.offer.get_placement_type_display }}</td>
-            <td>{{ row.price }}</td>
-            <td>{% if row.is_working %}<span class="seo-chip seo-down">рабочая</span>{% elif row.other_service %}<span class="seo-flat">другая услуга</span>{% elif row.delta %}{{ row.delta }}{% endif %}</td>
-            <td>{{ row.writing|default:"—" }}</td>
-            <td>{{ row.announce }}</td>
-            <td>{{ row.gray }}</td>
-            <td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td>
-            <td>
-              {% if can_change and not row.is_working %}
-              <form method="post" action="{{ fix_url }}" data-card-form>{% csrf_token %}
-                <input type="hidden" name="offer" value="{{ row.offer.pk|unlocalize }}">
-                <button type="submit" class="seo-btn">Сделать рабочей</button>
-              </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+  <section class="seo-card-sec{% if 'data' in closed %} seo-closed{% endif %}" id="card-data" data-section="data">
+    <div class="seo-card-sec-h">
+      <h3><button type="button" class="seo-card-toggle" aria-expanded="{% if 'data' in closed %}false{% else %}true{% endif %}" aria-controls="card-data-body"><span class="seo-card-chev" aria-hidden="true"></span><span class="seo-card-sec-name">Данные из файлов</span><span class="seo-card-sec-summary">{{ extras_summary }}</span></button></h3>
     </div>
-    {% if can_change and has_pending %}
-    <form method="post" action="{{ keep_url }}" data-card-form class="seo-inline-form">{% csrf_token %}
-      <button type="submit" class="seo-btn">Оставить как есть</button>
-      <span class="seo-sub">снять пометки «новое», рабочую цену не менять</span>
-    </form>
-    {% endif %}
-    {% else %}
-    <p class="seo-sub">Цен нет.</p>
-    {% endif %}
-    <p class="seo-sub">Последнее предложение каждого продавца по каждой услуге, дешёвые в евро — первыми. Сравниваем только цену размещения одной услуги; написание и анонс — справочно.{% if can_change %} <a href="{{ add_offer_url }}">Добавить предложение</a>{% endif %}</p>
-  </section>
-
-  <section>
-    <details>
-      <summary>История цен ({{ history|length }})</summary>
-      {% if history %}
-      <div class="seo-table-wrap">
-        <table class="seo-card-table"><tbody>
-        {% for row in history %}
-          <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{{ row.price }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
-        {% endfor %}
-        </tbody></table>
+    <div class="seo-card-sec-body" id="card-data-body">
+      {% for offer in extras %}
+      <div class="seo-extra">
+        <div class="seo-sub">{{ offer.seller_name }} · прайс от {{ offer.checked_at|date:"d.m.Y" }}</div>
+        <dl class="seo-card-data">{% for key, value in offer.extra.items %}<dt>{{ key }}</dt><dd>{{ value }}</dd>{% endfor %}</dl>
       </div>
-      {% else %}
-      <p class="seo-sub">Старых цен нет.</p>
-      {% endif %}
-    </details>
-  </section>
-
-  <section>
-    <h3>Прочие данные из файлов</h3>
-    {% for offer in extras %}
-    <div class="seo-extra">
-      <div class="seo-sub">{{ offer.seller_name }} · {{ offer.checked_at|date:"d.m.Y" }}</div>
-      <div class="seo-kv">{% for key, value in offer.extra.items %}<span>{{ key }}: <b>{{ value }}</b></span>{% endfor %}</div>
-    </div>
-    {% empty %}
-    <p class="seo-sub">Нет.</p>
-    {% endfor %}
-  </section>
-
-  <section>
-    <h3>Заметки</h3>
-    {% if can_change %}
-    <form method="post" action="{{ note_url }}" data-card-form class="seo-note-form">{% csrf_token %}
-      <textarea name="body" rows="2" required placeholder="Новая заметка" aria-label="Текст заметки"></textarea>
-      <div>
-        <select name="product" aria-label="Продукт">
-          <option value="">Без продукта</option>
-          {% for product in products %}<option value="{{ product.pk|unlocalize }}">{{ product.name }}</option>{% endfor %}
-        </select>
-        <button type="submit" class="seo-btn seo-btn-primary">Добавить заметку</button>
-      </div>
-    </form>
-    {% endif %}
-    <ul class="seo-notes-list">
-      {% for note in notes %}
-      <li>{{ note.body|linebreaksbr }}<span class="seo-sub">{{ note.created_at|date:"d.m.Y H:i" }} · {% if note.author %}{{ note.author }}{% else %}{{ note.source|default:"—" }}{% endif %}{% if note.product %} · {{ note.product.name }}{% endif %}</span></li>
       {% empty %}
-      <li class="seo-sub">Заметок нет.</li>
+      <p class="seo-sub">Прочих данных из файлов продавцов нет.</p>
       {% endfor %}
-    </ul>
-    <p class="seo-sub">Заметки не правятся и не удаляются: это история. Смена рабочей цены и отказ попадают сюда сами.</p>
+    </div>
   </section>
+</div>
+<script src="{% asset 'seo/site-card.js' %}"></script>
 </div>

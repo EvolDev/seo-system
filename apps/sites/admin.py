@@ -50,7 +50,6 @@ from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
     announce_text,
-    copy_domain_html,
     delta,
     delta_html,
     delta_text,
@@ -83,7 +82,10 @@ from apps.sites.models import (
     SitePrice,
     SiteStatus,
 )
+from apps.sites.site_card import STATUS_TONES, euros, fields_text, note_rows, notes_summary
+from apps.sites.site_card import price_summary as card_price_summary
 from apps.sites.status_history import site_history
+from apps.workspace import card as card_sections
 from apps.workspace.products import WorkingProductFilter, products_of, working_product_id
 from config import export
 from config.admin import ModelAdmin, NoDeleteAdmin, SnapshotAdmin, TabularInline, is_partial
@@ -301,19 +303,24 @@ class SiteAdmin(NoDeleteAdmin):
         if not self.has_view_permission(request, site):
             return HttpResponse(status=403)
         partial = is_partial(request)
+        gray = _gray_context(site, gray_form)
         context = {
             **self.admin_site.each_context(request),
-            **_card_context(site),
-            "gray": _gray_context(site, gray_form),
+            **_card_context(site, working_product_id(request)),
+            "gray": gray,
+            # Свёрнутые разделы — у пользователя, на все карточки (ADR-058):
+            # сервер сразу отдаёт их свёрнутыми, без мигания при открытии.
+            "closed": card_sections.closed_sections(request.user),
             "title": site.domain,
             "subtitle": "Карточка площадки",
             "opts": self.model._meta,
             "can_change": self.has_change_permission(request, site),
             "panel": partial,
             "panel_title": site.domain,
-            # Название — ссылка на сайт в новой вкладке, рядом — скопировать домен.
+            # Название — ссылка на сайт в новой вкладке, рядом — значки «открыть
+            # сайт» и «скопировать домен».
             "panel_title_url": site_url(site.domain),
-            "panel_title_tools": copy_domain_html(site.domain),
+            "panel_title_tools": domain_tools_html(site.domain),
             "panel_sub": "Карточка площадки",
             "panel_links": [
                 ("Факты о площадке", reverse("admin:sites_site_change", args=[site.pk]), True)
@@ -364,13 +371,12 @@ class SiteAdmin(NoDeleteAdmin):
         return HttpResponseRedirect(card_url(object_id))
 
 
-def _card_context(site: Site) -> dict[str, Any]:
+def _card_context(site: Site, working_product: int | None = None) -> dict[str, Any]:
     """Всё для карточки: метрики, статусы с историей, рабочая цена, предложения,
-    история цен, заметки."""
-    rows = list(
-        ProductSiteLatest.objects.filter(site_id=site.pk)
-        .select_related("product")
-        .order_by("product_id")
+    история цен, заметки. Рабочий продукт пользователя — первым (E9-13)."""
+    rows = sorted(
+        ProductSiteLatest.objects.filter(site_id=site.pk).select_related("product"),
+        key=lambda row: (row.product_id != working_product, row.product_id),
     )
     latest = rows[0] if rows else None
     working = site.price
@@ -415,12 +421,20 @@ def _card_context(site: Site) -> dict[str, Any]:
     status_history = site_history(site.pk)
     # Ссылается ли площадка на продукт — по его выгрузке Ahrefs (ADR-051).
     refs = {ref.product_id: ref for ref in ProductRefDomain.objects.filter(domain=site.domain)}
+    notes = note_rows(site.notes.select_related("author", "product").order_by("-created_at", "-pk"))
+    extras = [offer for offer in current if offer.extra]
+    pending = sum(1 for row in offer_rows if row["pending"] and not row["is_working"])
+    working_eur = euros(working_amount.eur_cents) if working_amount else ""
+    if working is not None and not working_eur:
+        # Курса нет — в евро не пересчитать, показываем как есть.
+        working_eur = offers.money(working.placement_cents, working.currency)
     return {
         "site": site,
         "latest": latest,
         "statuses": [
             {
                 "row": row,
+                "tone": STATUS_TONES.get(SiteStatus(row.status), "info"),
                 "change_url": reverse("admin:sites_productsite_change", args=[row.pk]),
                 "decision_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
                 # Строка «Площадок» — та же строка product_sites (pk общий).
@@ -429,6 +443,21 @@ def _card_context(site: Site) -> dict[str, Any]:
             }
             for row in rows
         ],
+        "geo_flag": countries.flag_html(latest.top_geo) if latest is not None else "",
+        "traffic_text": gray_scan.count_text(latest.organic_traffic if latest else None),
+        "geo_traffic_text": gray_scan.count_text(latest.top_geo_traffic)
+        if latest is not None and latest.top_geo_traffic is not None
+        else "",
+        # Плитка «Рабочая цена»: крупно в евро, мелко — исходная цена и услуга.
+        "working_eur": working_eur,
+        "working_original": offers.money(working.placement_cents, working.currency)
+        if working is not None and working.currency != "EUR"
+        else "",
+        "price_summary": card_price_summary(
+            working_eur, working.seller.name if working else "", len(offer_rows), pending
+        ),
+        "has_gray_price": any(offer.gray_cents is not None for offer in current),
+        "pending_count": pending,
         "metrics_mark": seller_mark(latest.metrics_seller)
         if latest is not None and latest.metrics_trusted is False
         else "",
@@ -447,9 +476,16 @@ def _card_context(site: Site) -> dict[str, Any]:
             }
             for offer in history
         ],
-        "extras": [offer for offer in current if offer.extra],
-        "notes": site.notes.select_related("author", "product").order_by("-created_at", "-pk"),
+        "extras": extras,
+        "extras_summary": " · ".join(
+            f"{offer.seller_name} · {fields_text(len(offer.extra or {}))}" for offer in extras
+        )
+        or "нет",
+        "notes": notes,
+        "notes_summary": notes_summary(notes),
         "products": Product.objects.order_by("pk"),
+        # Новая заметка — к рабочему продукту пользователя.
+        "note_product": working_product,
         "fix_url": reverse("admin:sites_site_card_fix", args=[site.pk]),
         "keep_url": reverse("admin:sites_site_card_keep", args=[site.pk]),
         "note_url": reverse("admin:sites_site_card_note", args=[site.pk]),
@@ -548,6 +584,7 @@ def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
         rows.append(
             {
                 "when": f"{timezone.localtime(scan.checked_at):%d.%m.%Y %H:%M}",
+                "day": _day(scan.checked_at),
                 "percent": gray_scan.percent_text(scan.ratio),
                 "zone": zone,
                 "zone_title": gray_scan.ZONE_TITLES[zone] if zone else "",

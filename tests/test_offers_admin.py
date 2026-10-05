@@ -194,7 +194,7 @@ class TestCard:
         self, admin_client: Client, site: Site, two_sellers: tuple[SitePrice, ...]
     ) -> None:
         offers_ = _card(admin_client, site)
-        assert "Предложения продавцов" in offers_
+        assert "Цена и предложения" in offers_
         assert "Сделать рабочей" in offers_
         assert "рабочая" in offers_
         assert "$170" in offers_ and "≈&nbsp;€150" in offers_

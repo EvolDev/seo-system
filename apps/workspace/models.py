@@ -3,7 +3,9 @@
 from typing import ClassVar
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
+from django.db.models import Value
 from django.db.models.functions import Lower
 
 from apps.sites.models import Product
@@ -54,11 +56,12 @@ class SavedFilter(models.Model):
 
 
 class UserSettings(models.Model):
-    """Личные настройки пользователя: рабочий продукт (E9-12, ADR-057).
+    """Личные настройки пользователя: рабочий продукт (E9-12, ADR-057) и
+    свёрнутые разделы карточки площадки (E9-13, ADR-058).
 
     Рабочий продукт — с ним открываются экраны с фильтром продукта и главная,
     он подставлен в новые записи. Пусто — первый активный продукт. Строка
-    заводится при первом выборе в шапке. Удалили продукт (ADR-036) — выбор
+    заводится при первом выборе. Удалили продукт (ADR-036) — выбор
     пустеет, а не мешает удалению.
     """
 
@@ -77,6 +80,13 @@ class UserSettings(models.Model):
         verbose_name="рабочий продукт",
         related_name="+",
         db_index=False,
+    )
+    # Ключи разделов карточки (apps/sites/card.py SECTIONS); не свёрнут — нет в списке.
+    card_closed = ArrayField(
+        models.TextField(),
+        verbose_name="свёрнутые разделы карточки",
+        default=list,
+        db_default=Value([], output_field=ArrayField(models.TextField())),
     )
     updated_at = models.DateTimeField("изменено", db_default=PgNow())
 

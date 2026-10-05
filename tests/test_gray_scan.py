@@ -190,7 +190,7 @@ class TestCard:
         scan = GrayScan.objects.get(site=site)
         assert (scan.total_indexed, scan.gray_hits, scan.ratio) == (375, 12, Decimal("3.20"))
         page = response.content.decode()
-        assert "Последний замер" in page
+        assert 'class="seo-gray-latest"' in page
         assert "3,2 %" in page
         assert "зелёная зона" in page
 
@@ -288,7 +288,7 @@ class TestDomainTools:
 
     def test_card_panel_title_is_a_link(self, admin_client: Client, site: Site) -> None:
         page = _card(admin_client, site)
-        title = page[page.index('<h2 class="seo-panel-title">') :]
+        title = page[page.index('<h2 class="seo-panel-title seo-card-title">') :]
         title = title[: title.index("</h2>")]
         assert self.OPEN in title
         assert 'data-copy="youengage.me"' in title
@@ -296,7 +296,7 @@ class TestDomainTools:
     def test_card_page_title_is_a_link(self, admin_client: Client, site: Site) -> None:
         url = reverse("admin:sites_site_card", args=[site.pk])
         page = admin_client.get(url).content.decode()
-        title = page[page.index('<h1 class="seo-site-title">') :]
+        title = page[page.index('<h1 class="seo-panel-title seo-card-title">') :]
         title = title[: title.index("</h1>")]
         assert self.OPEN in title
         assert ">youengage.me</a>" in title

@@ -264,7 +264,9 @@
       var html = await response.text();
       if (controller !== mine) return;
       var keep = form ? snapshot : null;
-      await show(html);
+      // Форма карточки (заметка, «Сделать рабочей», замер) — новая карточка на
+      // том же месте прокрутки: человек остаётся у раздела, где нажал.
+      await show(html, Boolean(form && form.hasAttribute("data-card-form")));
       // Правки после ошибки по-прежнему не сохранены: сравниваем с тем, что
       // было до них. Куда шли после записи — забываем: исправили ошибку и
       // нажали «Сохранить» — панель просто закроется.
@@ -276,7 +278,7 @@
     throw new Error("сервер ответил " + response.status);
   }
 
-  async function show(html) {
+  async function show(html, keepScroll) {
     // Ответ пришёл: «Загружаю…» уже не нужно — иначе таймер стёр бы содержимое,
     // которое как раз вставляется. Панель покажем, когда оно будет готово.
     clearTimeout(revealTimer);
@@ -288,10 +290,11 @@
     }
     toastMessages(doc);
     var source = doc.getElementById("content") || doc.body;
+    var top = body.scrollTop;
     var added = await window.seoNav.mount(body, doc, source);
     styles = styles.concat(added);
     snapshot = serialize(mainForm());
-    body.scrollTop = 0;
+    body.scrollTop = keepScroll ? top : 0;
     reveal();
     if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
   }

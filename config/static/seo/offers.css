@@ -1,4 +1,4 @@
-/* Цены, предложения и карточка площадки (E1-07, ADR-043).
+/* Цены и предложения на экранах площадок (E1-07, ADR-043).
    Цвета — переменные расцветок (admin-palettes.css), а для стрелок свои:
    ▼ зелёная — дешевле, ▲ красная — дороже, как на бирже. У тёмных
    расцветок зелёный светлее, чтобы читался на тёмном фоне. */
@@ -67,36 +67,11 @@ html[data-palette="ahrefs"] body.admin-interface {
 }
 .seo-notes:hover { border-color: var(--link-fg, #2a65a8); }
 
-/* Карточка площадки — одинаковая в панели справа (seo/panel.css) и на странице. */
-.seo-card-content { display: flex; flex-direction: column; gap: 18px; max-width: 1100px; padding-bottom: 24px; }
-.seo-card-content h3 {
-  margin: 0 0 8px;
-  color: var(--body-quiet-color, #666);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  background: none;
-  padding: 0;
-}
-.seo-card-summary { display: flex; flex-direction: column; gap: 4px; }
-.seo-card-status { font-size: 0.8125rem; }
-.seo-card-status a { margin-left: 6px; font-size: 0.75rem; }
-.seo-card-working { font-size: 0.9375rem; }
+/* Карточка площадки — seo/site-card.css (E9-13). Общие для экранов: */
 .seo-table-wrap { overflow-x: auto; }
-.seo-card-table { width: 100%; }
-.seo-card-table td, .seo-card-table th { vertical-align: middle; }
-.seo-card-table tr.seo-working td { background: var(--seo-down-bg); }
-.seo-card-table form { margin: 0; }
 /* Кнопки (.seo-btn, .seo-btn-primary, .seo-run-btn) — в seo/admin-palettes.css: цвета и форма — от расцветки. */
 .seo-inline-form { margin-top: 8px; }
 .seo-kv { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.8125rem; }
-.seo-extra + .seo-extra { margin-top: 8px; }
-.seo-note-form { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
-.seo-note-form textarea { width: 100%; box-sizing: border-box; }
-.seo-notes-list { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.seo-notes-list li { list-style: none; padding: 0; }
-.seo-notes-list .seo-sub { display: block; }
 
 /* Флаг страны 16×11 — кусок общей картинки django-countries (flags/sprite-hq.css):
    эмодзи-флаги Windows не рисует (ADR-045). */

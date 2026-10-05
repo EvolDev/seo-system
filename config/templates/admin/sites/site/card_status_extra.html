@@ -1,0 +1,10 @@
+{% comment %}
+Решение по продукту в шапке карточки (E9-13): «история (N)» смен статуса
+(ADR-049) и метка «ссылается на продукт» по выгрузке Ahrefs (ADR-051).
+Контекст: status — строка statuses из _card_context.
+{% endcomment %}{% if status.ref %}{% if status.ref.is_linking %}<span class="seo-card-badge" title="По выгрузке Ahrefs от {{ status.ref.seen_on|date:'d.m.Y' }}">ссылается на {{ status.row.product.name }}{% if status.ref.first_seen_at %} с {{ status.ref.first_seen_at|date:"d.m.Y" }}{% endif %}</span>{% elif status.ref.lost_at %}<span class="seo-card-badge seo-card-badge-lost" title="По выгрузке Ahrefs">ссылка на {{ status.row.product.name }} пропала {{ status.ref.lost_at|date:"d.m.Y" }}</span>{% else %}<span class="seo-card-badge seo-card-badge-lost" title="По выгрузке Ahrefs">ссылки на {{ status.row.product.name }} нет в выгрузке Ahrefs с {{ status.ref.missing_since|date:"d.m.Y" }}</span>{% endif %}{% endif %}{% if status.history %}<details class="seo-status-history">
+<summary>история ({{ status.history|length }})</summary>
+<ul class="seo-status-list">
+{% for change in status.history %}<li><span class="seo-sub">{{ change.when }}</span> {{ change.change }} · <span class="seo-sub">{{ change.who }}</span></li>{% endfor %}
+</ul>
+</details>{% endif %}

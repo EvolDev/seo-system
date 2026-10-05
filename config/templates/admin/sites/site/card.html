@@ -3,17 +3,17 @@
 Карточка площадки отдельной страницей — если панель не открылась (нет
 скрипта) или ссылку открыли в новой вкладке. Содержимое — card_body.html.
 {% endcomment %}
-{% load static seo_assets seo_docs %}
+{% load static seo_assets %}
 
 {% block extrastyle %}{{ block.super }}
 <link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/status-history.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/gray.css' %}">
+<link rel="stylesheet" href="{% asset 'flags/sprite-hq.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/site-card.css' %}">
 {% endblock %}
 
-{% block content_title %}
-<h1 class="seo-site-title"><a href="{{ panel_title_url }}" target="_blank" rel="noopener noreferrer" title="Открыть сайт в новой вкладке">{{ title }}</a> {{ panel_title_tools }}{% screen_help %}</h1>
-{% endblock %}
+{% block content_title %}{# Название, значки и «?» — в шапке карточки (card_body.html). #}{% endblock %}
 
 {% block breadcrumbs %}
 <div class="breadcrumbs">

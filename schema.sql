@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.16 от 05.10.2026 — свёрнутые разделы карточки площадки у пользователя (ADR-058)
 -- Версия 1.15 от 05.10.2026 — рабочий продукт пользователя (ADR-057)
 -- Версия 1.14 от 04.10.2026 — счета продавцов (ADR-055)
 -- Версия 1.13 от 04.10.2026 — загрузки размещений и ссылающиеся домены Ahrefs (ADR-051)
@@ -778,10 +779,12 @@ CREATE UNIQUE INDEX saved_filters_name_key ON saved_filters (user_id, screen, lo
 
 -- Личные настройки пользователя (ADR-057): рабочий продукт — с ним открываются
 -- экраны с фильтром продукта и главная. Пусто — первый активный продукт.
+-- card_closed — свёрнутые разделы карточки площадки, на все карточки (ADR-058).
 CREATE TABLE user_settings (
-    user_id     integer PRIMARY KEY REFERENCES auth_user(id),
-    product_id  bigint REFERENCES products(id) ON DELETE SET NULL,
-    updated_at  timestamptz NOT NULL DEFAULT now()
+    user_id      integer PRIMARY KEY REFERENCES auth_user(id),
+    product_id   bigint REFERENCES products(id) ON DELETE SET NULL,
+    card_closed  text[] NOT NULL DEFAULT '{}',
+    updated_at   timestamptz NOT NULL DEFAULT now()
 );
 
 -- ---------- Функции ----------

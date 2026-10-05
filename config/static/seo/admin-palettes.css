@@ -363,6 +363,7 @@ body.admin-interface .seo-run-btn:not(.seo-btn) { min-height: 38px; padding: 8px
 
 /* Внутри таблиц, карточки и фильтров — компактнее. */
 body.admin-interface .seo-card-table .seo-btn,
+body.admin-interface .seo-btn.seo-btn-small,
 body.admin-interface .seo-decision .seo-btn,
 body.admin-interface .seo-upload-table .seo-btn,
 body.admin-interface .numericrangefilter .seo-btn,

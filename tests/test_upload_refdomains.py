@@ -192,7 +192,7 @@ class TestSitesScreen:
     def test_card_says_it_links(self, admin_client: Client) -> None:
         site = Site.objects.get(domain="linking.com")
         page = admin_client.get(reverse("admin:sites_site_card", args=[site.pk])).content.decode()
-        assert "ссылается на Convertio — по выгрузке Ahrefs от 01.10.2026" in page
+        assert 'title="По выгрузке Ahrefs от 01.10.2026">ссылается на Convertio' in page
         lost = Site.objects.get(domain="lost.com")
         page = admin_client.get(reverse("admin:sites_site_card", args=[lost.pk])).content.decode()
         assert "ссылки на Convertio нет в выгрузке Ahrefs с 01.10.2026" in page

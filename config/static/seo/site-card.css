@@ -1,0 +1,325 @@
+/* Карточка площадки (E9-13, ADR-058; прототип docs/prototypes/site-card.html).
+   Одна разметка — в панели справа (seo/panel.css) и на отдельной странице.
+   Цвета — переменные расцветок (admin-palettes.css) и offers.css: зелёная —
+   «рабочая», «дешевле», синяя — «новое», продукт заметки; красная — отказ.
+
+   Шапка закреплена вверху (.seo-panel-head — sticky): домен, плитки, решение,
+   переходы к разделам. Разделы — блоками; свёрнутый (.seo-closed) — строкой со
+   сводкой. Переход к разделу учитывает высоту шапки: --seo-card-head ставит
+   seo/site-card.js. */
+
+/* Ширина в панели — около 860 px с полями; уже — если справа мало места
+   (предел ставит seo/panel.js), на узком экране — во всю ширину. */
+.seo-panel-body .seo-card { width: 812px; max-width: 100%; }
+.seo-card-page .seo-card { max-width: 960px; }
+.seo-card { --seo-card-gap: 20px; padding-bottom: 32px; font-size: 0.875rem; line-height: 1.45; }
+.seo-card a { text-decoration: none; }
+.seo-card a:hover { text-decoration: underline; }
+.seo-card .seo-btn:hover { text-decoration: none; }
+
+/* ---------- Шапка ---------- */
+
+.seo-panel-head.seo-card-head { display: block; padding-bottom: 0; margin-bottom: var(--seo-card-gap); }
+.seo-card-page .seo-panel-head.seo-card-head { margin: 0 0 var(--seo-card-gap); padding: 12px 0 0; }
+.seo-card-titlerow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; }
+body.admin-interface .seo-card-title { margin: 0; font-size: 1.25rem; }
+.seo-card-title a { color: inherit; }
+.seo-card-titlerow .seo-panel-tools { margin-left: auto; font-size: 0.8125rem; }
+
+/* Плитки: подпись над значением, в ряд; в узкой панели переносятся. */
+.seo-card-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 8px;
+  margin: 14px 0 12px;
+}
+.seo-card-fact { min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--darkened-bg, #f5f5f7); }
+.seo-card-fact dt {
+  margin: 0 0 2px;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.seo-card-fact dd {
+  margin: 0;
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Мелкая строка (дата замера, исходная цена) — переносится, а не обрезается. */
+.seo-card-fact dd small {
+  display: block;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.75rem;
+  font-weight: 400;
+  white-space: normal;
+}
+.seo-card-fact .seo-flag { margin-right: 4px; }
+.seo-card-zone { display: inline-block; padding: 0 7px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.seo-card-zone.seo-gray-green { background: var(--seo-down-bg); color: var(--seo-down); }
+.seo-card-zone.seo-gray-yellow { background: var(--seo-mark-bg); color: var(--seo-mark); }
+.seo-card-zone.seo-gray-red { background: var(--seo-up-bg); color: var(--seo-up); }
+
+/* Решение: рабочий продукт — крупно, остальные — строкой ниже. */
+.seo-card-decision { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding-bottom: 10px; }
+.seo-card-product { font-weight: 600; }
+.seo-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.seo-card-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.seo-tone-info { background: var(--seo-info-bg); color: var(--seo-info); }
+.seo-tone-ok { background: var(--seo-down-bg); color: var(--seo-down); }
+.seo-tone-no { background: var(--seo-up-bg); color: var(--seo-up); }
+.seo-tone-mark { background: var(--seo-mark-bg); color: var(--seo-mark); }
+.seo-card-reason { color: var(--body-medium-color, #444); font-size: 0.8125rem; }
+.seo-card-decision .seo-status-history { margin-left: 0; font-size: 0.8125rem; }
+.seo-card-decision .seo-status-history[open] { flex-basis: 100%; }
+.seo-card-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--seo-info-bg);
+  color: var(--seo-info);
+  font-size: 0.75rem;
+  cursor: help;
+}
+.seo-card-badge.seo-card-badge-lost { background: var(--darkened-bg, #f0f0f0); color: var(--body-quiet-color, #666); }
+.seo-card-others { display: flex; flex-wrap: wrap; gap: 4px 18px; padding-bottom: 10px; color: var(--body-medium-color, #444); font-size: 0.8125rem; }
+.seo-card-other .seo-status-history { margin-left: 4px; }
+/* История в закреплённой шапке — не выше пары строк, дальше прокрутка. */
+.seo-card-head ul.seo-status-list { max-height: 7.5em; overflow-y: auto; }
+
+/* Переходы к разделам — вкладками-якорями под шапкой. */
+.seo-card-jump { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 2px; margin: 0 -8px; }
+.seo-card-jump a {
+  padding: 9px 10px 10px;
+  border-bottom: 2px solid transparent;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.seo-card .seo-card-jump a:hover { color: var(--body-fg, #333); text-decoration: none; }
+.seo-card-jump a.seo-on { border-bottom-color: var(--seo-accent, var(--link-fg)); color: var(--body-fg, #333); }
+.seo-card-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--selected-bg, #e8e8ed);
+  color: var(--body-medium-color, #444);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.seo-card-all {
+  align-self: center;
+  margin-left: auto;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--seo-accent-text, var(--link-fg));
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.seo-card-all:hover { text-decoration: underline; }
+
+/* ---------- Разделы ---------- */
+
+.seo-card-sections { display: flex; flex-direction: column; gap: var(--seo-card-gap); }
+.seo-card-sec {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--darkened-bg, #f5f5f7);
+  scroll-margin-top: calc(var(--seo-card-head, 0px) + 12px);
+}
+.seo-card-sec-h { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin: 0 0 12px; }
+body.admin-interface .seo-card-sec-h h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: var(--body-fg, #333);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.seo-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.seo-card-toggle:focus-visible { outline: 2px solid var(--seo-accent); outline-offset: 3px; border-radius: 4px; }
+.seo-card-chev {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--body-quiet-color, #666);
+  transition: transform .15s;
+}
+.seo-card-chev::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.seo-card-toggle:hover .seo-card-chev { background: var(--selected-bg, #e8e8ed); color: var(--body-fg, #333); }
+.seo-card-sec.seo-closed .seo-card-chev { transform: rotate(-90deg); }
+.seo-card-sec-name { flex: none; }
+.seo-card-sec-summary {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-card-sec.seo-closed { padding-block: 12px; }
+.seo-card-sec.seo-closed .seo-card-sec-h { margin: 0; }
+.seo-card-sec.seo-closed .seo-card-sec-summary { display: inline; }
+.seo-card-sec.seo-closed .seo-card-sec-body { display: none; }
+.seo-card-hint { margin: 10px 0 0; color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+body.admin-interface .seo-card-sec .seo-btn.seo-btn-small { min-height: 28px; padding: 4px 12px; font-size: 0.75rem; }
+
+.seo-card .seo-warnline {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--seo-mark-bg);
+  color: var(--seo-mark);
+  font-size: 0.8125rem;
+}
+.seo-card details.seo-card-more { margin-top: 12px; }
+.seo-card details.seo-card-more > summary { color: var(--seo-accent-text, var(--link-fg)); font-size: 0.8125rem; cursor: pointer; }
+
+/* Цена */
+.seo-card-working { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; }
+.seo-card-big { font-size: 1.375rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.seo-card-big .seo-approx { font-size: 0.9375rem; font-weight: 400; }
+.seo-card-kv { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 14px; color: var(--body-quiet-color, #666); font-size: 0.8125rem; }
+.seo-card-kv b { color: var(--body-fg, #333); font-weight: 600; }
+.seo-card .seo-table-wrap { overflow-x: auto; }
+.seo-card .seo-card-table { width: 100%; border-collapse: collapse; background: none; font-size: 0.8125rem; }
+.seo-card .seo-card-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline-color, #ddd);
+  background: none;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.seo-card .seo-card-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--hairline-color, #ddd);
+  background: none;
+  vertical-align: middle;
+}
+.seo-card .seo-card-table tr:last-child td { border-bottom: 0; }
+.seo-card .seo-card-table tr.seo-working td { background: var(--seo-down-bg); }
+.seo-card .seo-card-table tr.seo-working td:first-child { border-radius: 8px 0 0 8px; }
+.seo-card .seo-card-table tr.seo-working td:last-child { border-radius: 0 8px 8px 0; }
+.seo-card .seo-card-table form { margin: 0; }
+.seo-card .seo-card-table .seo-right { text-align: right; }
+.seo-card .seo-inline-form { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* Заметки: поле сверху, лента — новые сверху; у каждой — кто, к какому продукту, когда. */
+.seo-note-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.seo-card .seo-note-form textarea {
+  width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 10px;
+  background: var(--body-bg, #fff);
+  color: var(--body-fg, #333);
+  font: inherit;
+  resize: vertical;
+}
+.seo-note-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.seo-note-feed { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.seo-card .seo-note-feed > li { list-style: none; padding: 0; }
+.seo-note { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; }
+.seo-note-ava {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--seo-info-bg);
+  color: var(--seo-info);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.seo-note-bubble {
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 4px 12px 12px 12px;
+  background: var(--body-bg, #fff);
+}
+.seo-note-who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-bottom: 4px; }
+.seo-note-who b { font-weight: 700; }
+.seo-note-who time { color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-note-text { overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Системная — из файла: приглушённая, пунктиром. */
+.seo-note-system .seo-note-ava { background: var(--selected-bg, #e8e8ed); color: var(--body-quiet-color, #666); font-size: 1rem; font-weight: 400; }
+.seo-note-system .seo-note-bubble { border-style: dashed; background: none; }
+.seo-note-system .seo-note-who b { color: var(--body-medium-color, #444); font-weight: 600; }
+.seo-note-system .seo-note-text { color: var(--body-medium-color, #444); font-size: 0.8125rem; }
+
+/* Серость */
+.seo-card .seo-gray-buttons { display: inline-flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.seo-card .seo-gray-latest { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 0 0 12px; }
+.seo-card .seo-gray-form { align-items: flex-end; margin: 0; }
+.seo-card .seo-gray-form label { flex-direction: column; align-items: flex-start; gap: 3px; color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-card .seo-gray-result { padding-bottom: 6px; font-weight: 600; }
+
+/* Данные из файлов */
+.seo-card .seo-extra + .seo-extra { margin-top: 12px; }
+.seo-card .seo-extra > .seo-sub { margin-bottom: 8px; font-size: 0.8125rem; }
+.seo-card-data { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; font-size: 0.8125rem; }
+.seo-card-data dt { color: var(--body-quiet-color, #666); font-weight: 400; }
+.seo-card-data dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+/* Узкая панель или экран: таблица предложений прокручивается сама, шапка ниже. */
+@media (max-width: 899px) {
+  .seo-panel-body .seo-card { width: auto; }
+  .seo-card-all { margin-left: 0; }
+}

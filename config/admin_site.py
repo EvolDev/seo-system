@@ -135,6 +135,12 @@ class SeoAdminSite(admin.AdminSite):
                 self.admin_view(require_POST(views.working_product_view)),
                 name="working_product",
             ),
+            # Свёрнутые разделы карточки площадки (E9-13, ADR-058).
+            path(
+                "card-sections/",
+                self.admin_view(require_POST(views.card_sections_view)),
+                name="card_sections",
+            ),
         ]
         return own + super().get_urls()
 

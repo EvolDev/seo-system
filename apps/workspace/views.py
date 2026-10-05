@@ -1,5 +1,6 @@
 """«Мои фильтры»: сохранить, удалить и вернуть набор (E9-10, ADR-050);
-рабочий продукт из шапки (E9-12, ADR-057).
+рабочий продукт из шапки (E9-12, ADR-057); свёрнутые разделы карточки
+площадки (E9-13, ADR-058).
 
 Блок над колонкой фильтров (`seo/saved-filters.js`) шлёт POST и получает JSON:
 подпись для сообщения и наборы списка заново — селектор перерисовывается без
@@ -14,13 +15,21 @@ from django.contrib.admin.exceptions import NotRegistered
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, HttpResponseRedirect, JsonResponse, QueryDict
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponseBadRequest,
+    HttpResponseRedirect,
+    JsonResponse,
+    QueryDict,
+)
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.sites.models import Product
+from apps.workspace import card
 from apps.workspace.models import SavedFilter
 from apps.workspace.products import choose_product, without_product
 from apps.workspace.saved_filters import NAME_MAX, as_json, clean_query, sets_of
@@ -160,6 +169,21 @@ def working_product_view(request: HttpRequest) -> HttpResponseRedirect:
     path, _, query = target.partition("?")
     rest = without_product(QueryDict(query))
     return HttpResponseRedirect(f"{path}?{rest}" if rest else path)
+
+
+def card_sections_view(request: HttpRequest) -> JsonResponse | HttpResponseBadRequest:
+    """Свернуть или развернуть раздел карточки площадки — на все карточки.
+
+    `section` — ключ раздела или `all` («Свернуть все»), `closed` — 1 или 0.
+    Неизвестный раздел — ошибка разметки, а не вопрос человеку: 400.
+    """
+    section = request.POST.get("section", "")
+    sections = card.SECTIONS if section == "all" else (section,)
+    if not set(sections) <= set(card.SECTIONS):
+        return HttpResponseBadRequest("Нет такого раздела карточки.")
+    closed = request.POST.get("closed") == "1"
+    keys = card.set_closed(request.user, sections, closed)  # type: ignore[arg-type]
+    return JsonResponse({"closed": keys})
 
 
 def _number(value: str | None) -> int:

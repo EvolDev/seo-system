@@ -55,9 +55,8 @@
 .seo-panel-body .help,
 .seo-panel-body .description,
 .seo-panel-body .errornote,
-.seo-panel-body .seo-card-summary,
 .seo-panel-body .seo-kv,
-.seo-panel-body .seo-notes-list { contain: inline-size; }
+.seo-panel-body .seo-note-feed { contain: inline-size; }
 /* Значение «только для чтения» (история проверок, run_id) — тоже не раздвигает,
    но в строке с подписью занимает всё оставшееся место: иначе сжалось бы в
    столбик по букве. */
