@@ -44,7 +44,7 @@ def _published(
     return Placement.objects.create(
         site=Site.objects.create(domain=domain),
         product=product,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         published_at=when,
         price_paid_cents=cents,
         currency=currency,

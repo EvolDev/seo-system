@@ -26,17 +26,17 @@ from django.db.models import TextChoices
 
 from apps.keywords.models import AnchorType
 from apps.observability.models import CheckStatus, LlmStatus, Performer, TaskStatus
-from apps.placements.models import InvoiceStatus, PlacementStatus
+from apps.placements.models import InvoiceStatus
 from apps.sites.models import (
     AuditAuthor,
     AuditVerdict,
     MetricSource,
     PlacementType,
     ReviewGroup,
-    SiteStatus,
     StatusSource,
     UploadKind,
     UploadStatus,
+    WorkStatus,
 )
 
 TABLES = [
@@ -155,11 +155,10 @@ TRIGGERS = [
 ]
 
 ENUMS: dict[str, type[TextChoices]] = {
-    "site_status": SiteStatus,
+    "work_status": WorkStatus,
     "metric_source": MetricSource,
     "audit_verdict": AuditVerdict,
     "audit_author": AuditAuthor,
-    "placement_status": PlacementStatus,
     "placement_type": PlacementType,
     "anchor_type": AnchorType,
     "check_status": CheckStatus,

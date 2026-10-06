@@ -187,11 +187,11 @@ def test_status_fields_stay_dropdowns(admin_client: Client) -> None:
 
     response = admin_client.post(
         reverse("admin:sites_productsite_change", args=[row.pk]),
-        {"status": SiteStatus.APPROVED, "reject_reason": "", "content_profile": "null"},
+        {"status": SiteStatus.IN_WORK, "comment": "", "content_profile": "null"},
     )
     assert response.status_code == 302
     row.refresh_from_db()
-    assert row.status == SiteStatus.APPROVED
+    assert row.status == SiteStatus.IN_WORK
 
     placement = admin_client.get(reverse("admin:placements_placement_add"))
     assert isinstance(placement.context["adminform"].form.fields["status"].widget, ChoiceButtons)

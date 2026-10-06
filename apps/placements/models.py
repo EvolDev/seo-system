@@ -20,29 +20,24 @@ from apps.keywords.models import AnchorType
 from apps.sites import statuses
 
 # Формат размещения — колонка «Тип ссылки» Excel; общий с ценами площадки (ADR-043).
-from apps.sites.models import PlacementType, SiteStatus, StatusSource
+from apps.sites.models import PlacementType, StatusSource, WorkStatus
 from config.changes import stamped
 from config.db import PgCurrentDate, PgEnumField, PgNow
 from config.run_id import current_run_id
 
-
-class PlacementStatus(models.TextChoices):
-    PLANNED = "planned", "Запланировано"
-    ORDERED = "ordered", "Заявка отправлена"
-    WRITING = "writing", "Пишется"
-    REVIEW = "review", "На проверке"
-    PUBLISHED = "published", "Опубликовано"
-    REJECTED = "rejected", "Отклонено"
-    CANCELLED = "cancelled", "Отменено"
+# Статус размещения — тот же словарь, что у площадки (ADR-062): одно состояние
+# называется одинаково в «Площадках» и в «Размещениях».
+PlacementStatus = WorkStatus
 
 
-# Какой статус площадки у продукта ставит статус размещения (ADR-047): заявка в
-# работе — «Заявка отправлена», публикация — «Размещались». Остальные не ставят.
-SITE_STATUS_BY_PLACEMENT: dict[str, SiteStatus] = {
-    PlacementStatus.ORDERED: SiteStatus.ORDERED,
-    PlacementStatus.WRITING: SiteStatus.ORDERED,
-    PlacementStatus.REVIEW: SiteStatus.ORDERED,
-    PlacementStatus.PUBLISHED: SiteStatus.PLACED,
+# Какой статус площадки у продукта ставит статус размещения (ADR-047, ADR-062):
+# он же и ставит — словарь общий. «Новая» и «Просмотрено» у размещения не
+# встречаются, «Чёрный список» система не двигает.
+SITE_STATUS_BY_PLACEMENT: dict[str, WorkStatus] = {
+    WorkStatus.IN_WORK: WorkStatus.IN_WORK,
+    WorkStatus.ORDERED: WorkStatus.ORDERED,
+    WorkStatus.WRITING: WorkStatus.WRITING,
+    WorkStatus.PLACED: WorkStatus.PLACED,
 }
 # Поля, от которых зависит статус площадки; в update_fields — имя или колонка.
 _SITE_STATUS_FIELDS = frozenset({"status", "site", "site_id", "product", "product_id"})
@@ -74,10 +69,10 @@ class Placement(models.Model):
     article_url = models.TextField("адрес статьи", null=True, blank=True)
     status = PgEnumField(
         "статус",
-        enum_type="placement_status",
-        choices=PlacementStatus.choices,
-        default=PlacementStatus.PLANNED,
-        db_default=PlacementStatus.PLANNED,
+        enum_type="work_status",
+        choices=WorkStatus.choices,
+        default=WorkStatus.IN_WORK,
+        db_default=WorkStatus.IN_WORK,
     )
     collaborator_order_id = models.TextField("номер заявки", null=True, blank=True)
     placement_type = PgEnumField(
@@ -202,12 +197,12 @@ class PlacementStatusChange(models.Model):
     )
     from_status = PgEnumField(
         "был",
-        enum_type="placement_status",
-        choices=PlacementStatus.choices,
+        enum_type="work_status",
+        choices=WorkStatus.choices,
         null=True,
         blank=True,
     )
-    to_status = PgEnumField("стал", enum_type="placement_status", choices=PlacementStatus.choices)
+    to_status = PgEnumField("стал", enum_type="work_status", choices=WorkStatus.choices)
     source = PgEnumField(
         "откуда", enum_type="status_source", choices=StatusSource.choices, null=True, blank=True
     )

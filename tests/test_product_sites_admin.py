@@ -145,7 +145,7 @@ class TestWorked:
         Placement.objects.create(site=_site("planned.com"), product=convertio)
         # Статья Clideo для Convertio «уже работали» не делает.
         Placement.objects.create(
-            site=_site("clideo.com"), product=clideo, status=PlacementStatus.PUBLISHED
+            site=_site("clideo.com"), product=clideo, status=PlacementStatus.PLACED
         )
 
     @pytest.mark.usefixtures("sites")
@@ -174,8 +174,8 @@ class TestFilters:
         low = _site("low.com", dr=10, organic_traffic=100)
         mid = _site("mid.com", dr=50, organic_traffic=5000, language="de")
         _site("high.com", dr=90, organic_traffic=90000)
-        _status(low, convertio, SiteStatus.APPROVED)
-        Placement.objects.create(site=mid, product=convertio, status=PlacementStatus.PUBLISHED)
+        _status(low, convertio, SiteStatus.IN_WORK)
+        Placement.objects.create(site=mid, product=convertio, status=PlacementStatus.PLACED)
 
     @pytest.mark.usefixtures("sites")
     def test_dr_range(self, admin_client: Client) -> None:
@@ -189,7 +189,7 @@ class TestFilters:
 
     @pytest.mark.usefixtures("sites")
     def test_status(self, admin_client: Client) -> None:
-        assert _domains(admin_client, list="all", status="approved") == {"low.com"}
+        assert _domains(admin_client, list="all", status="in_work") == {"low.com"}
 
     @pytest.mark.usefixtures("sites")
     def test_language(self, admin_client: Client) -> None:
@@ -379,7 +379,7 @@ def test_query_count(
         SiteListItem.objects.create(site_list=site_list, site=site)
         SiteCountryMetric.objects.create(site=site, country="us", organic_traffic=number)
         if number % 3 == 0:
-            Placement.objects.create(site=site, product=clideo, status=PlacementStatus.PUBLISHED)
+            Placement.objects.create(site=site, product=clideo, status=PlacementStatus.PLACED)
     ExchangeRate.objects.create(currency="USD", rate_date=datetime(2026, 9, 30).date(), rate=1.1355)
     params = {
         "worked": "no",

@@ -60,10 +60,10 @@ class TestProductSites:
     def test_repeat_call_keeps_decision(self) -> None:
         Product.objects.create(name="Convertio", domain="convertio.co")
         Site.objects.create(domain="example.com")
-        ProductSite.objects.update(status=SiteStatus.DISCARDED, reject_reason="nofollow")
+        ProductSite.objects.update(status=SiteStatus.DISCARDED, comment="nofollow")
         ensure_product_sites()
         row = ProductSite.objects.get()
-        assert (row.status, row.reject_reason) == (SiteStatus.DISCARDED, "nofollow")
+        assert (row.status, row.comment) == (SiteStatus.DISCARDED, "nofollow")
 
     def test_fills_missing_pairs(self) -> None:
         # Например, после bulk_create площадок, который не вызывает save().
@@ -83,7 +83,7 @@ class TestProductSites:
         row = ProductSite.objects.get()
         row.save()
         assert ProductSite.objects.get().imported_undecided is True
-        row.status = SiteStatus.APPROVED
+        row.status = SiteStatus.IN_WORK
         row.save(update_fields=update_fields)
         assert ProductSite.objects.get().imported_undecided is False
 

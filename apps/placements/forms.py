@@ -36,7 +36,7 @@ from config.forms import ChoiceButtons, DayField, DayFieldsForm, DayInput, Money
 # Какую дату ставит кнопка статуса, если поле пустое.
 STATUS_FILLS: dict[str, str] = {
     PlacementStatus.ORDERED: "ordered_at",
-    PlacementStatus.PUBLISHED: "published_at",
+    PlacementStatus.PLACED: "published_at",
 }
 
 
@@ -51,7 +51,9 @@ class PlacementForm(DayFieldsForm):
         model = Placement
         fields = "__all__"
         widgets: ClassVar[dict[str, forms.Widget]] = {
-            "status": ChoiceButtons(rows=(PlacementStatus.REJECTED,), fills=STATUS_FILLS),
+            "status": ChoiceButtons(
+                rows=(PlacementStatus.IN_WORK, PlacementStatus.DISCARDED), fills=STATUS_FILLS
+            ),
         }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

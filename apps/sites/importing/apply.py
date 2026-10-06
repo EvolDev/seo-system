@@ -7,7 +7,7 @@
   обновляется, новая — новая строка. Цены — предложения Collaborator
   (ADR-043): первая цена площадки становится рабочей сама, зафиксированную
   рабочую цену импорт не меняет — другая цена ждёт решения человека;
-- решения и работа — статус по продукту, причина отказа, размещения,
+- решения и работа — статус по продукту, комментарий, размещения,
   ссылки — только дополняются: недостающее создаётся, пустое
   заполняется, статусы двигаются вперёд. Расхождение — в отчёт. У
   размещения «Источник» — продавец (нет такого — заводится), «Итог цена»
@@ -492,7 +492,7 @@ class Importer:
 
     @staticmethod
     def _note_or_rejection(data: SiteData) -> tuple[str | None, str | None]:
-        """«Комментарий к площадке»: (заметка, причина отказа) — одно из двух."""
+        """«Комментарий к площадке»: (заметка, комментарий к статусу) — одно из двух."""
         if values.is_rejection(data.comment):
             return None, data.comment
         return data.comment, None
@@ -508,7 +508,7 @@ class Importer:
                 )
             # Заявка — «Заявка отправлена», публикация — «Размещались», как у
             # размещения в админке; запланированное — «Одобрена».
-            return SITE_STATUS_BY_PLACEMENT.get(data.placement.status, SiteStatus.APPROVED), None
+            return SITE_STATUS_BY_PLACEMENT.get(data.placement.status, SiteStatus.IN_WORK), None
         if reason:
             return SiteStatus.DISCARDED, reason
         return None, None
@@ -534,13 +534,13 @@ class Importer:
         current = row.status
         if current == status:
             if reason:
-                self._fill(row, "reject_reason", reason, where, Section.DECISION_CONFLICTS, changed)
+                self._fill(row, "comment", reason, where, Section.DECISION_CONFLICTS, changed)
         elif current in statuses.replaceable(status, fact=fact):
             row.status = status
             changed.append("status")
             if reason:
-                row.reject_reason = reason
-                changed.append("reject_reason")
+                row.comment = reason
+                changed.append("comment")
         elif not _ahead(status, current, statuses.LADDER):
             # База не просто впереди по цепочке, а решила иначе: не трогаем.
             self.report.issue(
@@ -605,7 +605,7 @@ class Importer:
         if _ahead(current, wanted.status, PLACEMENT_LADDER):
             placement.status = wanted.status
             changed.append("status")
-        elif current == PlacementStatus.PUBLISHED and wanted.status != current:
+        elif current == PlacementStatus.PLACED and wanted.status != current:
             self.report.issue(
                 Section.PLACEMENT_CONFLICTS,
                 f"{where}: в базе «Опубликовано», в таблице «{wanted.status.label}» — не тронуто",
@@ -774,7 +774,7 @@ class Importer:
                 Placement.objects.create(
                     site=site,
                     product=self.clideo,
-                    status=PlacementStatus.PUBLISHED,
+                    status=PlacementStatus.PLACED,
                     article_url=url,
                 )
             )
@@ -785,8 +785,8 @@ class Importer:
                 # Размещение из списка доменов (загрузка размещений): адрес — из таблицы.
                 placement.article_url = url
                 changed.append("article_url")
-            if _ahead(placement.status, PlacementStatus.PUBLISHED, PLACEMENT_LADDER):
-                placement.status = PlacementStatus.PUBLISHED
+            if _ahead(placement.status, PlacementStatus.PLACED, PLACEMENT_LADDER):
+                placement.status = PlacementStatus.PLACED
                 changed.append("status")
                 fact = True
             self._save(placement, changed, "placements")
@@ -801,7 +801,7 @@ class Importer:
         counted = {
             keyword.pk: keyword
             for keyword in Keyword.objects.filter(product=self.convertio).annotate(
-                placed=Count("links", filter=Q(links__placement__status=PlacementStatus.PUBLISHED)),
+                placed=Count("links", filter=Q(links__placement__status=PlacementStatus.PLACED)),
                 waiting=Count("links", filter=Q(links__placement__status__in=WAITING)),
             )
         }

@@ -143,7 +143,7 @@ def test_overview_counts_and_shares() -> None:
     )
     PageTypeShare.objects.create(product=product, page_type="Video", target_pct=D(25), position=1)
     PageTypeShare.objects.create(product=product, page_type="Audio", target_pct=D(75), position=2)
-    statuses = [PlacementStatus.PUBLISHED, PlacementStatus.ORDERED, PlacementStatus.PUBLISHED]
+    statuses = [PlacementStatus.PLACED, PlacementStatus.ORDERED, PlacementStatus.PLACED]
     for number, status in enumerate(statuses):
         placement = Placement.objects.create(
             site=Site.objects.create(domain=f"s{number}.com"), product=product, status=status

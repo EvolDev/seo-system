@@ -45,7 +45,7 @@ def placements(products: tuple[Product, Product]) -> dict[str, Placement]:
         name: Placement.objects.create(
             site=Site.objects.create(domain=f"{name}.com"),
             product=product,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
         )
         for name, product in (("conv", convertio), ("clid", clideo))
     }

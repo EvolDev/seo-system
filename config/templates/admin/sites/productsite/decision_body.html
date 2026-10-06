@@ -1,6 +1,6 @@
 {% comment %}
 «Решение по площадке» панелью справа (E9-11, ADR-048): статус кнопками по
-порядку и причина отказа. Панель и отправку ведёт seo/panel.js; стили и
+порядку и комментарий. Панель и отправку ведёт seo/panel.js; стили и
 скрипт кнопок — media формы, первыми: панель подгрузит их до показа.
 Полная форма — «Открыть полностью».
 {% endcomment %}{{ form.media }}
@@ -14,9 +14,9 @@
     {{ form.status.errors }}
   </div>
   <div class="seo-decision-row">
-    <label class="seo-decision-label" for="{{ form.reject_reason.id_for_label }}">Причина отказа</label>
-    {{ form.reject_reason }}
-    {{ form.reject_reason.errors }}
+    <label class="seo-decision-label" for="{{ form.comment.id_for_label }}">Комментарий</label>
+    {{ form.comment }}
+    {{ form.comment.errors }}
     <div class="help">Причина попадёт в историю заметок площадки.</div>
   </div>
   {% if row.imported_undecided %}

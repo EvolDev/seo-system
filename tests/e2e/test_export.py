@@ -36,7 +36,7 @@ def sites() -> None:
             Placement.objects.create(
                 site=site,
                 product=convertio,
-                status=PlacementStatus.PUBLISHED,
+                status=PlacementStatus.PLACED,
                 published_at=dt.datetime(2026, 9, 1 + number, 12, tzinfo=dt.UTC),
                 price_paid_cents=10000 + number,
             )

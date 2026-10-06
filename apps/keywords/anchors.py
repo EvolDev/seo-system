@@ -128,8 +128,8 @@ def overview(product_id: int) -> Overview:
         # он не попадает.
         cursor.execute(
             """
-            SELECT COUNT(*) FILTER (WHERE p.status = 'published'),
-                   COUNT(*) FILTER (WHERE p.status IN ('planned','ordered','writing','review'))
+            SELECT COUNT(*) FILTER (WHERE p.status = 'placed'),
+                   COUNT(*) FILTER (WHERE p.status IN ('in_work','ordered','writing'))
             FROM placement_links pl
             JOIN placements p ON p.id = pl.placement_id
             LEFT JOIN keywords k ON k.id = pl.keyword_id

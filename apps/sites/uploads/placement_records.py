@@ -34,22 +34,22 @@ _NA = {"#н/д", "#n/a", "н/д", "#value!", "#ref!"}
 
 _STATUSES: dict[str, PlacementStatus] = {
     **{label.lower(): PlacementStatus(value) for value, label in PlacementStatus.choices},
-    "размещено": PlacementStatus.PUBLISHED,
-    "размещена": PlacementStatus.PUBLISHED,
-    "опубликована": PlacementStatus.PUBLISHED,
-    "published": PlacementStatus.PUBLISHED,
-    "placed": PlacementStatus.PUBLISHED,
-    "live": PlacementStatus.PUBLISHED,
-    "done": PlacementStatus.PUBLISHED,
+    "размещено": PlacementStatus.PLACED,
+    "размещена": PlacementStatus.PLACED,
+    "опубликована": PlacementStatus.PLACED,
+    "published": PlacementStatus.PLACED,
+    "placed": PlacementStatus.PLACED,
+    "live": PlacementStatus.PLACED,
+    "done": PlacementStatus.PLACED,
     "заявка": PlacementStatus.ORDERED,
     "ordered": PlacementStatus.ORDERED,
     "in progress": PlacementStatus.WRITING,
     "writing": PlacementStatus.WRITING,
-    "review": PlacementStatus.REVIEW,
-    "planned": PlacementStatus.PLANNED,
+    "review": PlacementStatus.WRITING,
+    "planned": PlacementStatus.IN_WORK,
     "rejected": PlacementStatus.REJECTED,
-    "cancelled": PlacementStatus.CANCELLED,
-    "canceled": PlacementStatus.CANCELLED,
+    "cancelled": PlacementStatus.REJECTED,
+    "canceled": PlacementStatus.REJECTED,
 }
 _YES = {"да", "yes", "y", "true", "1", "+", "в индексе", "indexed"}
 _NO = {"нет", "no", "n", "false", "0", "-", "не в индексе", "not indexed"}

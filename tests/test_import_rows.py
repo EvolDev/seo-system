@@ -239,7 +239,7 @@ class TestPlacement:
         )
         placement = _only(_base(path)[0]).placement
         assert placement is not None
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert placement.published_on == dt.date(2026, 9, 14)
         assert placement.is_indexed is True
         assert placement.placement_type == PlacementType.GUEST_POST
@@ -252,7 +252,7 @@ class TestPlacement:
         path = make_workbook(base=[("a.com", {"Анкор1": "gif to mp4", "Ссылка1": "https://c.co/"})])
         placement = _only(_base(path)[0]).placement
         assert placement is not None
-        assert placement.status == PlacementStatus.PLANNED
+        assert placement.status == PlacementStatus.IN_WORK
 
     def test_no_placement_columns_no_placement(self, make_workbook: MakeWorkbook) -> None:
         assert _only(_base(make_workbook(base=[("a.com", {})]))[0]).placement is None

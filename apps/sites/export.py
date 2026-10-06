@@ -39,7 +39,7 @@ _REGION_FIELDS = (REGION_TRAFFIC, REGION_KEYWORDS, REGION_AT)
 _BEFORE_REGION: tuple[tuple[str, Column, str], ...] = (
     ("domain", Column("Домен", width=28), SITE),
     ("status", Column("Статус", width=18), SITE),
-    ("reject_reason", Column("Причина отказа", width=30), SITE),
+    ("comment", Column("Комментарий", width=30), SITE),
     ("dr", Column("DR", Kind.INT, 6), METRICS),
     ("organic_traffic", Column("Трафик", Kind.INT, 12), METRICS),
     ("total_keywords", Column("Ключей", Kind.INT, 10), METRICS),

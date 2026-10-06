@@ -41,9 +41,9 @@ from apps.sites.rates import to_eur_cents
 from apps.sites.uploads.records import Parsed, Record
 
 # Заявка в работе — цена договорённая, рабочая сама не меняется.
-ORDER_IN_WORK = (PlacementStatus.ORDERED, PlacementStatus.WRITING, PlacementStatus.REVIEW)
+ORDER_IN_WORK = (PlacementStatus.ORDERED, PlacementStatus.WRITING, PlacementStatus.WRITING)
 # Вкладка «Отклоняли»: отказались мы, отказала площадка или чёрный список (ADR-047).
-REJECTED_STATUSES = (SiteStatus.DISCARDED, SiteStatus.DECLINED, SiteStatus.BLACKLISTED)
+REJECTED_STATUSES = (SiteStatus.DISCARDED, SiteStatus.REJECTED, SiteStatus.BLACKLISTED)
 # Длинные списки сводки обрезаются: каталог — 45 000 строк.
 LIST_LIMIT = 300
 # Запросы с доменами и id — пачками, чтобы не собирать один запрос на 45 000 значений.
@@ -53,7 +53,7 @@ CHUNK = 5000
 def refusal_text(row: ProductSite) -> str:
     """Отказ по продукту одной строкой: «Convertio: Отбрасываю — Nofollow»."""
     text = f"{row.product.name}: {row.get_status_display()}"
-    return f"{text} — {row.reject_reason}" if row.reject_reason else text
+    return f"{text} — {row.comment}" if row.comment else text
 
 
 @dataclass(frozen=True)

@@ -205,7 +205,7 @@ def test_naked_attaches_old_links(convertio: Product) -> None:
     placement = Placement.objects.create(
         site=Site.objects.create(domain="a.com"),
         product=convertio,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
     )
     link = PlacementLink.objects.create(
         placement=placement, anchor="convertio", target_url="https://convertio.co/"

@@ -64,7 +64,7 @@ def anchors(convertio: Product) -> dict[str, Keyword]:
     placement = Placement.objects.create(
         site=Site.objects.create(domain="a.com"),
         product=convertio,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
     )
     PlacementLink.objects.create(
         placement=placement, keyword=made["convert"], anchor="convert",

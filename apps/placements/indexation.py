@@ -163,7 +163,7 @@ def next_check_at(indexed: bool, schedule: IndexationSchedule, now: datetime) ->
 
 def checkable() -> Q:
     """Размещения, которые вообще можно проверить: опубликованы, адрес статьи есть."""
-    return Q(status=PlacementStatus.PUBLISHED, article_url__isnull=False) & ~Q(article_url="")
+    return Q(status=PlacementStatus.PLACED, article_url__isnull=False) & ~Q(article_url="")
 
 
 def _checks_of(placement_id: Any) -> QuerySet[Check]:

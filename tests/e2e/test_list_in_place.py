@@ -19,7 +19,7 @@ from apps.sites.models import (
     SiteMetric,
 )
 
-from .conftest import mark, same_document, soft_load
+from .conftest import mark, pick, same_document, soft_load
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True, serialized_rollback=True)]
 
@@ -75,7 +75,7 @@ def test_filter_keeps_typed_and_chosen(
     # Набрано, но «Найти» не нажата; выбраны действие и продавец; «от» DR не отправлено.
     page.locator("#searchbar").fill("site01")
     page.locator("select[name=action]").select_option("fix_seller_action")
-    page.locator("select[name=seller]").select_option(str(seller.pk))
+    pick(page, "seller", seller.name)
     page.locator("#id_organic_traffic__range__gte").fill("700")
 
     with soft_load(page):

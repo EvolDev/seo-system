@@ -245,14 +245,14 @@ def _home_numbers() -> dict[str, Any]:
         rows.aggregate(sites=Count("pk"), undecided=Count("pk", filter=Q(status=SiteStatus.NEW)))
     )
     in_progress = [
-        PlacementStatus.PLANNED,
+        PlacementStatus.IN_WORK,
         PlacementStatus.ORDERED,
         PlacementStatus.WRITING,
-        PlacementStatus.REVIEW,
+        PlacementStatus.WRITING,
     ]
     numbers.update(
         Placement.objects.filter(product=product).aggregate(
-            published=Count("pk", filter=Q(status=PlacementStatus.PUBLISHED)),
+            published=Count("pk", filter=Q(status=PlacementStatus.PLACED)),
             in_progress=Count("pk", filter=Q(status__in=in_progress)),
         )
     )

@@ -27,7 +27,7 @@ from apps.sites.models import (
 )
 from apps.sites.uploads.plan import start_of_day
 
-from .conftest import mark, same_document, soft_load
+from .conftest import mark, pick, same_document, soft_load
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True, serialized_rollback=True)]
 
@@ -76,7 +76,7 @@ def test_price_list_upload_to_review(
 
     # Шаг 1: файл уходит запросом с ходом отправки, ответ показывает общая подгрузка.
     page.locator("input[name=kind][value=price_list]").check()
-    page.locator("select[name=seller]").select_option(label="LinkHub Media")
+    pick(page, "seller", "LinkHub Media")
     page.locator("input[name=prices_date]").fill(PRICE_DATE.isoformat())
     page.locator("input[name=file]").set_input_files(
         {"name": "linkhub.csv", "mimeType": "text/csv", "buffer": CSV}
@@ -125,7 +125,7 @@ def test_indexation_buttons_after_soft_navigation(
     product = Product.objects.create(name="Convertio", domain="convertio.co")
     site = Site.objects.create(domain="example.com")
     Placement.objects.create(
-        site=site, product=product, status=PlacementStatus.PUBLISHED, article_url=article
+        site=site, product=product, status=PlacementStatus.PLACED, article_url=article
     )
     page = admin_page
     page.goto(f"{live_server.url}/admin/")
@@ -181,11 +181,11 @@ def test_placements_upload_form_and_path(
     page.locator("input[name=kind][value=price_list]").check()
     expect(product_row).to_be_hidden()
     expect(employee_row).to_be_hidden()
-    expect(page.locator("select[name=seller]")).to_be_visible()
+    expect(page.locator(".seo-picker:has(select[name=seller])")).to_be_visible()
     # Ссылающиеся домены — только продукт, дата — выгрузки.
     page.locator("input[name=kind][value=ahrefs_refdomains]").check()
     expect(product_row).to_be_visible()
-    expect(page.locator("select[name=seller]")).to_be_hidden()
+    expect(page.locator(".seo-picker:has(select[name=seller])")).to_be_hidden()
     expect(country_row).to_be_hidden()
     expect(date_label).to_have_text("Дата выгрузки")
     # Размещения — продукт, продавец и сотрудник, дата — файла.

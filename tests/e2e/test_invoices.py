@@ -48,7 +48,7 @@ def placements() -> list[Placement]:
                 site=Site.objects.create(domain=domain),
                 product=product,
                 seller=seller,
-                status=PlacementStatus.PUBLISHED,
+                status=PlacementStatus.PLACED,
                 published_at=start_of_day(day),
                 price_paid_cents=paid,
             )

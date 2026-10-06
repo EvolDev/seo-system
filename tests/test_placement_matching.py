@@ -28,7 +28,7 @@ def clideo() -> Product:
 
 def _placement(site: Site, product: Product, url: str | None = None) -> Placement:
     return Placement.objects.create(
-        site=site, product=product, status=PlacementStatus.PUBLISHED, article_url=url
+        site=site, product=product, status=PlacementStatus.PLACED, article_url=url
     )
 
 
@@ -88,10 +88,10 @@ def test_same_article() -> None:
 @pytest.mark.parametrize(
     ("current", "target", "expected"),
     [
-        (PlacementStatus.ORDERED, PlacementStatus.PUBLISHED, True),
-        (PlacementStatus.PUBLISHED, PlacementStatus.ORDERED, False),
-        (PlacementStatus.PUBLISHED, PlacementStatus.PUBLISHED, False),
-        (PlacementStatus.REJECTED, PlacementStatus.PUBLISHED, False),
+        (PlacementStatus.ORDERED, PlacementStatus.PLACED, True),
+        (PlacementStatus.PLACED, PlacementStatus.ORDERED, False),
+        (PlacementStatus.PLACED, PlacementStatus.PLACED, False),
+        (PlacementStatus.REJECTED, PlacementStatus.PLACED, False),
     ],
 )
 def test_moves_forward(current: str, target: str, expected: bool) -> None:

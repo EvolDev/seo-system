@@ -130,7 +130,7 @@ class TestFirstImport:
         expected = {
             "a.com": SiteStatus.PLACED,
             "b.com": SiteStatus.ORDERED,
-            "c.com": SiteStatus.APPROVED,
+            "c.com": SiteStatus.IN_WORK,
             "d.com": SiteStatus.DISCARDED,
             "e.com": SiteStatus.NEW,
             "f.com": SiteStatus.NEW,
@@ -138,7 +138,7 @@ class TestFirstImport:
         }
         rows = ProductSite.objects.filter(product=convertio).select_related("site")
         assert {row.site.domain: row.status for row in rows} == expected
-        assert _status("d.com", convertio).reject_reason == "Nofollow, отбрасываем"
+        assert _status("d.com", convertio).comment == "Nofollow, отбрасываем"
         undecided = set(rows.filter(imported_undecided=True).values_list("site__domain", flat=True))
         assert undecided == {"e.com", "f.com", "g.com"}
 
@@ -149,9 +149,9 @@ class TestFirstImport:
         report = run(book)
         placements = Placement.objects.filter(product=convertio).select_related("site")
         assert {p.site.domain: p.status for p in placements} == {
-            "a.com": PlacementStatus.PUBLISHED,
+            "a.com": PlacementStatus.PLACED,
             "b.com": PlacementStatus.ORDERED,
-            "c.com": PlacementStatus.PLANNED,
+            "c.com": PlacementStatus.IN_WORK,
         }
         published = placements.get(site__domain="a.com")
         assert published.article_url == "https://a.com/post"
@@ -173,7 +173,7 @@ class TestFirstImport:
         report = run(book)
         [placement] = Placement.objects.filter(product=clideo)
         assert placement.site.domain == "a.com"
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert PlacementLink.objects.filter(placement=placement).count() == 0
         assert _status("a.com", clideo).status == SiteStatus.PLACED
         assert _status("g.com", clideo).status == SiteStatus.NEW
@@ -335,15 +335,15 @@ class TestRepeatedImport:
         book = make_workbook(base=[("b.com", ORDERED)], keywords=KEYWORDS)
         run(book)
         row = _status("b.com", convertio)
-        row.status = SiteStatus.DECLINED
-        row.reject_reason = "отказали в админке"
+        row.status = SiteStatus.REJECTED
+        row.comment = "отказали в админке"
         row.save()
         report = run(book)
         row.refresh_from_db()
-        assert row.status == SiteStatus.DECLINED
+        assert row.status == SiteStatus.REJECTED
         assert report.issues[Section.DECISION_CONFLICTS] == [
             "b.com (строка 2), Convertio: в таблице «Заявка отправлена», "
-            "в базе «Отказала площадка» — не тронуто"
+            "в базе «Отказ» — не тронуто"
         ]
 
     def test_new_order_overrides_earlier_refusal(
@@ -357,11 +357,11 @@ class TestRepeatedImport:
         convertio, _ = products
         Site.objects.create(domain="b.com")
         ProductSite.objects.filter(site__domain="b.com", product=convertio).update(
-            status=SiteStatus.DISCARDED, reject_reason="дорого, отбрасываем"
+            status=SiteStatus.DISCARDED, comment="дорого, отбрасываем"
         )
         report = run(make_workbook(base=[("b.com", ORDERED)], keywords=KEYWORDS))
         row = _status("b.com", convertio)
-        assert (row.status, row.reject_reason) == (SiteStatus.ORDERED, "дорого, отбрасываем")
+        assert (row.status, row.comment) == (SiteStatus.ORDERED, "дорого, отбрасываем")
         assert Section.DECISION_CONFLICTS not in report.issues
 
     def test_blacklist_is_kept_with_new_order(
@@ -403,7 +403,7 @@ class TestRepeatedImport:
         placement.refresh_from_db()
         assert Placement.objects.filter(product=clideo).count() == 1
         assert placement.article_url == "https://a.com/clideo"
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert _status("a.com", clideo).status == SiteStatus.PLACED
 
     def test_clideo_article_matches_other_url_notation(
@@ -418,7 +418,7 @@ class TestRepeatedImport:
         Placement.objects.create(
             site=site,
             product=clideo,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url="https://a.com/blog/clideo/",
         )
         url = "https://www.a.com/blog/clideo#:~:text=Video%20editor"
@@ -445,7 +445,7 @@ class TestRepeatedImport:
         }
         run(make_workbook(base=[("a.com", published)], keywords=KEYWORDS, name="2.xlsx"))
         [placement] = Placement.objects.filter(product=convertio)
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert placement.article_url == "https://a.com/post"
         assert _status("a.com", convertio).status == SiteStatus.PLACED
 
@@ -453,7 +453,7 @@ class TestRepeatedImport:
         back = {**published, "Статус": "Заявка отправлена"}
         report = run(make_workbook(base=[("a.com", back)], keywords=KEYWORDS, name="3.xlsx"))
         placement.refresh_from_db()
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert report.issues[Section.PLACEMENT_CONFLICTS] == [
             "a.com (строка 2): в базе «Опубликовано», в таблице «Заявка отправлена» — не тронуто"
         ]
@@ -470,7 +470,7 @@ class TestRepeatedImport:
         run(make_workbook(base=[("a.com", PUBLISHED)], keywords=KEYWORDS, name="1.xlsx"))
         run(make_workbook(base=[("a.com", ORDERED)], keywords=KEYWORDS, name="2.xlsx"))
         statuses = Placement.objects.filter(product=convertio).values_list("status", flat=True)
-        assert sorted(statuses) == [PlacementStatus.ORDERED, PlacementStatus.PUBLISHED]
+        assert sorted(statuses) == [PlacementStatus.ORDERED, PlacementStatus.PLACED]
         assert _status("a.com", convertio).status == SiteStatus.PLACED
 
     def test_filled_placement_field_is_kept(

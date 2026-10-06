@@ -241,7 +241,7 @@ class TestCard:
         row = ProductSite.objects.get(site=site, product=convertio)
         url = reverse("admin:sites_productsite_change", args=[row.pk])
         response = admin_client.post(
-            url, {"status": SiteStatus.DISCARDED, "reject_reason": "Не тематика"}
+            url, {"status": SiteStatus.DISCARDED, "comment": "Не тематика"}
         )
         assert response.status_code == 302
         note = SiteNote.objects.get(site=site)

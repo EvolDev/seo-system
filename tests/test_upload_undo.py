@@ -204,7 +204,7 @@ class TestUndo:
         history_before = SiteStatusChange.objects.count()
         upload = _written(clideo, [TOMSGUIDE])
         placement.refresh_from_db()
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert placement.article_url
         assert _site_state(site, clideo) == SiteStatus.PLACED
 
@@ -235,7 +235,7 @@ class TestUndo:
         upload = _written(clideo, [TOMSGUIDE])
         site = Site.objects.get(domain="tomsguide.com")
         convertio = Product.objects.get(name="Convertio")
-        Placement.objects.create(site=site, product=convertio, status=PlacementStatus.PLANNED)
+        Placement.objects.create(site=site, product=convertio, status=PlacementStatus.IN_WORK)
         report = undo.preview(upload)
         assert any("созданное после загрузки — размещения: 1" in line for line in report.lines())
         undo.undo(upload)

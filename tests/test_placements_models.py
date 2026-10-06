@@ -57,7 +57,7 @@ class TestPlacement:
 
     def test_defaults(self, placement: Placement) -> None:
         placement.refresh_from_db()
-        assert placement.status == PlacementStatus.PLANNED
+        assert placement.status == PlacementStatus.IN_WORK
         assert placement.currency == "EUR"
         assert placement.ad_label_requested is False
         assert placement.is_indexed is None
@@ -73,10 +73,10 @@ class TestPlacement:
 
     def test_cancelled_by_status(self, placement: Placement) -> None:
         _link(placement)
-        placement.status = PlacementStatus.CANCELLED
+        placement.status = PlacementStatus.REJECTED
         placement.save()
         placement.refresh_from_db()
-        assert placement.status == PlacementStatus.CANCELLED
+        assert placement.status == PlacementStatus.REJECTED
         assert placement.links.count() == 1
 
     def test_not_deleted_with_links(self, placement: Placement) -> None:

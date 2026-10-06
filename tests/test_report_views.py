@@ -37,10 +37,10 @@ EARLY = datetime(2026, 8, 1, tzinfo=UTC)
 LATE = datetime(2026, 9, 1, tzinfo=UTC)
 
 WAITING = [
-    PlacementStatus.PLANNED,
+    PlacementStatus.IN_WORK,
     PlacementStatus.ORDERED,
     PlacementStatus.WRITING,
-    PlacementStatus.REVIEW,
+    PlacementStatus.WRITING,
 ]
 
 
@@ -97,10 +97,10 @@ class TestKeywordCoverage:
     ) -> None:
         for status in WAITING:
             _link(_placement(site, convertio, status), keyword)
-        published = _placement(site, convertio, PlacementStatus.PUBLISHED)
+        published = _placement(site, convertio, PlacementStatus.PLACED)
         _link(published, keyword)
         _link(published, keyword)
-        for status in (PlacementStatus.REJECTED, PlacementStatus.CANCELLED):
+        for status in (PlacementStatus.REJECTED, PlacementStatus.REJECTED):
             _link(_placement(site, convertio, status), keyword)
 
         row = self._coverage(keyword)
@@ -112,7 +112,7 @@ class TestKeywordCoverage:
         other = Keyword.objects.create(
             product=convertio, keyword="video converter", target_url="https://convertio.co/video/"
         )
-        placement = _placement(site, convertio, PlacementStatus.PUBLISHED)
+        placement = _placement(site, convertio, PlacementStatus.PLACED)
         _link(placement, other)
         _link(placement)
 
@@ -251,15 +251,15 @@ class TestProductSiteLatest:
             author=AuditAuthor.HUMAN,
             created_at=datetime(2026, 9, 20, tzinfo=UTC),
         )
-        _placement(site, convertio, PlacementStatus.PUBLISHED)
+        _placement(site, convertio, PlacementStatus.PLACED)
         _placement(site, convertio, PlacementStatus.ORDERED)
-        _placement(site, clideo, PlacementStatus.PUBLISHED)
+        _placement(site, clideo, PlacementStatus.PLACED)
         # Статус — тот, что в решении по продукту, даже если человек поставил его
         # руками после публикации (сама публикация ставит «Размещались»).
-        ProductSite.objects.filter(site=site, product=convertio).update(status=SiteStatus.APPROVED)
+        ProductSite.objects.filter(site=site, product=convertio).update(status=SiteStatus.IN_WORK)
 
         row = self._row(site, convertio)
-        assert row["status"] == SiteStatus.APPROVED
+        assert row["status"] == SiteStatus.IN_WORK
         assert (row["last_verdict"], row["last_score"]) == (AuditVerdict.YES, 80)
         assert row["placements_published"] == 1
         assert row["other_products_placed"] == ["Clideo"]
@@ -279,7 +279,7 @@ class TestSiteFunnel:
         first = Site.objects.create(domain="first.com")
         Site.objects.create(domain="second.com")
         deleted = Site.objects.create(domain="deleted.com")
-        ProductSite.objects.filter(site=first, product=convertio).update(status=SiteStatus.APPROVED)
+        ProductSite.objects.filter(site=first, product=convertio).update(status=SiteStatus.IN_WORK)
         ProductSite.objects.filter(site__domain="second.com", product=convertio).update(
             imported_undecided=True
         )
@@ -292,7 +292,7 @@ class TestSiteFunnel:
         )
         assert rows == [
             {"status": SiteStatus.NEW, "imported_undecided": True, "sites": 1},
-            {"status": SiteStatus.APPROVED, "imported_undecided": False, "sites": 1},
+            {"status": SiteStatus.IN_WORK, "imported_undecided": False, "sites": 1},
         ]
         assert _one(
             "SELECT sum(sites)::int AS total FROM v_site_funnel WHERE product_id = %s", clideo.pk
@@ -301,7 +301,7 @@ class TestSiteFunnel:
 
 class TestLinkHealth:
     def test_only_published_placements(self, site: Site, convertio: Product) -> None:
-        published = _placement(site, convertio, PlacementStatus.PUBLISHED, published_at=EARLY)
+        published = _placement(site, convertio, PlacementStatus.PLACED, published_at=EARLY)
         _link(published)
         _link(_placement(site, convertio, PlacementStatus.ORDERED))
 
@@ -327,14 +327,14 @@ class TestMonthlySpend:
         _placement(
             site,
             convertio,
-            PlacementStatus.PUBLISHED,
+            PlacementStatus.PLACED,
             published_at=LATE,
             price_paid_cents=45000,
         )
         _placement(
             site,
             convertio,
-            PlacementStatus.PUBLISHED,
+            PlacementStatus.PLACED,
             published_at=LATE,
             price_paid_cents=5000,
             currency="USD",

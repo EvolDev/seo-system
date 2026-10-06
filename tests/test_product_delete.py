@@ -56,7 +56,7 @@ def _imported(product: Product, site: Site) -> None:
 
 
 def _reason(product: Product, site: Site) -> None:
-    ProductSite.objects.filter(product=product).update(reject_reason="тест")
+    ProductSite.objects.filter(product=product).update(comment="тест")
 
 
 def _audit(product: Product, site: Site) -> None:

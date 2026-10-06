@@ -127,7 +127,7 @@ class TestDelete:
         Placement.objects.create(
             site_id=item.site_id,
             product=Product.objects.get(domain="convertio.co"),
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
         )
         result = _decide(admin_client, upload, "delete", [item.pk])
         assert result["undo"] == []
@@ -170,12 +170,12 @@ class TestBlock:
         upload = _load(["spam.com"])
         item = UploadItem.objects.get(upload=upload)
         convertio = ProductSite.objects.get(site_id=item.site_id, product__domain="convertio.co")
-        convertio.status = SiteStatus.APPROVED
+        convertio.status = SiteStatus.IN_WORK
         convertio.save()
         result = _decide(admin_client, upload, "block", [item.pk])
         _undo(admin_client, upload, result["undo"])
         convertio.refresh_from_db()
-        assert convertio.status == SiteStatus.APPROVED
+        assert convertio.status == SiteStatus.IN_WORK
         clideo = ProductSite.objects.get(site_id=item.site_id, product__domain="clideo.com")
         assert clideo.status == SiteStatus.NEW
 

@@ -93,3 +93,11 @@ def soft_load(page: Page, timeout: float = 10_000) -> Iterator[None]:
     yield
     page.wait_for_function("window.__seoLoaded !== false", timeout=timeout)
     assert page.evaluate("window.__seoLoaded === true"), "страница перезагрузилась целиком"
+
+
+def pick(page: Page, field: str, label: str) -> None:
+    """Выбрать значение в списке с поиском (seo/picker.js): штатный select скрыт."""
+    box = page.locator(f".seo-picker:has(select[name={field}])")
+    box.locator(".seo-picker-input").click()
+    box.locator(".seo-picker-input").fill(label)
+    box.locator(".seo-picker-list li", has_text=label).first.click()

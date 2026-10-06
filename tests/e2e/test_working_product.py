@@ -31,7 +31,7 @@ def placements() -> tuple[Product, Product]:
             Placement.objects.create(
                 site=Site.objects.create(domain=f"{product.name.lower()[:4]}{number}.com"),
                 product=product,
-                status=PlacementStatus.PUBLISHED,
+                status=PlacementStatus.PLACED,
                 article_url=f"https://{product.name.lower()[:4]}{number}.com/blog/post/",
             )
     return convertio, clideo

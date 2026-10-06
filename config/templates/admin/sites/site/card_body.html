@@ -44,7 +44,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
   <div class="seo-card-decision">
     <span class="seo-card-product">{{ main.row.product.name }}</span>
     <span class="seo-card-status seo-tone-{{ main.tone }}">{{ main.row.get_status_display }}</span>
-    {% if main.row.reject_reason %}<span class="seo-card-reason">{{ main.row.reject_reason }}</span>{% endif %}
+    {% if main.row.comment %}<span class="seo-card-reason">{{ main.row.comment }}</span>{% endif %}
     {% if can_change %}<a class="seo-btn seo-btn-small" href="{{ main.change_url }}" data-panel="{{ main.decision_url }}" title="Решение по площадке у {{ main.row.product.name }}">Сменить статус</a>{% endif %}
     {% include "admin/sites/site/card_status_extra.html" with status=main %}
   </div>
@@ -52,7 +52,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
   {% if statuses|length > 1 %}
   <div class="seo-card-others">
     {% for status in statuses|slice:"1:" %}
-    <span class="seo-card-other">{{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.reject_reason %} — {{ status.row.reject_reason }}{% endif %}{% if can_change %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
+    <span class="seo-card-other">{{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.comment %} — {{ status.row.comment }}{% endif %}{% if can_change %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
       {% include "admin/sites/site/card_status_extra.html" %}</span>
     {% endfor %}
   </div>

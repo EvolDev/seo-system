@@ -86,21 +86,27 @@ def test_screens_switch_without_reload(
     assert same_document(page)
 
 
+def at(page: Page, expected: int) -> None:
+    """Прокрутка вернулась на место. С допуском: липкая строка действий сдвигает
+    страницу на несколько пикселей, а проверяем мы возврат, а не пиксель."""
+    assert abs(page.evaluate("window.scrollY") - expected) <= 12, page.evaluate("window.scrollY")
+
+
 def test_back_returns_to_same_place(admin_page: Page, live_server: LiveServer, sites: None) -> None:
     page = admin_page
     page.goto(f"{live_server.url}{SITES}")
     mark(page)
     page.evaluate("window.scrollTo(0, 900)")
-    assert page.evaluate("window.scrollY") == 900
+    at(page, 900)
 
     with soft_load(page):
         page.locator("#nav-sidebar a", has_text="Размещения").click()
-    assert page.evaluate("window.scrollY") == 0
+    at(page, 0)
 
     with soft_load(page):
         page.evaluate("history.back()")
     expect(page).to_have_url(f"{live_server.url}{SITES}")
-    assert page.evaluate("window.scrollY") == 900
+    at(page, 900)
 
     with soft_load(page):
         page.evaluate("history.forward()")
@@ -274,7 +280,7 @@ def test_sites_filters_without_reload(
         page.locator("#id_dr__range__gte").press("Enter")
     assert "dr__range__gte=50" in page.url
     assert _rows(page) == 50
-    assert page.evaluate("window.scrollY") == 300
+    at(page, 300)
 
     # Выпадающий фильтр — к уже выбранному «от — до».
     with soft_load(page):
@@ -307,19 +313,19 @@ def test_sites_filters_without_reload(
     with soft_load(page):
         page.locator("#result_list thead th.column-dr_cell .text a").dispatch_event("click")
     assert "o=" in page.url
-    assert page.evaluate("window.scrollY") == 300
+    at(page, 300)
 
     # Следующая страница — к началу списка.
     with soft_load(page):
         page.locator(".paginator a", has_text="2").first.dispatch_event("click")
     assert "p=2" in page.url
-    assert page.evaluate("window.scrollY") == 0
+    at(page, 0)
 
     # «Назад» — снова первая страница и прежнее место.
     with soft_load(page):
         page.evaluate("history.back()")
     assert "p=2" not in page.url
-    assert page.evaluate("window.scrollY") == 300
+    at(page, 300)
     assert same_document(page)
 
 

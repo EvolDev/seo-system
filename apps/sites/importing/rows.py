@@ -99,7 +99,7 @@ COPY_SHEET = "Размещения"
 COPY_REQUIRED = (TARGET, STATUS, ARTICLE_URL, PUBLISHED, INDEXED, PLACEMENT_TYPE)
 
 PLACEMENT_STATUSES = {
-    "Размещено": PlacementStatus.PUBLISHED,
+    "Размещено": PlacementStatus.PLACED,
     "Заявка отправлена": PlacementStatus.ORDERED,
 }
 PLACEMENT_TYPES = {
@@ -329,7 +329,7 @@ def _parse_site(row: SheetRow, domain: str, report: Report) -> SiteData:
 
 def _paid(cells: _Cells, status: PlacementStatus, where: str, report: Report) -> int | None:
     """«Итог цена» — заплачено, только у опубликованного. 0 и пусто — ещё не вписали."""
-    if status != PlacementStatus.PUBLISHED:
+    if status != PlacementStatus.PLACED:
         return None
     paid = cells.cents(TOTAL_PRICE)
     if not paid:
@@ -401,7 +401,7 @@ def _parse_placement(cells: _Cells, where: str, report: Report) -> PlacementData
     if status_text is None and not (links or article_url or published_on):
         return None
     if status_text is None:
-        status = PlacementStatus.PLANNED
+        status = PlacementStatus.IN_WORK
     elif status_text in PLACEMENT_STATUSES:
         status = PLACEMENT_STATUSES[status_text]
     else:

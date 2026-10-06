@@ -21,16 +21,18 @@ from apps.sites.models import Product, ProductSite, Site, SiteStatus
 
 pytestmark = pytest.mark.django_db
 
+# Слова, о которых договорились с пользователем 06.10.2026 (ADR-062): один
+# словарь на площадку и размещение, в этом порядке.
 AGREED = [
     "Новая",
     "Просмотрено",
-    "Одобрена",
+    "В работе",
     "Заявка отправлена",
-    "Размещались",
+    "Написание статьи",
+    "Размещено",
     "Отбрасываю",
-    "Отказала площадка",
+    "Отказ",
     "Чёрный список",
-    "На аудите",
 ]
 SITES_URL = reverse("admin:sites_productsitelatest_changelist")
 PARTIAL = {"X-Seo-Partial": "1"}
@@ -56,9 +58,7 @@ def _row(site: Site, product: Product) -> ProductSite:
 
 
 def _set(site: Site, product: Product, status: SiteStatus, reason: str | None = None) -> None:
-    ProductSite.objects.filter(site=site, product=product).update(
-        status=status, reject_reason=reason
-    )
+    ProductSite.objects.filter(site=site, product=product).update(status=status, comment=reason)
 
 
 def _place(site: Site, product: Product, status: PlacementStatus) -> Placement:
@@ -75,12 +75,12 @@ class TestOrder:
         buttons = re.search(r'<div class="seo-choice".*?</div></div>', page, re.S)
         assert buttons is not None
         assert re.findall(r"<span>([^<]*)</span>", buttons.group()) == AGREED
-        # Ряды: путь площадки, отказы, аудит.
+        # Два ряда: путь площадки в работу и отказы.
         rows = re.findall(r'<div class="seo-choice-row">(.*?)</div>', buttons.group(), re.S)
         assert [re.findall(r"<span>([^<]*)</span>", row) for row in rows] == [
-            AGREED[:5],
-            AGREED[5:8],
-            AGREED[8:],
+            AGREED[:2],
+            AGREED[2:6],
+            AGREED[6:],
         ]
 
     def test_status_filter(self, admin_client: Client, site: Site) -> None:
@@ -103,17 +103,17 @@ class TestOrder:
 class TestRules:
     def test_ladder_forward_only(self) -> None:
         assert statuses.replaceable(SiteStatus.NEW) == ()
-        assert statuses.replaceable(SiteStatus.APPROVED) == (SiteStatus.NEW, SiteStatus.VIEWED)
+        assert statuses.replaceable(SiteStatus.IN_WORK) == (SiteStatus.NEW, SiteStatus.VIEWED)
         assert statuses.replaceable(SiteStatus.ORDERED) == (
             SiteStatus.NEW,
             SiteStatus.VIEWED,
-            SiteStatus.APPROVED,
+            SiteStatus.IN_WORK,
         )
 
     def test_new_fact_overrides_refusals_and_audit_not_blacklist(self) -> None:
         for target in (SiteStatus.ORDERED, SiteStatus.PLACED):
             replaced = statuses.replaceable(target, fact=True)
-            assert {SiteStatus.DISCARDED, SiteStatus.DECLINED, SiteStatus.AUDITING} <= set(replaced)
+            assert {SiteStatus.DISCARDED, SiteStatus.REJECTED, SiteStatus.IN_WORK} <= set(replaced)
             assert SiteStatus.BLACKLISTED not in replaced
         assert SiteStatus.PLACED not in statuses.replaceable(SiteStatus.ORDERED, fact=True)
 
@@ -121,11 +121,67 @@ class TestRules:
         undecided = (SiteStatus.NEW, SiteStatus.VIEWED)
         assert statuses.replaceable(SiteStatus.DISCARDED) == undecided
         # Запланированное размещение — не факт: прежний отказ «Одобрена» не перекрывает.
-        assert statuses.replaceable(SiteStatus.APPROVED, fact=True) == undecided
+        assert statuses.replaceable(SiteStatus.IN_WORK, fact=True) == undecided
+
+
+class TestBulkStatus:
+    """Действие «Поставить статус…» — статус отмеченным строкам (ADR-062)."""
+
+    def test_sites_list_sets_status(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        other = Site.objects.create(domain="second.com")
+        rows = [_row(site, convertio).pk, _row(other, convertio).pk]
+        response = admin_client.post(
+            SITES_URL,
+            {
+                "action": "set_status_action",
+                "status": SiteStatus.IN_WORK,
+                "_selected_action": [str(pk) for pk in rows],
+            },
+            follow=True,
+        )
+        assert "Статус «В работе» поставлен: 2" in response.content.decode()
+        assert _row(site, convertio).status == SiteStatus.IN_WORK
+        assert _row(other, convertio).status == SiteStatus.IN_WORK
+
+    def test_without_status_nothing_happens(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        response = admin_client.post(
+            SITES_URL,
+            {
+                "action": "set_status_action",
+                "status": "",
+                "_selected_action": [str(_row(site, convertio).pk)],
+            },
+            follow=True,
+        )
+        assert "Выберите статус рядом с действием" in response.content.decode()
+        assert _row(site, convertio).status == SiteStatus.NEW
+
+    def test_placements_list_sets_status_and_site_follows(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        placement = Placement.objects.create(site=site, product=convertio)
+        response = admin_client.post(
+            reverse("admin:placements_placement_changelist"),
+            {
+                "action": "set_status_action",
+                "status": SiteStatus.ORDERED,
+                "_selected_action": [str(placement.pk)],
+            },
+            follow=True,
+        )
+        assert "Статус «Заявка отправлена» поставлен: 1" in response.content.decode()
+        placement.refresh_from_db()
+        assert placement.status == SiteStatus.ORDERED
+        # Площадка идёт за размещением: словарь общий.
+        assert _row(site, convertio).status == SiteStatus.ORDERED
 
 
 class TestByPlacement:
-    @pytest.mark.parametrize("before", [SiteStatus.NEW, SiteStatus.VIEWED, SiteStatus.APPROVED])
+    @pytest.mark.parametrize("before", [SiteStatus.NEW, SiteStatus.VIEWED, SiteStatus.IN_WORK])
     def test_order_moves_forward(
         self, site: Site, convertio: Product, clideo: Product, before: SiteStatus
     ) -> None:
@@ -135,35 +191,34 @@ class TestByPlacement:
         # Площадка у другого продукта — своё решение.
         assert _row(site, clideo).status == SiteStatus.NEW
 
-    def test_planned_moves_nothing(self, site: Site, convertio: Product) -> None:
-        _place(site, convertio, PlacementStatus.PLANNED)
-        assert _row(site, convertio).status == SiteStatus.NEW
+    def test_placement_in_work_moves_the_site(self, site: Site, convertio: Product) -> None:
+        # Словарь общий (ADR-062): размещение «В работе» ставит площадке тот же статус.
+        _place(site, convertio, PlacementStatus.IN_WORK)
+        assert _row(site, convertio).status == SiteStatus.IN_WORK
 
-    def test_writing_and_review_are_order_in_work(self, site: Site, convertio: Product) -> None:
-        placement = _place(site, convertio, PlacementStatus.PLANNED)
+    def test_writing_moves_the_site_to_writing(self, site: Site, convertio: Product) -> None:
+        placement = _place(site, convertio, PlacementStatus.ORDERED)
+        assert _row(site, convertio).status == SiteStatus.ORDERED
         placement.status = PlacementStatus.WRITING
         placement.save()
-        assert _row(site, convertio).status == SiteStatus.ORDERED
-        placement.status = PlacementStatus.REVIEW
-        placement.save()
-        assert _row(site, convertio).status == SiteStatus.ORDERED
+        assert _row(site, convertio).status == SiteStatus.WRITING
 
     def test_publication_after_order(self, site: Site, convertio: Product) -> None:
         placement = _place(site, convertio, PlacementStatus.ORDERED)
-        placement.status = PlacementStatus.PUBLISHED
+        placement.status = PlacementStatus.PLACED
         placement.save()
         assert _row(site, convertio).status == SiteStatus.PLACED
 
     def test_never_back(self, site: Site, convertio: Product) -> None:
-        published = _place(site, convertio, PlacementStatus.PUBLISHED)
+        published = _place(site, convertio, PlacementStatus.PLACED)
         _place(site, convertio, PlacementStatus.ORDERED)
         assert _row(site, convertio).status == SiteStatus.PLACED
-        published.status = PlacementStatus.CANCELLED
+        published.status = PlacementStatus.REJECTED
         published.save()
         assert _row(site, convertio).status == SiteStatus.PLACED
 
     @pytest.mark.parametrize(
-        "before", [SiteStatus.DISCARDED, SiteStatus.DECLINED, SiteStatus.AUDITING]
+        "before", [SiteStatus.DISCARDED, SiteStatus.REJECTED, SiteStatus.IN_WORK]
     )
     def test_new_order_overrides_earlier_decision(
         self, site: Site, convertio: Product, before: SiteStatus
@@ -172,36 +227,36 @@ class TestByPlacement:
         _place(site, convertio, PlacementStatus.ORDERED)
         row = _row(site, convertio)
         assert row.status == SiteStatus.ORDERED
-        assert row.reject_reason == "Nofollow, отбрасываем"
+        assert row.comment == "Nofollow, отбрасываем"
 
     def test_blacklist_is_never_touched(self, site: Site, convertio: Product) -> None:
         _set(site, convertio, SiteStatus.BLACKLISTED)
         placement = _place(site, convertio, PlacementStatus.ORDERED)
-        placement.status = PlacementStatus.PUBLISHED
+        placement.status = PlacementStatus.PLACED
         placement.save()
         assert _row(site, convertio).status == SiteStatus.BLACKLISTED
 
-    @pytest.mark.parametrize("status", [PlacementStatus.REJECTED, PlacementStatus.CANCELLED])
+    @pytest.mark.parametrize("status", [PlacementStatus.REJECTED, PlacementStatus.REJECTED])
     def test_rejected_or_cancelled_placement_moves_nothing(
         self, site: Site, convertio: Product, status: PlacementStatus
     ) -> None:
-        _set(site, convertio, SiteStatus.APPROVED)
-        placement = _place(site, convertio, PlacementStatus.PLANNED)
+        _set(site, convertio, SiteStatus.IN_WORK)
+        placement = _place(site, convertio, PlacementStatus.IN_WORK)
         placement.status = status
         placement.save()
-        assert _row(site, convertio).status == SiteStatus.APPROVED
+        assert _row(site, convertio).status == SiteStatus.IN_WORK
 
     def test_edit_without_status_change_keeps_manual_decision(
         self, site: Site, convertio: Product
     ) -> None:
         placement = _place(site, convertio, PlacementStatus.ORDERED)
         # Площадка отказала уже после заявки — человек ставит это руками.
-        _set(site, convertio, SiteStatus.DECLINED, "Отказали, без объяснения")
+        _set(site, convertio, SiteStatus.REJECTED, "Отказали, без объяснения")
         placement.comment = "ждали неделю"
         placement.save()
         placement.save(update_fields=["comment"])
         Placement.objects.get(pk=placement.pk).save()
-        assert _row(site, convertio).status == SiteStatus.DECLINED
+        assert _row(site, convertio).status == SiteStatus.REJECTED
 
     def test_undecided_mark_and_time(self, site: Site, convertio: Product) -> None:
         old = dt.datetime(2026, 9, 1, tzinfo=dt.UTC)
@@ -226,7 +281,7 @@ class TestByPlacement:
         data = {
             "site": str(site.pk),
             "product": str(convertio.pk),
-            "status": PlacementStatus.PUBLISHED,
+            "status": PlacementStatus.PLACED,
             "currency": "EUR",
             "links-TOTAL_FORMS": "0",
             "links-INITIAL_FORMS": "0",

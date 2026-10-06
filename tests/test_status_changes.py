@@ -90,7 +90,7 @@ class TestSiteStatus:
             row.save()
             # Тот же статус ещё раз и правка причины — не смена.
             row.save()
-            row.reject_reason = "дорого"
+            row.comment = "дорого"
             row.save()
         assert _site_changes(row) == [
             (SiteStatus.NEW, SiteStatus.VIEWED, StatusSource.FORM, user.pk, None)
@@ -99,7 +99,7 @@ class TestSiteStatus:
     def test_change_has_time_and_run_id(self, row: ProductSite) -> None:
         run_id = new_run_id()
         with bind_run_id(run_id):
-            row.status = SiteStatus.APPROVED
+            row.status = SiteStatus.IN_WORK
             row.save()
         change = SiteStatusChange.objects.get()
         assert change.run_id == run_id
@@ -140,8 +140,8 @@ class TestPlacement:
             placement.status = PlacementStatus.ORDERED
             placement.save()
         assert _placement_changes(placement) == [
-            (None, PlacementStatus.PLANNED, StatusSource.PANEL, user.pk),
-            (PlacementStatus.PLANNED, PlacementStatus.ORDERED, StatusSource.PANEL, user.pk),
+            (None, PlacementStatus.IN_WORK, StatusSource.PANEL, user.pk),
+            (PlacementStatus.IN_WORK, PlacementStatus.ORDERED, StatusSource.PANEL, user.pk),
         ]
 
     def test_edit_without_status_change_is_not_written(
@@ -161,10 +161,12 @@ class TestPlacement:
         """Система по размещению (ADR-047): «по размещению», номер, кто сменил размещение."""
         with bind_change(StatusSource.PANEL, user.pk):
             placement = Placement.objects.create(site=site, product=convertio)
-            placement.status = PlacementStatus.PUBLISHED
+            placement.status = PlacementStatus.PLACED
             placement.save()
+        # Словарь общий (ADR-062): новое размещение «В работе» двигает площадку сразу.
         assert _site_changes(row) == [
-            (SiteStatus.NEW, SiteStatus.PLACED, StatusSource.PLACEMENT, user.pk, placement.pk)
+            (SiteStatus.NEW, SiteStatus.IN_WORK, StatusSource.PLACEMENT, user.pk, placement.pk),
+            (SiteStatus.IN_WORK, SiteStatus.PLACED, StatusSource.PLACEMENT, user.pk, placement.pk),
         ]
 
     def test_advance_mark_does_not_stick(self, row: ProductSite, site: Site) -> None:
@@ -190,7 +192,7 @@ class TestAdmin:
 
     def test_decision_panel(self, admin_client: Client, admin: User, row: ProductSite) -> None:
         url = reverse("admin:sites_productsite_decision", args=[row.pk])
-        admin_client.post(url, {"status": SiteStatus.DISCARDED, "reject_reason": "nofollow"},
+        admin_client.post(url, {"status": SiteStatus.DISCARDED, "comment": "nofollow"},
                           headers=PARTIAL)  # fmt: skip
         assert _site_changes(row) == [
             (SiteStatus.NEW, SiteStatus.DISCARDED, StatusSource.PANEL, admin.pk, None)
@@ -198,7 +200,7 @@ class TestAdmin:
 
     def test_decision_full_form(self, admin_client: Client, admin: User, row: ProductSite) -> None:
         url = reverse("admin:sites_productsite_change", args=[row.pk])
-        response = admin_client.post(url, {"status": SiteStatus.VIEWED, "reject_reason": ""})
+        response = admin_client.post(url, {"status": SiteStatus.VIEWED, "comment": ""})
         assert response.status_code == 302
         assert _site_changes(row) == [
             (SiteStatus.NEW, SiteStatus.VIEWED, StatusSource.FORM, admin.pk, None)
@@ -215,13 +217,13 @@ class TestAdmin:
             "product_sites-INITIAL_FORMS": "1",
             "product_sites-0-id": str(row.pk),
             "product_sites-0-site": str(site.pk),
-            "product_sites-0-status": SiteStatus.APPROVED,
-            "product_sites-0-reject_reason": "",
+            "product_sites-0-status": SiteStatus.IN_WORK,
+            "product_sites-0-comment": "",
         }
         response = admin_client.post(url, data)
         assert response.status_code == 302, response.context["errors"]
         assert _site_changes(row) == [
-            (SiteStatus.NEW, SiteStatus.APPROVED, StatusSource.FORM, admin.pk, None)
+            (SiteStatus.NEW, SiteStatus.IN_WORK, StatusSource.FORM, admin.pk, None)
         ]
 
     def test_placement_panel(
@@ -239,13 +241,20 @@ class TestAdmin:
         }
         assert admin_client.post(url, data, headers=PARTIAL).json()["saved"]
         assert _placement_changes(placement)[-1] == (
-            PlacementStatus.PLANNED,
+            PlacementStatus.IN_WORK,
             PlacementStatus.ORDERED,
             StatusSource.PANEL,
             admin.pk,
         )
         assert _site_changes(row) == [
-            (SiteStatus.NEW, SiteStatus.ORDERED, StatusSource.PLACEMENT, admin.pk, placement.pk)
+            (SiteStatus.NEW, SiteStatus.IN_WORK, StatusSource.PLACEMENT, None, placement.pk),
+            (
+                SiteStatus.IN_WORK,
+                SiteStatus.ORDERED,
+                StatusSource.PLACEMENT,
+                admin.pk,
+                placement.pk,
+            ),
         ]
 
 
@@ -342,8 +351,8 @@ class TestShown:
         url = reverse("admin:placements_placement_change", args=[placement.pk])
         page = admin_client.get(url, headers=PARTIAL).content.decode()
         history = page[page.index('class="seo-status-list"') :]
-        assert history.index('Запланировано → Пишется · <span class="seo-sub">не отмечено') < (
-            history.index('Создано: Запланировано · <span class="seo-sub">форма')
+        assert history.index('В работе → Написание статьи · <span class="seo-sub">не отмечено') < (
+            history.index('Создано: В работе · <span class="seo-sub">форма')
         )
         # Сразу под кнопками статуса — раньше группы «Заявка».
         assert page.index('name="status"') < page.index("seo-status-list") < page.index(">Заявка<")

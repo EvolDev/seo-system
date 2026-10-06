@@ -1,17 +1,19 @@
-"""Как статус площадки у продукта меняется сам (E1-12, ADR-047).
+"""Как статус площадки у продукта меняется сам (E1-12, ADR-047, ADR-062).
 
-Путь площадки в работу — лесенка «Новая → Просмотрено → Одобрена → Заявка
-отправлена → Размещались». Система двигает статус по ней только вперёд:
-новая заявка «Размещались» не откатывает.
+Словарь статусов общий у площадки и размещения, поэтому статус размещения
+переносится на площадку как есть. Путь в работу — лесенка «Новая →
+Просмотрено → В работе → Заявка отправлена → Написание статьи → Размещено».
+Система двигает статус по ней только вперёд: новая заявка «Размещено» не
+откатывает.
 
-Заявка и публикация размещения — факты. Новый факт — размещение только что
-создано или его статус только что сменился — сильнее прежнего решения
-«Отбрасываю», «Отказала площадка» и «На аудите». Старый факт, повторённый
-ещё раз (та же заявка в таблице при следующем импорте), решение человека не
-перекрывает: отказ мог быть поставлен уже после заявки. «Чёрный список»
-система не трогает никогда. Решение без факта — «Одобрена» по
-запланированному размещению, отказ из таблицы или аудита — встаёт только
-туда, где решения ещё нет: на «Новая» и «Просмотрено».
+Заявка, написание и публикация размещения — факты. Новый факт — размещение
+только что создано или его статус только что сменился — сильнее прежнего
+решения «Отбрасываю» и «Отказ». Старый факт, повторённый ещё раз (та же
+заявка в таблице при следующем импорте), решение человека не перекрывает:
+отказ мог быть поставлен уже после заявки. «Чёрный список» система не трогает
+никогда. Решение без факта — «В работе» по запланированному размещению, отказ
+из таблицы или аудита — встаёт только туда, где решения ещё нет: на «Новая» и
+«Просмотрено».
 
 Правила — только для системы: размещения (`Placement.save()`), импорта
 таблицы, аудита (E4). Человек в окне статуса ставит любой статус.
@@ -20,25 +22,26 @@
 from django.db import transaction
 from django.utils import timezone
 
-from apps.sites.models import ProductSite, SiteStatus, StatusSource
+from apps.sites.models import ProductSite, StatusSource, WorkStatus
 from config.changes import stamped
 
 LADDER = (
-    SiteStatus.NEW,
-    SiteStatus.VIEWED,
-    SiteStatus.APPROVED,
-    SiteStatus.ORDERED,
-    SiteStatus.PLACED,
+    WorkStatus.NEW,
+    WorkStatus.VIEWED,
+    WorkStatus.IN_WORK,
+    WorkStatus.ORDERED,
+    WorkStatus.WRITING,
+    WorkStatus.PLACED,
 )
 # Решения ещё нет.
-UNDECIDED = (SiteStatus.NEW, SiteStatus.VIEWED)
-# Что ставит факт размещения: заявка в работе и публикация.
-FACTS = (SiteStatus.ORDERED, SiteStatus.PLACED)
+UNDECIDED = (WorkStatus.NEW, WorkStatus.VIEWED)
+# Что ставит факт размещения: заявка, написание статьи и публикация.
+FACTS = (WorkStatus.ORDERED, WorkStatus.WRITING, WorkStatus.PLACED)
 # Прежние решения, которые новый факт перекрывает. Чёрного списка здесь нет.
-OVERRIDDEN_BY_FACT = (SiteStatus.DISCARDED, SiteStatus.DECLINED, SiteStatus.AUDITING)
+OVERRIDDEN_BY_FACT = (WorkStatus.DISCARDED, WorkStatus.REJECTED)
 
 
-def replaceable(target: SiteStatus, *, fact: bool = False) -> tuple[SiteStatus, ...]:
+def replaceable(target: WorkStatus, *, fact: bool = False) -> tuple[WorkStatus, ...]:
     """Статусы, которые система сама сменит на `target`.
 
     `fact` — `target` ставит новый факт: размещение только что создано или
@@ -51,7 +54,7 @@ def replaceable(target: SiteStatus, *, fact: bool = False) -> tuple[SiteStatus, 
 
 
 def advance(
-    site_id: int, product_id: int, target: SiteStatus, *, placement_id: int | None = None
+    site_id: int, product_id: int, target: WorkStatus, *, placement_id: int | None = None
 ) -> bool:
     """Новый факт размещения: поставить площадке у продукта `target`, если можно.
 

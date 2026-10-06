@@ -256,13 +256,13 @@ def test_placement_statuses_are_not_touched(pair: tuple[Seller, Seller], product
         site=site,
         product=product,
         seller=source,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         price_paid_cents=15000,
     )
 
     sellers.merge(target, [source])
 
     placement.refresh_from_db()
-    assert placement.status == PlacementStatus.PUBLISHED
+    assert placement.status == PlacementStatus.PLACED
     assert placement.price_paid_cents == 15000
     assert placement.seller_id == target.pk

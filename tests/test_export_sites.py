@@ -72,7 +72,7 @@ def base(offer: OfferFactory) -> dict[str, Any]:
     SiteMetric.objects.create(site=bad, dr=94)
     ensure_product_sites()
     ProductSite.objects.filter(product=convertio, site=bad).update(
-        status=SiteStatus.DISCARDED, reject_reason="Nofollow, отбрасываем"
+        status=SiteStatus.DISCARDED, comment="Nofollow, отбрасываем"
     )
 
     older = SiteList.objects.create(name="Сентябрь 2026")
@@ -134,7 +134,7 @@ def test_status_filter_and_reason(admin_client: Client, base: dict[str, Any]) ->
     assert len(rows) == 2
     row = _by_domain(rows)["bad.com"]
     assert row["Статус"] == "Отбрасываю"
-    assert row["Причина отказа"] == "Nofollow, отбрасываем"
+    assert row["Комментарий"] == "Nofollow, отбрасываем"
 
 
 def test_default_list_like_screen(admin_client: Client, base: dict[str, Any]) -> None:

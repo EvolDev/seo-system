@@ -56,7 +56,6 @@ LONG_TEXT_FIELDS = frozenset(
         "description",
         "error",
         "notes",
-        "reject_reason",
         "summary",
     }
 )

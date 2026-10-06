@@ -80,7 +80,8 @@ from apps.sites.models import (
     SiteMetric,
     SiteOffer,
     SitePrice,
-    SiteStatus,
+    StatusSource,
+    WorkStatus,
 )
 from apps.sites.site_card import STATUS_TONES, euros, fields_text, note_rows, notes_summary
 from apps.sites.site_card import price_summary as card_price_summary
@@ -97,6 +98,7 @@ from config.admin import (
     is_partial,
 )
 from config.assets import Css, Js
+from config.changes import stamped
 from config.export import attachment
 from config.forms import ChoiceButtons
 
@@ -160,16 +162,16 @@ class DeletedFilter(admin.SimpleListFilter):
 
 
 def _note_rejection(request: HttpRequest, row: ProductSite, changed: list[str]) -> None:
-    """Причина отказа, поставленная в админке, — сразу и в историю заметок (ADR-043)."""
-    if "reject_reason" in changed and row.reject_reason:
-        offers.add_note(row.site_id, row.reject_reason, product=row.product, author=request.user)
+    """Комментарий, поставленный в админке, — сразу и в историю заметок (ADR-043)."""
+    if "comment" in changed and row.comment:
+        offers.add_note(row.site_id, row.comment, product=row.product, author=request.user)
 
 
 class ProductSiteInline(TabularInline):
     """Статус площадки по каждому продукту. Строки создаёт система."""
 
     model = ProductSite
-    fields = ("product", "status", "reject_reason", "imported_undecided")
+    fields = ("product", "status", "comment", "imported_undecided")
     readonly_fields = ("product", "imported_undecided")
     extra = 0
     can_delete = False
@@ -423,7 +425,7 @@ def _card_context(site: Site, working_product: int | None = None) -> dict[str, A
         "statuses": [
             {
                 "row": row,
-                "tone": STATUS_TONES.get(SiteStatus(row.status), "info"),
+                "tone": STATUS_TONES.get(WorkStatus(row.status), "info"),
                 "change_url": reverse("admin:sites_productsite_change", args=[row.pk]),
                 "decision_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
                 # Строка «Площадок» — та же строка product_sites (pk общий).
@@ -607,11 +609,13 @@ def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
 
 
 # Ряды кнопок статуса площадки: путь площадки, отказы, аудит (ADR-047).
-SITE_STATUS_ROWS = (SiteStatus.DISCARDED, SiteStatus.AUDITING)
+# С какого статуса начинается новая строка кнопок: «не взяли» · путь в работу · отказы.
+# Девять кнопок в один ряд делают панель шире экрана.
+SITE_STATUS_ROWS = (WorkStatus.IN_WORK, WorkStatus.DISCARDED)
 
 
 class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
-    """Решение по площадке: статус кнопками по порядку и причина отказа.
+    """Решение по площадке: статус кнопками по порядку и комментарий.
 
     Панель «Решение по площадке» в «Площадках»; у полной формы решения те же
     кнопки (`ProductSiteAdmin.formfield_for_dbfield`).
@@ -619,10 +623,10 @@ class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
 
     class Meta:
         model = ProductSite
-        fields = ("status", "reject_reason")
+        fields = ("status", "comment")
         widgets: ClassVar[dict[str, forms.Widget]] = {
             "status": ChoiceButtons(rows=SITE_STATUS_ROWS),
-            "reject_reason": forms.Textarea(attrs={"rows": 3}),
+            "comment": forms.Textarea(attrs={"rows": 3}),
         }
 
 
@@ -1250,7 +1254,7 @@ class WorkedFilter(admin.SimpleListFilter):
         placed = Placement.objects.filter(
             site_id=OuterRef("site_id"), product_id=OuterRef("product_id")
         )
-        worked = ~Q(status=SiteStatus.NEW) | Q(audited_at__isnull=False) | Exists(placed)
+        worked = ~Q(status=WorkStatus.NEW) | Q(audited_at__isnull=False) | Exists(placed)
         return queryset.filter(worked) if self.value() == self.YES else queryset.exclude(worked)
 
 
@@ -1602,7 +1606,7 @@ def _merge_nodes(chosen: "list[sellers.Facts]") -> list[dict[str, Any]]:
 
 
 class SellerActionForm(helpers.ActionForm):
-    """Поле «продавец» рядом с выбором действия — для «Зафиксировать продавца…»."""
+    """Поля рядом с выбором действия: продавец и статус — для действий над строками."""
 
     seller = forms.ModelChoiceField(
         queryset=Seller.objects.order_by("name"),
@@ -1610,6 +1614,11 @@ class SellerActionForm(helpers.ActionForm):
         label="продавец",
         empty_label="продавец…",
         widget=forms.Select(attrs={"data-search": "Найти продавца…"}),
+    )
+    status = forms.ChoiceField(
+        choices=[("", "статус…"), *WorkStatus.choices],
+        required=False,
+        label="статус",
     )
 
 
@@ -1686,7 +1695,12 @@ class ProductSiteLatestAdmin(RecordAdmin):
     # Полный счётчик без фильтров — лишний запрос на каждую страницу.
     show_full_result_count = False
     action_form = SellerActionForm
-    actions = ("accept_new_prices_action", "fix_seller_action", "keep_current_action")
+    actions = (
+        "set_status_action",
+        "accept_new_prices_action",
+        "fix_seller_action",
+        "keep_current_action",
+    )
 
     class Media:
         js = (Js("seo/country-picker.js"),)
@@ -1964,6 +1978,36 @@ class ProductSiteLatestAdmin(RecordAdmin):
             return
         result = offers.fix_seller(_site_ids(queryset), seller, author=request.user)
         self._report(request, result, f"нет предложения {seller} или оно уже рабочее")
+
+    @admin.action(description="Поставить статус…", permissions=["change_status"])
+    def set_status_action(
+        self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
+    ) -> None:
+        """Статус отмеченным строкам — выбором рядом с действием (ADR-062).
+
+        Статус у площадки свой на каждый продукт, поэтому меняем строки
+        «продукт × площадка» того продукта, который открыт на экране.
+        """
+        status = request.POST.get("status") or ""
+        if status not in WorkStatus.values:
+            self.message_user(request, "Выберите статус рядом с действием.", messages.WARNING)
+            return
+        rows = list(queryset.values_list("site_id", "product_id"))
+        with stamped(source=StatusSource.FORM):
+            changed = 0
+            for product_id in {product for _, product in rows}:
+                sites = [site for site, product in rows if product == product_id]
+                changed += (
+                    ProductSite.objects.filter(site_id__in=sites, product_id=product_id)
+                    .exclude(status=status)
+                    .update(status=status, updated_at=timezone.now())
+                )
+        label = WorkStatus(status).label
+        self.message_user(request, f"Статус «{label}» поставлен: {changed}.", messages.SUCCESS)
+
+    def has_change_status_permission(self, request: HttpRequest) -> bool:
+        # Строка списка — представление; статус меняется у «продукт × площадка».
+        return bool(request.user.has_perm("sites.change_productsite"))
 
     @admin.action(description="Оставить как есть", permissions=["fix_price"])
     def keep_current_action(

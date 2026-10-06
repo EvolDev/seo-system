@@ -373,7 +373,7 @@ def _published_articles(site_ids: list[int]) -> dict[tuple[int, int], list[tuple
     """Опубликованные статьи площадок по продуктам, свежие первыми: «Пример статьи на …»."""
     found: dict[tuple[int, int], list[tuple[int, str]]] = defaultdict(list)
     published = (
-        Placement.objects.filter(site_id__in=site_ids, status=PlacementStatus.PUBLISHED)
+        Placement.objects.filter(site_id__in=site_ids, status=PlacementStatus.PLACED)
         .exclude(article_url__isnull=True)
         .exclude(article_url="")
         .order_by(F("published_at").desc(nulls_last=True), "-pk")

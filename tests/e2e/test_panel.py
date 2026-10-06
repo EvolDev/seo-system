@@ -100,13 +100,13 @@ def test_decision_panel_on_sites_list(
 
     status.click()
     panel.locator(".seo-choice-item", has_text="Отбрасываю").click()
-    panel.locator("textarea[name=reject_reason]").fill("Не тематика")
+    panel.locator("textarea[name=comment]").fill("Не тематика")
     panel.locator("[data-panel-save]").click()
     expect(panel).to_be_hidden()
     expect(status).to_have_text("Отбрасываю")
     expect(page.locator(".seo-toast-success")).to_contain_text("known.com · Convertio — Отбрасываю")
     row = ProductSite.objects.get(site=known)
-    assert (row.status, row.reject_reason) == (SiteStatus.DISCARDED, "Не тематика")
+    assert (row.status, row.comment) == (SiteStatus.DISCARDED, "Не тематика")
     assert same_document(page)
 
 
@@ -145,8 +145,8 @@ def test_placement_status_from_list(
     assert site_cell is not None and box is not None
     assert box["x"] >= site_cell["x"] + site_cell["width"]
 
-    # «Опубликовано» ставит сегодняшний день в пустую дату публикации.
-    panel.locator(".seo-choice-item", has_text="Опубликовано").click()
+    # «Размещено» ставит сегодняшний день в пустую дату публикации.
+    panel.locator(".seo-choice-item", has_text="Размещено").click()
     published = panel.locator("input[name=published_at]")
     expect(published).to_have_value(_server_today())
     expect(panel.locator(".seo-day.seo-day-auto")).to_have_count(1)
@@ -154,13 +154,13 @@ def test_placement_status_from_list(
     panel.locator("[data-panel-save]").click()
 
     expect(panel).to_be_hidden()
-    expect(row.locator("a[title='Сменить статус']")).to_have_text("Опубликовано")
+    expect(row.locator("a[title='Сменить статус']")).to_have_text("Размещено")
     expect(page.locator(".seo-toast-success")).to_have_text(
         "Размещение «alpha.com · Convertio» — сохранено."
     )
     assert same_document(page)
     placement = Placement.objects.get(site__domain="alpha.com")
-    assert placement.status == PlacementStatus.PUBLISHED
+    assert placement.status == PlacementStatus.PLACED
     assert placement.published_at is not None
     assert f"{timezone.localtime(placement.published_at):%Y-%m-%d}" == _server_today()
     decision = ProductSite.objects.get(site=placement.site, product=placement.product)
@@ -187,21 +187,23 @@ def test_status_history_in_panel_and_card(
     status.click()
     history = panel.locator("ul.seo-status-list li")
     expect(history).to_have_count(2)
-    expect(history.first).to_contain_text("Запланировано → Заявка отправлена")
+    expect(history.first).to_contain_text("В работе → Заявка отправлена")
     expect(history.first).to_contain_text("admin, панель")
-    expect(history.last).to_contain_text("Создано: Запланировано")
+    expect(history.last).to_contain_text("Создано: В работе")
 
-    # Карточка площадки из той же панели: «история (1)» у Convertio, раскрывается.
+    # Карточка площадки из той же панели: у Convertio две смены (словарь общий,
+    # ADR-062: размещение «В работе» сразу двигает площадку), список раскрывается.
     panel.locator("a[data-panel]", has_text="Карточка площадки").click()
     expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com")
     summary = panel.locator(".seo-status-history summary")
-    expect(summary).to_have_text("история (1)")
-    change = panel.locator(".seo-status-history li")
-    expect(change).to_be_hidden()
+    expect(summary).to_have_text("история (2)")
+    changes = panel.locator(".seo-status-history li")
+    expect(changes.first).to_be_hidden()
     summary.click()
-    expect(change).to_contain_text("Новая → Заявка отправлена")
+    expect(changes.first).to_contain_text("В работе → Заявка отправлена")
+    expect(changes.last).to_contain_text("Новая → В работе")
     # «по размещению» — само размещение в той же панели.
-    change.locator("a", has_text="по размещению").click()
+    changes.first.locator("a", has_text="по размещению").click()
     expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com · Convertio")
     assert same_document(page)
 

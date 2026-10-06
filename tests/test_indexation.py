@@ -101,7 +101,7 @@ def make_placement(product: Product) -> Callable[..., Placement]:
         defaults: dict[str, Any] = {
             "site": site,
             "product": product,
-            "status": PlacementStatus.PUBLISHED,
+            "status": PlacementStatus.PLACED,
             "article_url": URL,
             "published_at": _at(1, 12),
         }
@@ -340,7 +340,7 @@ class TestSchedule:
         "fields",
         [
             {"status": PlacementStatus.ORDERED},
-            {"status": PlacementStatus.CANCELLED},
+            {"status": PlacementStatus.REJECTED},
             {"article_url": None},
             {"article_url": ""},
             {"skip_checks": True},
@@ -368,7 +368,7 @@ class TestSchedule:
         Placement.objects.create(
             site=placement.site,
             product=clideo,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url=URL,
         )
         assert self._due(_at(10)) == [placement.pk]

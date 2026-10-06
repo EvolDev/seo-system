@@ -44,7 +44,7 @@ def placement() -> Placement:
     product = Product.objects.create(name="Convertio", domain="convertio.co")
     site = Site.objects.create(domain="example.com")
     return Placement.objects.create(
-        site=site, product=product, status=PlacementStatus.PUBLISHED, article_url=URL
+        site=site, product=product, status=PlacementStatus.PLACED, article_url=URL
     )
 
 
@@ -254,7 +254,7 @@ class TestInPlace:
         other = Placement.objects.create(
             site=placement.site,
             product=placement.product,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url="https://example.com/other/",
         )
         admin_client.post(BATCH, {"ids": [placement.pk, other.pk]})

@@ -29,11 +29,11 @@ from apps.placements.models import Placement, PlacementStatus
 # Статус размещения из файла — только вперёд по цепочке. Отклонённое и
 # отменённое файл не трогает: так решил человек (маппинг §1.5).
 LADDER = (
-    PlacementStatus.PLANNED,
+    PlacementStatus.IN_WORK,
     PlacementStatus.ORDERED,
     PlacementStatus.WRITING,
-    PlacementStatus.REVIEW,
-    PlacementStatus.PUBLISHED,
+    PlacementStatus.WRITING,
+    PlacementStatus.PLACED,
 )
 
 

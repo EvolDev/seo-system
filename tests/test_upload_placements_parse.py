@@ -212,7 +212,7 @@ class TestParse:
         parsed = _parse(tmp_path, TOMSGUIDE)
         [record] = parsed.records
         assert record.domain == "tomsguide.com"
-        assert record.status == PlacementStatus.PUBLISHED
+        assert record.status == PlacementStatus.PLACED
         assert record.published_on == dt.date(2026, 9, 14)
         assert (record.seller, record.employee) == ("Athena Smith", "Evgeniy")
         assert record.paid_cents == 31181

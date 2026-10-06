@@ -296,7 +296,7 @@ class TestPlacementForm:
         assert "счёт № 12 от" in page
         # Форма размещения без поля суммы её не стирает.
         data = {
-            "status": "published",
+            "status": "placed",
             "placement_type": "",
             "seller": str(seller.pk),
             "employee": "",

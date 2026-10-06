@@ -378,7 +378,7 @@ class _Planner:
         row = PlanRow(
             record=record,
             site_id=plan.sites.get(record.domain),
-            status=record.status or PlacementStatus.PUBLISHED,
+            status=record.status or PlacementStatus.PLACED,
             seller=record.seller or (upload.seller.name if upload.seller else None),
             employee=record.employee
             or (employee_name(upload.employee) if upload.employee else None),
@@ -1011,7 +1011,7 @@ def _offers_by_key(site_ids: Sequence[int]) -> dict[OfferKey, SitePrice]:
 
 def _date_field(status: PlacementStatus) -> str:
     """Дата из файла у опубликованного — день публикации, у остального — день заявки."""
-    return "published_at" if status == PlacementStatus.PUBLISHED else "ordered_at"
+    return "published_at" if status == PlacementStatus.PLACED else "ordered_at"
 
 
 def _free_username(name: str) -> str:

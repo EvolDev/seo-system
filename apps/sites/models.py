@@ -25,23 +25,32 @@ from config.changes import stamped
 from config.db import PgEnumField, PgNow
 
 
-class SiteStatus(models.TextChoices):
-    """Статус площадки у продукта (ADR-047).
+class WorkStatus(models.TextChoices):
+    """Статус работы с площадкой — общий для площадки и размещения (ADR-062).
 
-    Порядок — как в окне статуса и в фильтре: путь площадки в работу, потом
-    отказы, последним — аудит. В типе Postgres значения в том же порядке,
-    по нему сортирует колонка «статус». Как статус движется сам — `statuses`.
+    У площадки и у размещения были свои наборы слов, и одно и то же состояние
+    называлось по-разному («Одобрена» и «Запланировано», «Размещались» и
+    «Опубликовано»). Теперь словарь один: в «Площадках» человек отбирает
+    площадку в работу, в «Размещениях» ведёт её до публикации, и статус
+    читается одинаково (просьба пользователя 06.10.2026).
+
+    Порядок — путь площадки в работу, потом отказы: по нему сортирует колонка
+    «статус» и по нему же система двигает статус только вперёд (`statuses`).
     """
 
     NEW = "new", "Новая"
     VIEWED = "viewed", "Просмотрено"
-    APPROVED = "approved", "Одобрена"
+    IN_WORK = "in_work", "В работе"
     ORDERED = "ordered", "Заявка отправлена"
-    PLACED = "placed", "Размещались"
+    WRITING = "writing", "Написание статьи"
+    PLACED = "placed", "Размещено"
     DISCARDED = "discarded", "Отбрасываю"
-    DECLINED = "declined", "Отказала площадка"
+    REJECTED = "rejected", "Отказ"
     BLACKLISTED = "blacklisted", "Чёрный список"
-    AUDITING = "auditing", "На аудите"
+
+
+# Прежнее имя статуса площадки: код и тесты ещё зовут его так.
+SiteStatus = WorkStatus
 
 
 class MetricSource(models.TextChoices):
@@ -173,7 +182,7 @@ class Product(models.Model):
         """
         touched = self.product_sites.exclude(
             status=SiteStatus.NEW,
-            reject_reason__isnull=True,
+            comment__isnull=True,
             content_profile__isnull=True,
             imported_undecided=False,
         )
@@ -350,12 +359,12 @@ class ProductSite(models.Model):
     )
     status = PgEnumField(
         "статус",
-        enum_type="site_status",
+        enum_type="work_status",
         choices=SiteStatus.choices,
         default=SiteStatus.NEW,
         db_default=SiteStatus.NEW,
     )
-    reject_reason = models.TextField("причина отказа", null=True, blank=True)
+    comment = models.TextField("комментарий", null=True, blank=True)
     content_profile = models.JSONField("соответствие тематике", null=True, blank=True)
     imported_undecided = models.BooleanField(
         "импортирована без решения", default=False, db_default=False
@@ -409,9 +418,9 @@ class SiteStatusChange(models.Model):
         db_index=False,
     )
     from_status = PgEnumField(
-        "был", enum_type="site_status", choices=SiteStatus.choices, null=True, blank=True
+        "был", enum_type="work_status", choices=SiteStatus.choices, null=True, blank=True
     )
-    to_status = PgEnumField("стал", enum_type="site_status", choices=SiteStatus.choices)
+    to_status = PgEnumField("стал", enum_type="work_status", choices=SiteStatus.choices)
     source = PgEnumField(
         "откуда", enum_type="status_source", choices=StatusSource.choices, null=True, blank=True
     )
@@ -735,7 +744,7 @@ class SiteNote(models.Model):
     """Заметка о площадке — история: не правится и не удаляется (ADR-043).
 
     Автор — пользователь, или источник — файл («таблица линкбилдинга»).
-    Продукт — если заметка про решение под него (причина отказа).
+    Продукт — если заметка про решение под него (комментарий к статусу).
     """
 
     site = models.ForeignKey(
@@ -1142,8 +1151,8 @@ class ProductSiteLatest(models.Model):
     site = models.ForeignKey(
         Site, models.DO_NOTHING, verbose_name="площадка", related_name="+", db_constraint=False
     )
-    status = PgEnumField("статус", enum_type="site_status", choices=SiteStatus.choices)
-    reject_reason = models.TextField("причина отказа", null=True)
+    status = PgEnumField("статус", enum_type="work_status", choices=SiteStatus.choices)
+    comment = models.TextField("комментарий", null=True)
     imported_undecided = models.BooleanField("импортирована без решения")
     domain = models.TextField("домен")
     language = models.TextField("язык", null=True)

@@ -101,7 +101,7 @@ def base(offer: OfferFactory) -> dict[str, Any]:
     first = Placement.objects.create(
         site=egg,
         product=convertio,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         placement_type=PlacementType.GUEST_POST,
         article_url="https://www.eggradients.com/blog/image-file-conversion",
         published_at=dt.datetime(2026, 9, 11, tzinfo=MSK),
@@ -124,7 +124,7 @@ def base(offer: OfferFactory) -> dict[str, Any]:
     second = Placement.objects.create(
         site=pod,
         product=convertio,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         placement_type=PlacementType.LINK_INSERTION,
         published_at=dt.datetime(2026, 9, 30, 23, 30, tzinfo=MSK),
         price_paid_cents=10000,
@@ -138,14 +138,14 @@ def base(offer: OfferFactory) -> dict[str, Any]:
     Placement.objects.create(
         site=late,
         product=convertio,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         published_at=dt.datetime(2026, 10, 1, 0, 30, tzinfo=MSK),
     )
     Placement.objects.create(site=wait, product=convertio, status=PlacementStatus.ORDERED)
     Placement.objects.create(
         site=egg,
         product=clideo,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         article_url="https://www.eggradients.com/blog/top-7-color-perfection",
         published_at=dt.datetime(2026, 8, 1, tzinfo=MSK),
     )
@@ -212,7 +212,7 @@ def test_month_report_like_sheet(admin_client: Client, base: dict[str, Any]) -> 
     assert egg["Источник"] == "Collaborator"
     assert egg["Комментарий к площадке"] == "На доработке пока что"
     assert egg["Индексация"] == "Да"
-    assert egg["Статус"] == "Опубликовано"
+    assert egg["Статус"] == "Размещено"
     assert egg["Дата размещения"] == dt.datetime(2026, 9, 11)
     assert egg["Месяц"] == dt.datetime(2026, 9, 1)
     # Текст из файла не стал формулой.

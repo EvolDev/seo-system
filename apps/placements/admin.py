@@ -25,7 +25,9 @@ from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 from uuid import uuid4
 
+from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin import helpers
 from django.contrib.admin.utils import display_for_value
 from django.contrib.admin.views.main import ChangeList
 from django.core.cache import cache
@@ -48,13 +50,14 @@ from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLin
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
-from apps.sites.models import Product
+from apps.sites.models import Product, StatusSource, WorkStatus
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
 from apps.workspace.products import ALL, WorkingProductFilter, working_product_id
 from config import export
 from config.admin import RecordAdmin, StackedInline
 from config.assets import Css, Js
+from config.changes import stamped
 from config.export import month_name
 from config.queue import MAX_ATTEMPTS
 from config.run_id import bind_run_id, new_run_id
@@ -235,6 +238,16 @@ SERVICE = "Служебное"
 AFTER_LINKS = (CHECKS, COMMENT, SERVICE)
 
 
+class StatusActionForm(helpers.ActionForm):
+    """Поле «статус» рядом с выбором действия — для «Поставить статус…»."""
+
+    status = forms.ChoiceField(
+        choices=[("", "статус…"), *WorkStatus.choices],
+        required=False,
+        label="статус",
+    )
+
+
 @admin.register(Placement)
 class PlacementAdmin(RecordAdmin):
     """Размещения. Проверка индексации без перезагрузки страницы — кнопка ↻ в
@@ -326,7 +339,9 @@ class PlacementAdmin(RecordAdmin):
         (SERVICE, {"classes": ("collapse",), "fields": ("run_id", "created_at", "updated_at")}),
     )
     inlines = (PlacementLinkInline,)
+    action_form = StatusActionForm
     actions = (
+        "set_status_action",
         "check_indexation_action",
         "skip_checks_action",
         "resume_checks_action",
@@ -662,6 +677,26 @@ class PlacementAdmin(RecordAdmin):
             obj.pk,
             _when(obj.indexed_checked_at),
         )
+
+    @admin.action(description="Поставить статус…", permissions=["change"])
+    def set_status_action(self, request: HttpRequest, queryset: QuerySet[Placement]) -> None:
+        """Статус отмеченным размещениям — выбором рядом с действием (ADR-062).
+
+        Через `save()`, а не `update()`: по статусу размещения двигается статус
+        площадки у продукта, и это делает сам `Placement.save()`.
+        """
+        status = request.POST.get("status") or ""
+        if status not in WorkStatus.values:
+            self.message_user(request, "Выберите статус рядом с действием.", messages.WARNING)
+            return
+        changed = 0
+        with stamped(source=StatusSource.FORM):
+            for placement in queryset.exclude(status=status):
+                placement.status = WorkStatus(status)
+                placement.save(update_fields=["status", "updated_at"])
+                changed += 1
+        label = WorkStatus(status).label
+        self.message_user(request, f"Статус «{label}» поставлен: {changed}.", messages.SUCCESS)
 
     @admin.action(description="Проверить индексацию")
     def check_indexation_action(self, request: HttpRequest, queryset: QuerySet[Placement]) -> None:

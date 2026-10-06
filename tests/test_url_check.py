@@ -83,7 +83,7 @@ class TestCheck:
         placement = Placement.objects.create(
             site=Site.objects.create(domain="example.com"),
             product=product,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url=URL,
         )
         assert _check(admin_client, URL)["indexed"] is True

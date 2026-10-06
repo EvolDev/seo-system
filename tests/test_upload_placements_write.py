@@ -197,7 +197,7 @@ class TestSummary:
         Placement.objects.create(
             site=site,
             product=clideo,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url="https://vocal.media/01/ai-productivity/",
             seller=old,
         )
@@ -247,7 +247,7 @@ class TestWrite:
         upload = _write(_check(_upload(clideo, [TOMSGUIDE, VOCAL], author=author)))
         placement = Placement.objects.get(site__domain="tomsguide.com")
         assert placement.product == clideo
-        assert placement.status == PlacementStatus.PUBLISHED
+        assert placement.status == PlacementStatus.PLACED
         assert placement.article_url == TOMSGUIDE["URL статьи"]
         assert placement.published_at is not None
         assert timezone.localtime(placement.published_at).date() == dt.date(2026, 9, 14)
@@ -267,7 +267,7 @@ class TestWrite:
         assert placement.is_indexed is True
 
         vocal = Placement.objects.get(site__domain="vocal.media")
-        assert vocal.status == PlacementStatus.PUBLISHED  # пустой статус — «Опубликовано»
+        assert vocal.status == PlacementStatus.PLACED  # пустой статус — «Опубликовано»
         [link] = vocal.links.all()
         assert (link.anchor, link.target_url) == (
             "online video maker",
@@ -320,7 +320,7 @@ class TestWrite:
         placement = Placement.objects.create(
             site=site,
             product=clideo,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url="https://tomsguide.com/computing/ai-video/",
         )
         _write(_check(_upload(clideo, [TOMSGUIDE])))
@@ -337,7 +337,7 @@ class TestWrite:
         with_url = Placement.objects.create(
             site=known,
             product=clideo,
-            status=PlacementStatus.PUBLISHED,
+            status=PlacementStatus.PLACED,
             article_url="https://known.com/post",
         )
         rows = [{"Сайт": "known.com"}, {"Сайт": "https://www.fresh.com/"}]
@@ -348,7 +348,7 @@ class TestWrite:
         fresh = Placement.objects.get(site__domain="fresh.com")
         assert (fresh.article_url, fresh.status, fresh.seller) == (
             None,
-            PlacementStatus.PUBLISHED,
+            PlacementStatus.PLACED,
             seller,
         )
         assert Placement.objects.filter(product=clideo).count() == 2
@@ -542,7 +542,7 @@ def test_human_mark_does_not_hide_newer_system_check(clideo: Product) -> None:
     placement = Placement.objects.create(
         site=site,
         product=clideo,
-        status=PlacementStatus.PUBLISHED,
+        status=PlacementStatus.PLACED,
         article_url=TOMSGUIDE["URL статьи"],
         is_indexed=False,
         indexed_checked_at=checked,

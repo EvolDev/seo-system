@@ -51,7 +51,7 @@ def test_panel_gets_only_the_form(admin_client: Client, row: ProductSite) -> Non
     assert "<html" not in page
     assert '<h2 class="seo-panel-title">coingabbar.com · Convertio</h2>' in page
     # Статус — кнопками; рядом — карточка той же площадки в той же панели.
-    assert 'type="radio" name="status"' in page and 'name="reject_reason"' in page
+    assert 'type="radio" name="status"' in page and 'name="comment"' in page
     card = reverse("admin:sites_site_card", args=[row.site_id])
     assert f'<a href="{card}" data-panel>Карточка площадки</a>' in page
     assert "data-panel-save" in page
@@ -67,7 +67,7 @@ def test_without_window_opens_full_form(admin_client: Client, row: ProductSite) 
 def test_save_status_and_reason(admin_client: Client, row: ProductSite) -> None:
     response = admin_client.post(
         _url(row),
-        {"status": SiteStatus.DISCARDED, "reject_reason": "Nofollow"},
+        {"status": SiteStatus.DISCARDED, "comment": "Nofollow"},
         headers=PARTIAL,
     )
     assert response.json() == {
@@ -76,14 +76,14 @@ def test_save_status_and_reason(admin_client: Client, row: ProductSite) -> None:
     }
     row.refresh_from_db()
     assert row.status == SiteStatus.DISCARDED
-    assert row.reject_reason == "Nofollow"
+    assert row.comment == "Nofollow"
     # Решение принято — пометка «без решения» снята; причина — в истории заметок.
     assert not row.imported_undecided
     assert list(row.site.notes.values_list("body", flat=True)) == ["Nofollow"]
 
 
 def test_wrong_status_shows_form_with_error(admin_client: Client, row: ProductSite) -> None:
-    response = admin_client.post(_url(row), {"status": "New", "reject_reason": ""}, headers=PARTIAL)
+    response = admin_client.post(_url(row), {"status": "New", "comment": ""}, headers=PARTIAL)
     assert response.status_code == 200
     assert response["Content-Type"].startswith("text/html")
     assert "errorlist" in response.content.decode()
@@ -95,7 +95,7 @@ def test_view_only_user_cannot_change(client: Client, row: ProductSite) -> None:
     user = User.objects.create_user("viewer", password="x", is_staff=True)
     user.user_permissions.add(Permission.objects.get(codename="view_productsite"))
     client.force_login(user)
-    response = client.post(_url(row), {"status": SiteStatus.APPROVED}, headers=PARTIAL)
+    response = client.post(_url(row), {"status": SiteStatus.IN_WORK}, headers=PARTIAL)
     assert response.status_code == 403
     row.refresh_from_db()
     assert row.status == SiteStatus.NEW

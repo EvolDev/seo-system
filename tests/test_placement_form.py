@@ -44,7 +44,7 @@ def _url(placement: Placement) -> str:
 def _panel_form(**fields: str) -> dict[str, str]:
     """Форма панели, как её отправляет браузер: без площадки и продукта."""
     data = {
-        "status": "planned",
+        "status": "in_work",
         "placement_type": "",
         "seller": "",
         "employee": "",
@@ -137,19 +137,20 @@ class TestStatus:
         block = re.search(r'<div class="seo-choice".*?</div></div>', page, re.S)
         assert block is not None
         rows = re.findall(r'<div class="seo-choice-row">(.*?)</div>', block.group(), re.S)
-        return [re.findall(r'value="([a-z]+)"', row) for row in rows]
+        return [re.findall(r'value="([a-z_]+)"', row) for row in rows]
 
     def test_buttons_in_order(self, admin_client: Client, placement: Placement) -> None:
         page = admin_client.get(_url(placement), headers=PARTIAL).content.decode()
         values = [status.value for status in PlacementStatus]
-        assert self._buttons(page) == [values[:5], values[5:]]
+        # Два ряда: путь до публикации и отказы (ADR-062).
+        assert self._buttons(page) == [values[:2], values[2:6], values[6:]]
 
     def test_order_and_publication_fill_their_day(
         self, admin_client: Client, placement: Placement
     ) -> None:
         page = admin_client.get(_url(placement), headers=PARTIAL).content.decode()
         assert re.search(r'value="ordered"[^>]*data-fills="ordered_at"', page)
-        assert re.search(r'value="published"[^>]*data-fills="published_at"', page)
+        assert re.search(r'value="placed"[^>]*data-fills="published_at"', page)
         assert not re.search(r'value="writing"[^>]*data-fills', page)
 
     def test_status_from_panel_moves_site_status(
@@ -222,7 +223,7 @@ class TestList:
         page = response.content.decode()
         # data-seo-field — статус в строке меняется сразу после записи в панели.
         link = f'<a href="{_url(placement)}" title="Сменить статус" data-seo-field="status">'
-        assert f"{link}Запланировано</a>" in page
+        assert f"{link}В работе</a>" in page
         assert "01.10.2026" in page
         assert "15:30" not in page
 

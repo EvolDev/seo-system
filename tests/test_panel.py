@@ -194,22 +194,20 @@ class TestRowOutsideFilters:
     def test_placement_row_ignores_filters(self, admin_client: Client) -> None:
         placement = Placement.objects.create(site=_site(), product=_product())
         Placement.objects.create(site=Site.objects.create(domain="other.com"), product=_product())
-        Placement.objects.filter(pk=placement.pk).update(status="published")
+        Placement.objects.filter(pk=placement.pk).update(status="placed")
         url = reverse("admin:placements_placement_changelist")
         response = admin_client.get(
-            url, {"status__exact": "planned", "_seo_row": str(placement.pk)}
+            url, {"status__exact": "in_work", "_seo_row": str(placement.pk)}
         )
         assert response.status_code == 200
         results = response.context["cl"].result_list
         assert [row.pk for row in results] == [placement.pk]
         assert "Опубликовано" in response.content.decode()
         # Фильтры остались прежними: параметр строки не считается условием отбора.
-        assert response.context["cl"].get_filters_params() == {"status__exact": ["planned"]}
+        assert response.context["cl"].get_filters_params() == {"status__exact": ["in_work"]}
         # Под фильтр «Запланировано» запись больше не подходит — строка блёклая.
         assert response["X-Seo-Row-Match"] == "0"
-        matching = admin_client.get(
-            url, {"status__exact": "published", "_seo_row": str(placement.pk)}
-        )
+        matching = admin_client.get(url, {"status__exact": "placed", "_seo_row": str(placement.pk)})
         assert matching["X-Seo-Row-Match"] == "1"
 
     def test_row_does_not_count_whole_list(
@@ -226,7 +224,7 @@ class TestRowOutsideFilters:
     def test_without_param_list_as_usual(self, admin_client: Client) -> None:
         placement = Placement.objects.create(site=_site(), product=_product())
         url = reverse("admin:placements_placement_changelist")
-        response = admin_client.get(url, {"status__exact": "published"})
+        response = admin_client.get(url, {"status__exact": "placed"})
         assert placement not in response.context["cl"].result_list
 
     def test_bad_row_is_empty(self, admin_client: Client) -> None:

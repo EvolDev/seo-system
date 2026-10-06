@@ -35,13 +35,13 @@ _MONTHS = (
 STATUS_TONES = {
     SiteStatus.NEW: "info",
     SiteStatus.VIEWED: "info",
-    SiteStatus.APPROVED: "ok",
+    SiteStatus.IN_WORK: "ok",
     SiteStatus.ORDERED: "ok",
     SiteStatus.PLACED: "ok",
     SiteStatus.DISCARDED: "no",
-    SiteStatus.DECLINED: "no",
+    SiteStatus.REJECTED: "no",
     SiteStatus.BLACKLISTED: "no",
-    SiteStatus.AUDITING: "mark",
+    SiteStatus.IN_WORK: "mark",
 }
 
 

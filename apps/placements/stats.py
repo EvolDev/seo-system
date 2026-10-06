@@ -28,7 +28,7 @@ WITH placed AS (
                WHERE ii.placement_id = p.id AND i.status <> 'cancelled'
            ) AS invoiced
     FROM placements p
-    WHERE p.status = 'published'
+    WHERE p.status = 'placed'
       AND p.published_at >= %(start)s AND p.published_at < %(end)s
       AND (%(product)s::bigint IS NULL OR p.product_id = %(product)s::bigint)
 )
@@ -44,7 +44,7 @@ ORDER BY month
 
 _NO_DATE_SQL = """
 SELECT count(*) FROM placements p
-WHERE p.status = 'published' AND p.published_at IS NULL
+WHERE p.status = 'placed' AND p.published_at IS NULL
   AND (%(product)s::bigint IS NULL OR p.product_id = %(product)s::bigint)
 """
 

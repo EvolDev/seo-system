@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.19 от 06.10.2026 — общий статус работы: площадка и размещение (ADR-062)
 -- Версия 1.18 от 05.10.2026 — журнал загрузок: отмена загрузки целиком (ADR-060)
 -- Версия 1.17 от 05.10.2026 — анкоры продукта: доли типов страниц и стран, безанкорка (ADR-059)
 -- Версия 1.16 от 05.10.2026 — свёрнутые разделы карточки площадки у пользователя (ADR-058)
@@ -40,16 +41,16 @@ CREATE TABLE auth_user (
 
 -- ---------- Перечисления ----------
 
--- Порядок — как в окне статуса: путь в работу, отказы, аудит; по нему сортирует
--- колонка «статус». Как статус движется сам — apps/sites/statuses.py (ADR-047).
-CREATE TYPE site_status AS ENUM
-    ('new','viewed','approved','ordered','placed','discarded','declined','blacklisted','auditing');
+-- Статус работы с площадкой — общий у площадки и у размещения (ADR-062): одно
+-- состояние называется одинаково в «Площадках» и в «Размещениях». Порядок — путь
+-- в работу, потом отказы; по нему сортирует колонка «статус» и по нему система
+-- двигает статус только вперёд (apps/sites/statuses.py, ADR-047).
+CREATE TYPE work_status AS ENUM
+    ('new','viewed','in_work','ordered','writing','placed','discarded','rejected','blacklisted');
 CREATE TYPE metric_source AS ENUM
     ('ahrefs_api','serp_api','manual','csv_import','collaborator_api','ahrefs_batch');
 CREATE TYPE audit_verdict AS ENUM ('yes','no','borderline');
 CREATE TYPE audit_author AS ENUM ('human','llm','system');
-CREATE TYPE placement_status AS ENUM
-    ('planned','ordered','writing','review','published','rejected','cancelled');
 -- exact — точный ключ; diluted — ключ внутри фразы; branded, url, generic — безанкорка
 -- (бренд, голый URL, нейтральное «here»), как во вкладке «Распределение безанкорки».
 CREATE TYPE anchor_type AS ENUM ('exact','diluted','branded','url','generic');
@@ -139,8 +140,8 @@ CREATE TABLE product_sites (
     id                  bigserial PRIMARY KEY,
     product_id          bigint NOT NULL REFERENCES products(id),
     site_id             bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-    status              site_status NOT NULL DEFAULT 'new',
-    reject_reason       text,
+    status              work_status NOT NULL DEFAULT 'new',
+    comment             text,               -- наш комментарий к решению: виден при любом статусе
     content_profile     jsonb,              -- результат P2 под этот продукт: тематика, fit_score
     imported_undecided  boolean NOT NULL DEFAULT false,
     created_at          timestamptz NOT NULL DEFAULT now(),
@@ -375,7 +376,7 @@ CREATE TABLE placements (
     site_id                bigint NOT NULL REFERENCES sites(id),
     product_id             bigint NOT NULL REFERENCES products(id),
     article_url            text,
-    status                 placement_status NOT NULL DEFAULT 'planned',
+    status                 work_status NOT NULL DEFAULT 'in_work',
     collaborator_order_id  text,
     placement_type         placement_type,
     ad_label_requested     boolean NOT NULL DEFAULT false, -- пометку «реклама» заказали мы
@@ -410,8 +411,8 @@ CREATE INDEX idx_placements_pub ON placements(published_at DESC);
 CREATE TABLE site_status_changes (
     id               bigserial PRIMARY KEY,
     product_site_id  bigint NOT NULL REFERENCES product_sites(id),
-    from_status      site_status,
-    to_status        site_status NOT NULL,
+    from_status      work_status,
+    to_status        work_status NOT NULL,
     source           status_source,
     actor_id         integer REFERENCES auth_user(id),
     placement_id     bigint REFERENCES placements(id),
@@ -424,8 +425,8 @@ CREATE INDEX idx_site_status_changes ON site_status_changes(product_site_id, cha
 CREATE TABLE placement_status_changes (
     id            bigserial PRIMARY KEY,
     placement_id  bigint NOT NULL REFERENCES placements(id),
-    from_status   placement_status,
-    to_status     placement_status NOT NULL,
+    from_status   work_status,
+    to_status     work_status NOT NULL,
     source        status_source,
     actor_id      integer REFERENCES auth_user(id),
     run_id        uuid,
@@ -1030,8 +1031,8 @@ SELECT
     (SELECT position FROM keyword_positions kp
       WHERE kp.keyword_id = k.id AND kp.country = 'US'
       ORDER BY checked_at DESC LIMIT 1) AS last_position,
-    COUNT(pl.id) FILTER (WHERE p.status = 'published') AS links_placed,
-    COUNT(pl.id) FILTER (WHERE p.status IN ('planned','ordered','writing','review')) AS links_waiting,
+    COUNT(pl.id) FILTER (WHERE p.status = 'placed') AS links_placed,
+    COUNT(pl.id) FILTER (WHERE p.status IN ('in_work','ordered','writing')) AS links_waiting,
     k.global_volume,
     k.page_type,
     k.anchor_type::text AS anchor_type,
@@ -1067,7 +1068,7 @@ SELECT
 FROM placement_links pl
 JOIN placements p ON p.id = pl.placement_id
 JOIN sites s ON s.id = p.site_id
-WHERE p.status = 'published';
+WHERE p.status = 'placed';
 
 CREATE VIEW v_site_funnel AS
 SELECT ps.product_id, ps.status, ps.imported_undecided, count(*) AS sites
@@ -1090,7 +1091,7 @@ UNION ALL
 SELECT date_trunc('month', published_at)::date, 'placements',
        coalesce(currency, 'EUR'), sum(price_paid_cents)
 FROM placements
-WHERE status = 'published' AND published_at IS NOT NULL
+WHERE status = 'placed' AND published_at IS NOT NULL
 GROUP BY 1, 3;
 
 -- «С первой попытки» = у версии 1 нет проваленных проверок critical/medium.
@@ -1213,7 +1214,7 @@ WHERE NOT s.is_deleted;
 -- сколько заплатим площадке на самом деле. Настройки или цены нет — пусто:
 -- порог не угадываем.
 CREATE VIEW v_product_site_latest AS
-SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.reject_reason, ps.imported_undecided,
+SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.comment, ps.imported_undecided,
        l.domain, l.language, l.topics, l.declared_topics,
        l.links_allowed, l.link_type, l.marks_as_ad,
        l.dr, l.organic_traffic, l.total_keywords, l.top_geo, l.top_geo_traffic, l.top_geo_at,
@@ -1248,11 +1249,11 @@ LEFT JOIN LATERAL (SELECT * FROM site_audits x
                    ORDER BY created_at DESC LIMIT 1) a ON true
 LEFT JOIN LATERAL (SELECT count(*) AS published FROM placements x
                    WHERE x.site_id = ps.site_id AND x.product_id = ps.product_id
-                     AND x.status = 'published') pp ON true
+                     AND x.status = 'placed') pp ON true
 LEFT JOIN LATERAL (SELECT array_agg(DISTINCT pr.name ORDER BY pr.name) AS names
                    FROM placements x JOIN products pr ON pr.id = x.product_id
                    WHERE x.site_id = ps.site_id AND x.product_id <> ps.product_id
-                     AND x.status = 'published') op ON true;
+                     AND x.status = 'placed') op ON true;
 
 -- Последний замер площадки по каждой стране (ADR-045): колонки «трафик» и «ключи»
 -- выбранного региона в «Площадках». Страна здесь есть, только если под неё грузили
