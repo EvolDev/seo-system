@@ -50,6 +50,7 @@ from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLin
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
+from apps.sites.display import domain_tools_html, remove_placement_html
 from apps.sites.models import Product, StatusSource, WorkStatus
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
@@ -256,6 +257,10 @@ class PlacementChangeList(PerPageChangeList):
     """
 
     def get_results(self, request: HttpRequest) -> None:
+        # «N всего» считается по этому запросу: он должен быть в той же рамке,
+        # что и строки, иначе счётчик говорит про оба продукта (E1-20).
+        working = working_product_id(request)
+        self.root_queryset = self.root_queryset.filter(product_id=working)
         super().get_results(request)
         found = other_products.by_site(row.site_id for row in self.result_list)
         for row in self.result_list:
@@ -278,7 +283,7 @@ class PlacementAdmin(RecordAdmin):
     panel = True
     form = PlacementForm
     list_display = (
-        "site",
+        "site_link",
         "status_link",
         "placement_type",
         "published_day",
@@ -288,6 +293,9 @@ class PlacementAdmin(RecordAdmin):
         "skip_checks",
         "other_products_cell",
     )
+    # Запись открывает домен в первой колонке (`site_link`), а не обёртка Django:
+    # рядом с ним свои значки, а вложенные ссылки недопустимы (E1-20).
+    list_display_links = None
     list_filter = (
         FrameProductFilter,
         PublishedMonthFilter,
@@ -538,6 +546,22 @@ class PlacementAdmin(RecordAdmin):
         # Статус — кнопками в самой форме, продукт — рабочий, из шапки (ADR-063):
         # в заголовке оба лишние.
         return str(obj.site.domain)
+
+    @admin.display(description="площадка", ordering="site__domain")
+    def site_link(self, obj: Placement) -> SafeString:
+        """Домен открывает само размещение, рядом — значки площадки (E1-20).
+
+        Ссылка ведёт на запись этого же списка, поэтому панель открывает её сама
+        (`seo/panel.js`), а Ctrl — отдельной страницей. Своя ссылка в ячейке
+        нужна из-за значков: вкладывать их в обёртку Django нельзя.
+        """
+        remove = remove_placement_html(reverse("admin:placements_placement_delete", args=[obj.pk]))
+        return format_html(
+            '<a href="{}" title="Карточка размещения">{}</a>{}',
+            reverse("admin:placements_placement_change", args=[obj.pk]),
+            obj.site.domain,
+            domain_tools_html(obj.site.domain, remove),
+        )
 
     @admin.display(description="другие продукты")
     def other_products_cell(self, obj: Placement) -> SafeString | str:

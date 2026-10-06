@@ -54,10 +54,12 @@ from apps.sites.display import (
     delta_html,
     delta_text,
     domain_tools_html,
+    placement_card_html,
     price_html,
     round_euros,
     seller_mark,
     site_url,
+    take_placement_html,
     writing_html,
 )
 from apps.sites.domains import normalize_domain
@@ -1691,7 +1693,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         "writing_cell",
         "expected_spend",
         "verdict",
-        "placements_cell",
+        "placements_published",
         "other_products_cell",
         "notes_cell",
     )
@@ -1720,6 +1722,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
     show_full_result_count = False
     action_form = SellerActionForm
     actions = (
+        "take_placement_action",
         "set_status_action",
         "accept_new_prices_action",
         "fix_seller_action",
@@ -1828,12 +1831,20 @@ class ProductSiteLatestAdmin(RecordAdmin):
     @admin.display(description="домен", ordering="domain")
     def domain_link(self, obj: ProductSiteLatest) -> SafeString:
         # Карточка открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
-        # скрипта — отдельной страницей. Рядом — открыть сайт и скопировать домен.
+        # скрипта — отдельной страницей. Рядом — открыть сайт, скопировать домен
+        # и размещение рабочего продукта: его карточка или пустая форма (E1-20).
+        found: list[other_products.Row] = getattr(obj, "page_products", [])
+        placement = other_products.own(found, obj.product_id)
+        tool = (
+            placement_card_html(other_products.card_url(placement))
+            if placement is not None
+            else take_placement_html(other_products.add_url(obj.site_id, obj.product_id))
+        )
         return format_html(
             '<a href="{}" data-panel title="Карточка площадки">{}</a>{}',
             card_url(obj.site_id),
             obj.domain,
-            domain_tools_html(obj.domain),
+            domain_tools_html(obj.domain, tool),
         )
 
     @admin.display(description="статус", ordering="status")
@@ -1962,17 +1973,6 @@ class ProductSiteLatestAdmin(RecordAdmin):
         label = obj.get_last_verdict_display()
         return label if obj.last_score is None else f"{label}, {obj.last_score}"
 
-    @admin.display(description="размещения", ordering="placements_published")
-    def placements_cell(self, obj: ProductSiteLatest) -> SafeString:
-        """Дверь в карточку размещения рабочего продукта; нет его — пустая форма (E1-19)."""
-        found: list[other_products.Row] = getattr(obj, "page_products", [])
-        return other_products.door(
-            other_products.own(found, obj.product_id),
-            obj.site_id,
-            obj.product_id,
-            obj.placements_published,
-        )
-
     @admin.display(description="другие продукты")
     def other_products_cell(self, obj: ProductSiteLatest) -> SafeString | str:
         # Статья другого продукта «уже работали» не делает, но её видно (ADR-033).
@@ -2011,6 +2011,38 @@ class ProductSiteLatestAdmin(RecordAdmin):
             return
         result = offers.fix_seller(_site_ids(queryset), seller, author=request.user)
         self._report(request, result, f"нет предложения {seller} или оно уже рабочее")
+
+    @admin.action(description="Взять в размещение", permissions=["take_placement"])
+    def take_placement_action(
+        self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
+    ) -> None:
+        """Заводит размещения рабочего продукта отмеченным площадкам (E1-20).
+
+        Статус новой записи — «В работе» (решение пользователя 07.10.2026); за
+        ним идёт статус площадки, это делает `Placement.save()` (ADR-062). У кого
+        размещение рабочего продукта уже есть, того пропускаем.
+        """
+        working = working_product_id(request)
+        if working is None:
+            self.message_user(request, "Сначала выберите продукт в шапке.", messages.WARNING)
+            return
+        sites = list(dict.fromkeys(queryset.values_list("site_id", flat=True)))
+        have = set(
+            Placement.objects.filter(site_id__in=sites, product_id=working).values_list(
+                "site_id", flat=True
+            )
+        )
+        fresh = [site_id for site_id in sites if site_id not in have]
+        with stamped(source=StatusSource.FORM):
+            for site_id in fresh:
+                Placement.objects.create(site_id=site_id, product_id=working)
+        text = f"Взято в размещение: {len(fresh)}."
+        if have:
+            text += f" Пропущено, размещение уже есть: {len(have)}."
+        self.message_user(request, text, messages.SUCCESS if fresh else messages.WARNING)
+
+    def has_take_placement_permission(self, request: HttpRequest) -> bool:
+        return bool(request.user.has_perm("placements.add_placement"))
 
     @admin.action(description="Поставить статус…", permissions=["change_status"])
     def set_status_action(

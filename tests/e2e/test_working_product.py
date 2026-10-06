@@ -38,7 +38,7 @@ def placements() -> tuple[Product, Product]:
 
 
 def _sites(page: Page) -> set[str]:
-    texts = page.locator("#result_list tbody .field-site a").all_inner_texts()
+    texts = page.locator("#result_list tbody .field-site_link > a").all_inner_texts()
     return {text.strip() for text in texts if text.strip()}
 
 
@@ -125,7 +125,7 @@ def test_check_url_shows_verdict(
 
     # Фильтр не стирает адрес в поле.
     with soft_load(page):
-        page.locator("#result_list thead th.column-site .text a").dispatch_event("click")
+        page.locator("#result_list thead th.column-site_link .text a").dispatch_event("click")
     expect(field).to_have_value("conv0.com/blog/post/")
 
     field.fill("не адрес")

@@ -15,7 +15,7 @@ from collections.abc import Iterable
 
 from django.db.models import F
 from django.urls import reverse
-from django.utils.html import format_html, format_html_join
+from django.utils.html import format_html_join
 from django.utils.safestring import SafeString
 
 from apps.placements.models import Placement
@@ -73,18 +73,3 @@ def card_url(placement_id: int) -> str:
 def add_url(site_id: int, product_id: int) -> str:
     """Пустая форма размещения под рабочий продукт: площадка и продукт подставлены."""
     return f"{reverse('admin:placements_placement_add')}?site={site_id}&product={product_id}"
-
-
-def door(
-    placement_id: int | None, site_id: int, product_id: int, published: int | None
-) -> SafeString:
-    """Колонка «размещения»: карточка рабочего продукта, а нет её — пустая форма."""
-    if placement_id is None:
-        return format_html(
-            '<a href="{}" data-panel title="Завести размещение">+</a>', add_url(site_id, product_id)
-        )
-    return format_html(
-        '<a href="{}" data-panel title="Карточка размещения">{}</a>',
-        card_url(placement_id),
-        published or "—",
-    )

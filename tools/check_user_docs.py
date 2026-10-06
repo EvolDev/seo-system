@@ -36,13 +36,29 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import markdown
 import yaml
+
+
+def _today() -> dt.date:
+    """Сегодня — по времени проекта (TIME_ZONE), а не по UTC контейнера.
+
+    Иначе вечерняя правка «из будущего»: в контейнере UTC, а работаем мы по
+    московскому времени.
+    """
+    zone = os.environ.get("TIME_ZONE", "Europe/Moscow")
+    try:
+        return dt.datetime.now(ZoneInfo(zone)).date()
+    except ZoneInfoNotFoundError:
+        return dt.date.today()
+
 
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -139,7 +155,7 @@ def check_page(
     updated = meta.get("updated")
     if not isinstance(updated, dt.date):
         report.err(path, "updated должен быть датой ГГГГ-ММ-ДД")
-    elif updated > dt.date.today():
+    elif updated > _today():
         report.err(path, f"updated {updated} — дата из будущего")
 
     tasks = meta.get("tasks", [])
