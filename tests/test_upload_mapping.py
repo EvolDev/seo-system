@@ -108,6 +108,38 @@ class TestMemory:
         assert questions == []
 
 
+class TestGuessByValues:
+    """Заголовок незнакомый — смотрим на значения (прайс Zain MediaX, 06.10.2026)."""
+
+    @pytest.fixture
+    def zain(self, tmp_path: Path) -> Table:
+        return _table(
+            tmp_path,
+            [
+                ["BLOG", "Traffic", "Price USD", "Post Type"],
+                ["https://www.portotheme.com/", 21400, "$170.00", "Both"],
+                ["https://amasty.com/", 88800, "$320.00", "Link insertion"],
+                ["https://www.socialchamp.com/", 27000, "$320.00", "Link insertion"],
+            ],
+        )
+
+    def test_urls_are_the_site_column(self, zain: Table) -> None:
+        guesses = guess_columns(zain.columns)
+        assert guesses["blog"].field == Field.DOMAIN
+        assert guesses["blog"].confidence == Confidence.LIKELY
+
+    def test_services_are_the_service_column(self, zain: Table) -> None:
+        assert guess_columns(zain.columns)["post type"].field == Field.SERVICE
+
+    def test_price_follows_the_service_column(self, zain: Table) -> None:
+        # Раз услуга есть в файле, цена — за неё, а не «публикация».
+        assert guess_columns(zain.columns)["price usd"].field == Field.PRICE
+
+    def test_the_whole_file_passes_validation(self, zain: Table) -> None:
+        mapping = {key: guess.field for key, guess in guess_columns(zain.columns).items()}
+        assert validate_mapping(mapping, zain.columns) == []
+
+
 class TestValidate:
     def test_needs_domain_and_price(self, tmp_path: Path) -> None:
         table = _table(tmp_path, [["Site", "DR"], ["a.com", 1]])
@@ -116,9 +148,15 @@ class TestValidate:
         assert any("ценой" in e for e in errors)
 
     def test_price_and_service_go_together(self, tmp_path: Path) -> None:
+        """Ошибка говорит, что именно отметить, — а не только что «вместе»."""
         table = _table(tmp_path, [["Site", "Price"], ["a.com", 1]])
         errors = validate_mapping({"site": Field.DOMAIN, "price": Field.PRICE}, table.columns)
-        assert any("выбираются вместе" in e for e in errors)
+        assert any("Отметьте колонку, где написано" in e for e in errors)
+
+        table = _table(tmp_path, [["Site", "Price", "Type"], ["a.com", 1, "Both"]])
+        mapping = {"site": Field.DOMAIN, "price": Field.GUEST_POST, "type": Field.SERVICE}
+        errors = validate_mapping(mapping, table.columns)
+        assert any("размечена как услуга" in e for e in errors)
 
     def test_one_column_per_field(self, tmp_path: Path) -> None:
         table = _table(tmp_path, [["Site", "A", "B"], ["a.com", 1, 2]])

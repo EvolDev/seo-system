@@ -10,10 +10,11 @@
 """
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from apps.sites.uploads import values
 from apps.sites.uploads.files import Column, header_key
 from apps.sites.uploads.values import currency_in
 
@@ -46,8 +47,8 @@ FIELD_LABELS: dict[Field, str] = {
     Field.DOMAIN: "Площадка (домен или адрес)",
     Field.GUEST_POST: "Цена публикации",
     Field.LINK_INSERTION: "Цена вставки ссылки",
-    Field.PRICE: "Цена услуги из колонки «Услуга»",
-    Field.SERVICE: "Услуга (публикация, вставка, Both)",
+    Field.PRICE: "Цена за услугу из колонки «Услуга»",
+    Field.SERVICE: "Услуга: публикация, вставка или Both",
     Field.GRAY: "Серая цена",
     Field.WRITING: "Цена написания",
     Field.ANNOUNCE: "Цена анонса",
@@ -161,7 +162,16 @@ _EXACT: dict[str, Field] = {
         Field.GRAY,
     ),
     **dict.fromkeys(
-        ("type", "placement type", "service", "услуга", "тип размещения", "тип услуги"),
+        (
+            "type",
+            "post type",
+            "placement type",
+            "service",
+            "услуга",
+            "тип размещения",
+            "тип поста",
+            "тип услуги",
+        ),
         Field.SERVICE,
     ),
     **dict.fromkeys(("dr", "ahrefs dr", "domain rating"), Field.DR),
@@ -180,7 +190,10 @@ _FOREIGN = ("collab", "коллаб", "коллоб")
 def guess_columns(columns: Sequence[Column]) -> dict[str, Guess]:
     """Догадка по каждой колонке: поле и уверенность. Ключ — `Column.key`."""
     tokens = {column.key: _tokens(column.header) for column in columns}
-    has_service = any(_exact_field(column.key) == Field.SERVICE for column in columns)
+    has_service = any(
+        _exact_field(column.key) == Field.SERVICE or _looks_like(column, values.parse_service)
+        for column in columns
+    )
     guesses: dict[str, Guess] = {}
     for column in columns:
         guesses[column.key] = _guess(column, tokens[column.key], has_service=has_service)
@@ -219,10 +232,17 @@ def validate_mapping(mapping: Mapping[str, Field], columns: Sequence[Column]) ->
     if not any(field in by_field for field in PRICE_FIELDS):
         errors.append("Укажите хотя бы одну колонку с ценой.")
     if (Field.PRICE in by_field) != (Field.SERVICE in by_field):
-        errors.append(
-            "«Цена услуги из колонки «Услуга»» и «Услуга» выбираются вместе: "
-            "услуга говорит, за что эта цена."
-        )
+        if Field.SERVICE in by_field:
+            errors.append(
+                f"Колонка «{by_field[Field.SERVICE][0]}» размечена как услуга — "
+                f"выберите и колонку с ценой: «{Field.PRICE.label}»."
+            )
+        else:
+            errors.append(
+                f"«{Field.PRICE.label}» выбрана, но не сказано, за какую услугу. "
+                "Отметьте колонку, где написано «публикация», «вставка» или «Both», "
+                f"как «{Field.SERVICE.label}»."
+            )
     for field in sorted(SINGLE_FIELDS, key=list(Field).index):
         if len(by_field.get(field, [])) > 1:
             names = ", ".join(f"«{name}»" for name in by_field[field])
@@ -318,7 +338,40 @@ def _guess(column: Column, tokens: set[str], *, has_service: bool) -> Guess:
         return Guess(Field.LINK_TYPE, Confidence.LIKELY)
     if tokens & {"comment", "comments", "комментарий", "комментарии", "примечание", "заметка"}:
         return Guess(Field.NOTE, Confidence.LIKELY, "Похоже на наши пометки — пойдут в заметки.")
+    # Заголовок ничего не сказал — смотрим на сами значения: «BLOG» со списком
+    # адресов и «Post Type» со словами «Both» и «Link insertion» узнаются так
+    # (пользователь 06.10.2026: прайс Zain MediaX с такими заголовками).
+    if _looks_like(column, _domain_of):
+        return Guess(Field.DOMAIN, Confidence.LIKELY, "В колонке адреса сайтов.")
+    if _looks_like(column, values.parse_service):
+        return Guess(
+            Field.SERVICE, Confidence.LIKELY, "В колонке услуги: публикация, вставка, Both."
+        )
     return Guess(Field.EXTRA, Confidence.UNKNOWN)
+
+
+def _domain_of(value: object) -> str:
+    """Домен из значения; не адрес и не домен — ValueError, как у разборщика услуги."""
+    domain, _ = values.parse_domain(value)
+    return domain
+
+
+def _looks_like(column: Column, parse: "Callable[[object], object]") -> bool:
+    """Значения колонки разбираются этим разборщиком — значит, поле его.
+
+    Хватает двух третей первых значений: в прайсе встречаются пустые ячейки и
+    пометки вроде «n/a».
+    """
+    if not column.samples:
+        return False
+    good = 0
+    for sample in column.samples:
+        try:
+            parsed = parse(sample)
+        except ValueError:
+            continue
+        good += parsed is not None
+    return good * 3 >= len(column.samples) * 2
 
 
 def _one_column_per_field(

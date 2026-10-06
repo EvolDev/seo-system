@@ -462,6 +462,13 @@ class UploadAdmin(RecordAdmin):
                 _start_check(upload)
                 return HttpResponseRedirect(_url("summary", upload))
         columns = upload.columns or []
+        if errors:
+            # Ошибка разметки не должна стирать выбор человека: показываем то,
+            # что он отправил, а не прошлые догадки (просьба 06.10.2026).
+            columns = [
+                column | {"field": mapping.get(str(column["key"]), column.get("field"))}
+                for column in columns
+            ]
         context = {
             **self._context(request, "Колонки файла", step=2, upload=upload),
             "errors": errors,
