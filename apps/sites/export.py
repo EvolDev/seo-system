@@ -69,7 +69,7 @@ _AFTER_REGION: tuple[tuple[str, Column, str], ...] = (
     ("last_verdict", Column("Аудит", width=12), WORK),
     ("last_score", Column("Оценка", Kind.INT, 7), WORK),
     ("placements_published", Column("Опубликовано", Kind.INT, 8), WORK),
-    ("other_products_placed", Column("Другие продукты", width=16), WORK),
+    ("other_products", Column("Другие продукты", width=16), WORK),
     ("topics", Column("Тематики", width=30), SITE),
     ("declared_topics", Column("Особые тематики", width=24), SITE),
     ("link_type", Column("Тип ссылки", width=10), SITE),

@@ -88,6 +88,13 @@ class UserSettings(models.Model):
         default=list,
         db_default=Value([], output_field=ArrayField(models.TextField())),
     )
+    # Выбор фильтров, который экран помнит (E1-19): экран → параметр адреса →
+    # значение. Экран — «приложение.модель», как у наборов «Моих фильтров».
+    filters = models.JSONField(
+        "выбор фильтров",
+        default=dict,
+        db_default=Value({}, output_field=models.JSONField()),
+    )
     updated_at = models.DateTimeField("изменено", db_default=PgNow())
 
     class Meta:

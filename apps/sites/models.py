@@ -1209,8 +1209,10 @@ class ProductSiteLatest(models.Model):
     last_score = models.SmallIntegerField("оценка", null=True)
     audited_at = models.DateTimeField("дата аудита", null=True)
     placements_published = models.BigIntegerField("опубликовано")
-    other_products_placed = ArrayField(
-        models.TextField(), verbose_name="размещались другие продукты", null=True
+    # Любой статус, не только «Размещено»: взятую в работу чужую площадку видно
+    # до публикации (E1-19).
+    other_products = ArrayField(
+        models.TextField(), verbose_name="другие продукты на площадке", null=True
     )
 
     class Meta:

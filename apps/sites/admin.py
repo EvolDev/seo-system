@@ -43,7 +43,7 @@ from apps.content.admin import (
 )
 from apps.content.domain_settings import gray_terms, gray_zones
 from apps.content.models import DomainSetting
-from apps.placements import invoices
+from apps.placements import invoices, other_products
 from apps.placements.models import Invoice, InvoiceStatus, Placement
 from apps.sites import ahrefs_domains, countries, gray_scan, offers, sellers
 from apps.sites import export as site_export
@@ -87,7 +87,13 @@ from apps.sites.site_card import STATUS_TONES, euros, fields_text, note_rows, no
 from apps.sites.site_card import price_summary as card_price_summary
 from apps.sites.status_history import site_history
 from apps.workspace import card as card_sections
-from apps.workspace.products import WorkingProductFilter, products_of, working_product_id
+from apps.workspace.filters import Remembering
+from apps.workspace.products import (
+    FrameProductFilter,
+    WorkingProductFilter,
+    products_of,
+    working_product_id,
+)
 from config import export
 from config.admin import (
     MultiChoiceFilter,
@@ -1163,10 +1169,11 @@ def _euros(cents: int | None) -> str:
 
 
 class ProductFilter(admin.SimpleListFilter):
-    """Продукт, чьими глазами смотрим на площадки. Пункта «все» нет: одна
-    площадка у двух продуктов дала бы две строки с разными статусами (ADR-030).
+    """Продукт одного экрана: пункта «все» нет, без выбора — рабочий (ADR-057).
 
-    Без выбора — рабочий продукт пользователя (ADR-057).
+    Остался у «Анкоров», где доли считаются по одному продукту. В «Площадках»
+    продукт строк задаёт шапка, а фильтр сужает по «другим продуктам»
+    (`ProductFrameFilter`, E1-19).
     """
 
     title = "продукт"
@@ -1198,8 +1205,20 @@ class ProductFilter(admin.SimpleListFilter):
         yield from choices
 
 
-class SiteListFilter(admin.SimpleListFilter):
-    """Рабочий список (ADR-033). Без выбора — самый новый список."""
+class ProductFrameFilter(FrameProductFilter):
+    """Продукт «Площадок»: строки — рабочего продукта, выбор сужает по размещениям.
+
+    Параметр адреса прежний (`product`): старые ссылки и наборы «Моих
+    фильтров» открываются, только читаются теперь как сужение (ADR-063).
+    """
+
+    parameter_name = "product"
+
+
+class SiteListFilter(Remembering, admin.SimpleListFilter):
+    """Рабочий список (ADR-033). Без выбора — тот, что выбирали в прошлый раз,
+    а не выбирали ни разу — все площадки (E1-19).
+    """
 
     title = "список"
     parameter_name = "list"
@@ -1209,19 +1228,22 @@ class SiteListFilter(admin.SimpleListFilter):
         lists = SiteList.objects.order_by("-created_at", "-pk").values_list("pk", "name")
         return [*((str(pk), name) for pk, name in lists), (self.ALL, "Все площадки")]
 
-    def value(self) -> str | None:
-        value = super().value()
-        if not value:
-            # Первый пункт — самый новый список, а если списков нет — «все».
-            value = self.lookup_choices[0][0]
-            self.used_parameters[self.parameter_name] = value
-        return str(value)
+    def value(self) -> str:
+        value = self.last_choice()
+        known = {lookup for lookup, _ in self.lookup_choices}
+        if value is None or (self.url_value is None and value not in known):
+            # Запомненный список могли удалить — тогда снова все площадки. Мусор
+            # в адресе остаётся мусором: список на него покажет пусто.
+            value = self.ALL
+        self.used_parameters[self.parameter_name] = value
+        return value
 
     def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
         value = self.value()
+        self.keep(value)
         if value == self.ALL:
             return queryset
-        if value is None or not value.isdigit():
+        if not value.isdigit():
             return queryset.none()
         in_list = SiteListItem.objects.filter(site_list_id=int(value)).values("site_id")
         return queryset.filter(site_id__in=in_list)
@@ -1632,8 +1654,10 @@ class OffersChangeList(PerPageChangeList):
     def get_results(self, request: HttpRequest) -> None:
         super().get_results(request)
         by_site = offers.current_offers(row.site_id for row in self.result_list)
+        placed = other_products.by_site(row.site_id for row in self.result_list)
         for row in self.result_list:
             row.page_offers = by_site.get(row.site_id, [])
+            row.page_products = placed.get(row.site_id, [])
         # «Домены для Ahrefs» выбранного списка — ссылка над таблицей, без лишнего запроса.
         self.ahrefs_url = None
         for spec in self.filter_specs:
@@ -1667,13 +1691,13 @@ class ProductSiteLatestAdmin(RecordAdmin):
         "writing_cell",
         "expected_spend",
         "verdict",
-        "placements_published",
-        "other_products",
+        "placements_cell",
+        "other_products_cell",
         "notes_cell",
     )
     list_display_links = None
     list_filter = (
-        ProductFilter,
+        ProductFrameFilter,
         SiteListFilter,
         WorkedFilter,
         RefsFilter,
@@ -1938,13 +1962,22 @@ class ProductSiteLatestAdmin(RecordAdmin):
         label = obj.get_last_verdict_display()
         return label if obj.last_score is None else f"{label}, {obj.last_score}"
 
+    @admin.display(description="размещения", ordering="placements_published")
+    def placements_cell(self, obj: ProductSiteLatest) -> SafeString:
+        """Дверь в карточку размещения рабочего продукта; нет его — пустая форма (E1-19)."""
+        found: list[other_products.Row] = getattr(obj, "page_products", [])
+        return other_products.door(
+            other_products.own(found, obj.product_id),
+            obj.site_id,
+            obj.product_id,
+            obj.placements_published,
+        )
+
     @admin.display(description="другие продукты")
-    def other_products(self, obj: ProductSiteLatest) -> str:
+    def other_products_cell(self, obj: ProductSiteLatest) -> SafeString | str:
         # Статья другого продукта «уже работали» не делает, но её видно (ADR-033).
-        if not obj.other_products_placed:
-            return ""
-        url = reverse("admin:placements_placement_changelist") + f"?site__id__exact={obj.site_id}"
-        return format_html('<a href="{}">{}</a>', url, ", ".join(obj.other_products_placed))
+        found: list[other_products.Row] = getattr(obj, "page_products", [])
+        return other_products.cell(other_products.others(found, obj.product_id))
 
     @admin.display(description="заметки", ordering="notes_count")
     def notes_cell(self, obj: ProductSiteLatest) -> SafeString | str:
@@ -2025,12 +2058,11 @@ class ProductSiteLatestAdmin(RecordAdmin):
 
 
 def _chosen_product(changelist: ChangeList) -> str:
-    """Название продукта, выбранного в фильтре списка (без выбора — первый активный)."""
+    """Название рабочего продукта: строки списка и выгрузка — под него (ADR-063)."""
     for spec in changelist.filter_specs:
-        if isinstance(spec, ProductFilter):
-            value = spec.value()
+        if isinstance(spec, ProductFrameFilter):
             names = dict(spec.lookup_choices)
-            return str(names.get(value, "")) if value else ""
+            return str(names.get(str(spec.working), ""))
     return ""
 
 

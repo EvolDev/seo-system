@@ -58,12 +58,16 @@ def test_switch_product_in_header(
     expect(page.locator("#result_list tbody tr")).to_have_count(3)
     assert all(name.startswith("conv") for name in _sites(page))
 
-    # Фильтр в колонке — разовый: «Все», шапка не меняется.
+    # Фильтр в колонке — лупа: сужает по «другим продуктам», шапку не меняет.
+    dropdown = page.locator(".list-filter-dropdown").filter(has_text="Продукт")
     with soft_load(page):
-        dropdown = page.locator(".list-filter-dropdown").filter(has_text="Продукт")
-        dropdown.locator("select").select_option(label="Все")
-    expect(page.locator("#result_list tbody tr")).to_have_count(6)
+        dropdown.locator("select").select_option(label="Clideo")
+    expect(page.locator("#result_list tbody tr")).to_have_count(0)
     expect(switch).to_have_value(str(convertio.pk))
+
+    with soft_load(page):
+        dropdown.locator("select").select_option(label="Все")
+    expect(page.locator("#result_list tbody tr")).to_have_count(3)
 
     # Шапка — Clideo: список на месте, выбор из колонки уходит.
     page.evaluate("window.__held = document.querySelector('#changelist-filter'); 0")

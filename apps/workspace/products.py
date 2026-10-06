@@ -5,9 +5,11 @@
 продукта и главная, он подставлен в новые записи. Не выбран — первый активный
 продукт.
 
-Фильтр продукта в колонке справа — разовый взгляд: адрес с параметром
-продукта главнее рабочего, шапку он не меняет. «Все» — явным выбором
-(`all` в адресе): пустой параметр значит «рабочий».
+Фильтр продукта в колонке справа — не рамка, а лупа (E1-19, ADR-063):
+открывается на «Все», дальше помнит последний выбор, шапку не меняет. Где
+рабочий продукт решает, чьи строки в списке («Площадки», «Размещения»), стоит
+`FrameProductFilter`: строки всегда рабочего продукта, а выбор в фильтре
+только сужает их до площадок, где работал и выбранный продукт.
 """
 
 from collections.abc import Iterator
@@ -16,11 +18,13 @@ from urllib.parse import urlencode
 
 from django.contrib import admin
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
-from django.db.models import QuerySet
+from django.db.models import Exists, OuterRef, QuerySet
 from django.http import HttpRequest, QueryDict
 from django.utils import timezone
 
+from apps.placements.models import Placement
 from apps.sites.models import Product
+from apps.workspace.filters import Remembering, settings_of
 from apps.workspace.models import UserSettings
 
 ALL = "all"
@@ -48,7 +52,8 @@ def working_product_id(request: HttpRequest) -> int | None:
     if hasattr(request, _CACHE):
         cached: int | None = getattr(request, _CACHE)
         return cached
-    chosen = chosen_product_id(request.user)
+    found = settings_of(request)
+    chosen = found.product_id if found is not None else None
     if chosen is None:
         chosen = next((pk for pk, _, active in products_of(request) if active), None)
     setattr(request, _CACHE, chosen)
@@ -87,8 +92,8 @@ def without_product(query: QueryDict) -> str:
     return urlencode(kept)
 
 
-class WorkingProductFilter(admin.SimpleListFilter):
-    """Фильтр «продукт»: без выбора — рабочий продукт, «Все» — явным выбором.
+class WorkingProductFilter(Remembering, admin.SimpleListFilter):
+    """Фильтр «продукт»: по умолчанию «Все», дальше — последний выбор (E1-19).
 
     `field` — путь к продукту от строки списка; параметр адреса — как у
     штатного фильтра по связи (`product__id__exact`): старые ссылки и наборы
@@ -99,26 +104,36 @@ class WorkingProductFilter(admin.SimpleListFilter):
     parameter_name = "product__id__exact"
     field = "product"
 
-    def __init__(self, request: HttpRequest, params: dict[str, Any], *args: Any) -> None:
+    def __init__(
+        self, request: HttpRequest, params: dict[str, Any], model: Any, model_admin: Any
+    ) -> None:
         self.working = working_product_id(request)
-        super().__init__(request, params, *args)
+        super().__init__(request, params, model, model_admin)
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
         return [(str(pk), name) for pk, name, _ in products_of(request)]
 
     def value(self) -> str:
-        value = super().value()
-        if value:
-            return str(value)
-        return str(self.working) if self.working is not None else ALL
+        value = self.last_choice()
+        known = {lookup for lookup, _ in self.lookup_choices} | {ALL}
+        if value is None or (self.url_value is None and value not in known):
+            # Запомненный продукт могли удалить (ADR-036) — тогда снова «Все».
+            # Мусор в адресе остаётся мусором: список на него покажет пусто.
+            return ALL
+        return value
 
     def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
         value = self.value()
+        self.keep(value)
         if value == ALL:
-            return queryset
+            return self.all_products(queryset)
         if not value.isdigit():
             return queryset.none()
         return self.of_product(queryset, int(value))
+
+    def all_products(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        """Что показывать на «Все»: здесь — всё подряд, у рамочного — рабочий продукт."""
+        return queryset
 
     def of_product(self, queryset: QuerySet[Any], product_id: int) -> QuerySet[Any]:
         return queryset.filter(**{f"{self.field}_id": product_id})
@@ -141,6 +156,33 @@ class WorkingProductFilter(admin.SimpleListFilter):
                 "query_string": changelist.get_query_string({self.parameter_name: lookup}),
                 "display": title,
             }
+
+
+class FrameProductFilter(WorkingProductFilter):
+    """Тот же фильтр там, где рабочий продукт — рамка работы (E1-19, ADR-063).
+
+    Строки списка всегда под продуктом из шапки: «Площадки» и «Размещения»
+    показывают, что с площадкой делаем мы под этот продукт. Выбор в фильтре
+    рамку не меняет, а сужает список до площадок, где работал и выбранный
+    продукт, — то есть ищет по колонке «другие продукты».
+
+    `site_field` — путь к площадке от строки списка: по ней и ищем чужие
+    размещения.
+    """
+
+    site_field = "site_id"
+
+    def all_products(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        return self.framed(queryset)
+
+    def of_product(self, queryset: QuerySet[Any], product_id: int) -> QuerySet[Any]:
+        other = Placement.objects.filter(site_id=OuterRef(self.site_field), product_id=product_id)
+        return self.framed(queryset).filter(Exists(other))
+
+    def framed(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        if self.working is None:
+            return queryset.none()
+        return queryset.filter(**{f"{self.field}_id": self.working})
 
 
 def product_filter(field: str) -> type[WorkingProductFilter]:

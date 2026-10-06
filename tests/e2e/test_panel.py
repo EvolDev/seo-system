@@ -138,7 +138,7 @@ def test_placement_status_from_list(
     row = page.locator("#result_list tbody tr", has_text="alpha.com")
     row.locator("a[title='Сменить статус']").click()
     panel = page.locator(PANEL)
-    expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com · Convertio")
+    expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com")
     # Колонка площадок видна: панель начинается правее неё.
     site_cell = row.locator("th, td").nth(1).bounding_box()
     box = panel.bounding_box()
@@ -155,9 +155,7 @@ def test_placement_status_from_list(
 
     expect(panel).to_be_hidden()
     expect(row.locator("a[title='Сменить статус']")).to_have_text("Размещено")
-    expect(page.locator(".seo-toast-success")).to_have_text(
-        "Размещение «alpha.com · Convertio» — сохранено."
-    )
+    expect(page.locator(".seo-toast-success")).to_have_text("Размещение «alpha.com» — сохранено.")
     assert same_document(page)
     placement = Placement.objects.get(site__domain="alpha.com")
     assert placement.status == PlacementStatus.PLACED
@@ -204,7 +202,11 @@ def test_status_history_in_panel_and_card(
     expect(changes.last).to_contain_text("Новая → В работе")
     # «по размещению» — само размещение в той же панели.
     changes.first.locator("a", has_text="по размещению").click()
-    expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com · Convertio")
+    expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com")
+    # Заголовок у карточки площадки такой же, поэтому различаем по подписи.
+    expect(panel.locator("a[title='Эта запись отдельной страницей']")).to_have_attribute(
+        "href", re.compile(r"/placements/placement/\d+/change/")
+    )
     assert same_document(page)
 
 
@@ -218,12 +220,12 @@ def test_keys_and_unsaved_changes(
     panel = page.locator(PANEL)
     title = panel.locator(".seo-panel-title")
     page.locator("#result_list a", has_text="alpha.com").click()
-    expect(title).to_have_text("alpha.com · Convertio")
+    expect(title).to_have_text("alpha.com")
     page.keyboard.press("ArrowDown")
-    expect(title).to_have_text("beta.com · Convertio")
+    expect(title).to_have_text("beta.com")
     expect(page.locator("#result_list tr.seo-panel-row")).to_contain_text("beta.com")
     page.keyboard.press("ArrowUp")
-    expect(title).to_have_text("alpha.com · Convertio")
+    expect(title).to_have_text("alpha.com")
 
     # Правка и Esc — вопрос; «Остаться» — правка на месте; «Не сохранять» — закрыть.
     ask = panel.locator(".seo-panel-ask")
@@ -251,7 +253,7 @@ def test_keys_and_unsaved_changes(
     panel.locator(".seo-panel-title").click()
     page.keyboard.press("ArrowDown")
     ask.locator("[data-ask=save]").click()
-    expect(title).to_have_text("beta.com · Convertio")
+    expect(title).to_have_text("beta.com")
     assert Placement.objects.get(site__domain="alpha.com").comment == "Статья без картинок"
     assert same_document(page)
 
@@ -407,7 +409,8 @@ def test_panel_width_fits_content(
     panel = page.locator(PANEL)
 
     page.goto(f"{live_server.url}/admin/sites/productsitelatest/")
-    page.locator("#result_list a[title='Сменить статус']").click()
+    row = page.locator("#result_list tbody tr", has_text="known.com")
+    row.locator("a[title='Сменить статус']").click()
     expect(panel.locator(".seo-choice")).to_be_visible()
     size = page.evaluate(PANEL_SIZE)
     assert 480 <= size["width"] <= 720, size

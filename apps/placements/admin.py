@@ -45,7 +45,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.keywords import anchor_views
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
 from apps.placements import export as placement_export
-from apps.placements import invoices
+from apps.placements import invoices, other_products
 from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLinkFormSet
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
@@ -53,9 +53,9 @@ from apps.placements.tasks import check_indexation, check_url_indexation, url_re
 from apps.sites.models import Product, StatusSource, WorkStatus
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
-from apps.workspace.products import ALL, WorkingProductFilter, working_product_id
+from apps.workspace.products import FrameProductFilter, working_product_id
 from config import export
-from config.admin import RecordAdmin, StackedInline
+from config.admin import PerPageChangeList, RecordAdmin, StackedInline
 from config.assets import Css, Js
 from config.changes import stamped
 from config.export import month_name
@@ -248,6 +248,20 @@ class StatusActionForm(helpers.ActionForm):
     )
 
 
+class PlacementChangeList(PerPageChangeList):
+    """Список размещений, который заодно достаёт другие продукты строк страницы.
+
+    Одним запросом на страницу, как предложения цен в «Площадках»: колонка
+    «другие продукты» берёт готовое.
+    """
+
+    def get_results(self, request: HttpRequest) -> None:
+        super().get_results(request)
+        found = other_products.by_site(row.site_id for row in self.result_list)
+        for row in self.result_list:
+            row.page_products = found.get(row.site_id, [])
+
+
 @admin.register(Placement)
 class PlacementAdmin(RecordAdmin):
     """Размещения. Проверка индексации без перезагрузки страницы — кнопка ↻ в
@@ -265,7 +279,6 @@ class PlacementAdmin(RecordAdmin):
     form = PlacementForm
     list_display = (
         "site",
-        "product",
         "status_link",
         "placement_type",
         "published_day",
@@ -273,9 +286,10 @@ class PlacementAdmin(RecordAdmin):
         "indexed_cell",
         "indexed_at_cell",
         "skip_checks",
+        "other_products_cell",
     )
     list_filter = (
-        WorkingProductFilter,
+        FrameProductFilter,
         PublishedMonthFilter,
         "status",
         InvoiceFilter,
@@ -372,7 +386,7 @@ class PlacementAdmin(RecordAdmin):
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
         if export.is_export(request):
             return export.ExportChangeList
-        return super().get_changelist(request, **kwargs)
+        return PlacementChangeList
 
     def get_urls(self) -> list[URLPattern]:
         own = [
@@ -521,8 +535,14 @@ class PlacementAdmin(RecordAdmin):
         return JsonResponse(states.get(task, {"state": "queued"}))
 
     def panel_title(self, obj: Placement) -> str:
-        # Статус — кнопками в самой форме, в заголовке он лишний.
-        return f"{obj.site.domain} · {obj.product.name}"
+        # Статус — кнопками в самой форме, продукт — рабочий, из шапки (ADR-063):
+        # в заголовке оба лишние.
+        return str(obj.site.domain)
+
+    @admin.display(description="другие продукты")
+    def other_products_cell(self, obj: Placement) -> SafeString | str:
+        found: list[other_products.Row] = getattr(obj, "page_products", [])
+        return other_products.cell(other_products.others(found, obj.product_id))
 
     def get_fieldsets(self, request: HttpRequest, obj: Any = None) -> Any:
         fieldsets = list(super().get_fieldsets(request, obj))
@@ -590,8 +610,14 @@ class PlacementAdmin(RecordAdmin):
             context["anchor_dialog"] = anchor_views.dialog_context(product)
             context["anchor_product"] = product
         if obj is not None:
+            # Чужие продукты — ссылками в шапке панели: в карточке только наш (E1-19).
+            found = other_products.by_site([obj.site_id]).get(obj.site_id, [])
             context["panel_links"] = [
-                ("Карточка площадки", reverse("admin:sites_site_card", args=[obj.site_id]), True)
+                ("Карточка площадки", reverse("admin:sites_site_card", args=[obj.site_id]), True),
+                *(
+                    (f"Размещение {name}", other_products.card_url(pk), True)
+                    for name, pk in other_products.others(found, obj.product_id)
+                ),
             ]
         return super().render_change_form(request, context, add, change, form_url, obj)
 
@@ -826,14 +852,12 @@ class PlacementAdmin(RecordAdmin):
 
 
 def _export_name(request: HttpRequest) -> str:
-    """«Размещения Convertio сентябрь 2026»: продукт и месяц из фильтров, без месяца — дата."""
+    """«Размещения Convertio сентябрь 2026»: рабочий продукт и месяц фильтра, без месяца — дата."""
     parts = ["Размещения"]
-    # Продукт — как у фильтра: из адреса, без выбора — рабочий, «Все» — без имени.
-    product_id = request.GET.get(WorkingProductFilter.parameter_name) or ""
-    if not product_id:
-        product_id = str(working_product_id(request) or "")
-    if product_id != ALL and product_id.isdigit():
-        name = Product.objects.filter(pk=int(product_id)).values_list("name", flat=True).first()
+    # Продукт — рабочий: строки списка под ним, фильтр продукта их не меняет (ADR-063).
+    product_id = working_product_id(request)
+    if product_id is not None:
+        name = Product.objects.filter(pk=product_id).values_list("name", flat=True).first()
         if name:
             parts.append(name)
     value = request.GET.get(PublishedMonthFilter.parameter_name)

@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from django.contrib.admin.views.main import ChangeList
+from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
 from pytest_django import DjangoAssertNumQueries
@@ -34,6 +35,7 @@ from apps.sites.models import (
     SitePrice,
     SiteStatus,
 )
+from apps.workspace.products import choose_product
 
 pytestmark = pytest.mark.django_db
 
@@ -99,23 +101,31 @@ class TestProductAndList:
         response = admin_client.get(URL, {"list": "all"})
         assert [row.product_id for row in response.context["cl"].result_list] == [clideo.pk]
 
-    def test_other_product_by_filter(
-        self, admin_client: Client, convertio: Product, clideo: Product
+    def test_other_product_by_the_header(
+        self, admin_client: Client, admin_user: User, convertio: Product, clideo: Product
     ) -> None:
         site = _site("a.com")
         _status(site, clideo, SiteStatus.DISCARDED)
-        response = admin_client.get(URL, {"list": "all", "product": str(clideo.pk)})
+        # Продукт строк меняет переключатель в шапке, а не фильтр (ADR-063).
+        choose_product(admin_user, clideo)
+        response = admin_client.get(URL, {"list": "all"})
         [row] = response.context["cl"].result_list
         assert row.status == SiteStatus.DISCARDED
 
-    def test_default_list_is_newest(self, admin_client: Client, convertio: Product) -> None:
+    def test_default_list_is_all_then_remembered(
+        self, admin_client: Client, convertio: Product
+    ) -> None:
         old, new = SiteList.objects.create(name="Август"), SiteList.objects.create(name="Сентябрь")
         SiteListItem.objects.create(site_list=old, site=_site("old.com"))
         SiteListItem.objects.create(site_list=new, site=_site("new.com"))
         _site("nowhere.com")
-        assert _domains(admin_client) == {"new.com"}
+        everything = {"old.com", "new.com", "nowhere.com"}
+        assert _domains(admin_client) == everything
         assert _domains(admin_client, list=str(old.pk)) == {"old.com"}
-        assert _domains(admin_client, list="all") == {"old.com", "new.com", "nowhere.com"}
+        # Выбранный список экран помнит: без параметра он открывается тем же (E1-19).
+        assert _domains(admin_client) == {"old.com"}
+        assert _domains(admin_client, list="all") == everything
+        assert _domains(admin_client) == everything
 
     def test_without_lists_shows_all(self, admin_client: Client, convertio: Product) -> None:
         _site("a.com")
@@ -161,11 +171,13 @@ class TestWorked:
         assert _domains(admin_client, list="all", worked="no") == {"fresh.com", "clideo.com"}
 
     @pytest.mark.usefixtures("sites")
-    def test_other_product_shown_as_link(self, admin_client: Client) -> None:
+    def test_other_product_leads_to_its_card(self, admin_client: Client) -> None:
         content = admin_client.get(URL, {"list": "all", "q": "clideo.com"}).content.decode()
         site = Site.objects.get(domain="clideo.com")
-        link = reverse("admin:placements_placement_changelist") + f"?site__id__exact={site.pk}"
-        assert f'href="{link}">Clideo</a>' in content
+        placement = Placement.objects.get(site=site)
+        # Чужое размещение открывается своей карточкой, а не списком (E1-19).
+        link = reverse("admin:placements_placement_change", args=[placement.pk])
+        assert f'href="{link}" data-panel title="Карточка размещения Clideo">Clideo</a>' in content
 
 
 class TestFilters:
@@ -359,7 +371,7 @@ def test_query_count(
     offer: OfferFactory,
     django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
-    """Критерий приёмки: страница — не больше 14 запросов при любом числе строк.
+    """Критерий приёмки: страница — не больше 15 запросов при любом числе строк.
 
     С E1-07 — ещё и с продавцами, предложениями, заметками и их фильтрами.
     С E1-10 — с выбранным регионом и его «от/до»: список регионов — 11-й
@@ -367,7 +379,8 @@ def test_query_count(
     наборы пользователя на этом списке — 12-й. С E9-12 — рабочий продукт
     пользователя — 13-й (список продуктов — общий у шапки и фильтра).
     С ADR-060 — счётчики площадок у продавцов в фильтре: 14-й, один на всех
-    продавцов.
+    продавцов. С E1-19 — размещения площадок страницы (колонка «другие продукты»
+    и дверь в карточку): 15-й, один на страницу.
     """
     site_list = SiteList.objects.create(name="Сентябрь")
     seller = Seller.objects.create(name="LinkHub Media", currency="USD")
@@ -397,7 +410,7 @@ def test_query_count(
     # Тема Admin Interface при первом открытии заводит свою строку и кладёт её
     # в кеш; в работающем приложении она там уже есть, считаем без неё.
     admin_client.get(URL)
-    with django_assert_max_num_queries(14):
+    with django_assert_max_num_queries(15):
         response = admin_client.get(URL, params)
     assert response.status_code == 200
     assert len(response.context["cl"].result_list) == 100

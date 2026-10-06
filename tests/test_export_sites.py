@@ -32,6 +32,7 @@ from apps.sites.models import (
     SiteStatus,
     ensure_product_sites,
 )
+from apps.workspace.products import choose_product
 
 pytestmark = pytest.mark.django_db
 
@@ -138,8 +139,8 @@ def test_status_filter_and_reason(admin_client: Client, base: dict[str, Any]) ->
 
 
 def test_default_list_like_screen(admin_client: Client, base: dict[str, Any]) -> None:
-    """Без выбора списка — самый новый, как на экране."""
-    assert len(_xlsx(admin_client)) == 1 + 5
+    """Без выбора списка — все площадки, как на экране (E1-19)."""
+    assert len(_xlsx(admin_client)) == len(_xlsx(admin_client, list="all"))
 
 
 def test_search_by_pasted_address(admin_client: Client, base: dict[str, Any]) -> None:
@@ -160,9 +161,13 @@ def test_region_columns(admin_client: Client, base: dict[str, Any]) -> None:
     assert isinstance(row["Замер US"], dt.datetime)
 
 
-def test_other_product_and_file_name(admin_client: Client, base: dict[str, Any]) -> None:
+def test_other_product_and_file_name(
+    admin_client: Client, admin_user: User, base: dict[str, Any]
+) -> None:
+    # Продукт выгрузки — рабочий, из шапки: фильтр продукта его не меняет (ADR-063).
     clideo = Product.objects.get(name="Clideo")
-    response = admin_client.get(_url(), {"list": "all", "product": str(clideo.pk)})
+    choose_product(admin_user, clideo)
+    response = admin_client.get(_url(), {"list": "all"})
     assert (
         "%D0%9F%D0%BB%D0%BE%D1%89%D0%B0%D0%B4%D0%BA%D0%B8%20Clideo"
         in (response["Content-Disposition"])
@@ -190,6 +195,8 @@ def test_csv_same_rows(admin_client: Client, base: dict[str, Any]) -> None:
 
 
 def test_queries_do_not_grow_with_rows(admin_client: Client, base: dict[str, Any]) -> None:
+    # Первый выбор заводит строку настроек (память фильтров, E1-19) — он вне замера.
+    admin_client.get(_url(), {"list": "all"})
     with CaptureQueriesContext(connection) as small:
         admin_client.get(_url(), {"list": str(base["fresh"].pk)})
     with CaptureQueriesContext(connection) as big:

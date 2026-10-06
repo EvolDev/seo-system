@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.20 от 06.10.2026 — память выбора фильтров у пользователя (ADR-063)
 -- Версия 1.19 от 06.10.2026 — общий статус работы: площадка и размещение (ADR-062)
 -- Версия 1.18 от 05.10.2026 — журнал загрузок: отмена загрузки целиком (ADR-060)
 -- Версия 1.17 от 05.10.2026 — анкоры продукта: доли типов страниц и стран, безанкорка (ADR-059)
@@ -829,6 +830,7 @@ CREATE TABLE user_settings (
     user_id      integer PRIMARY KEY REFERENCES auth_user(id),
     product_id   bigint REFERENCES products(id) ON DELETE SET NULL,
     card_closed  text[] NOT NULL DEFAULT '{}',
+    filters      jsonb NOT NULL DEFAULT '{}',   -- память выбора фильтров: экран → параметр → значение (E1-19)
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -1204,8 +1206,9 @@ LEFT JOIN (SELECT DISTINCT ON (x.site_id) x.site_id, x.body, x.created_at,
 WHERE NOT s.is_deleted;
 
 -- Площадка в работе продукта «на сегодня»: статус, последний аудит под этот
--- продукт, его опубликованные размещения и другие наши продукты, уже
--- размещённые на площадке (ADR-030).
+-- продукт, его опубликованные размещения и другие наши продукты, которые с
+-- площадкой работают (ADR-030). «Другие продукты» — размещения в любом статусе
+-- (E1-19): взятую в работу чужую площадку видно, пока она не опубликована.
 -- we_write и expected_spend вычисляются здесь и больше нигде (одна точка правды),
 -- от рабочей цены, в евро (ADR-043).
 -- Порог написания — writing_eur из настройки PRICE_REFERENCE: локальное значение
@@ -1236,7 +1239,7 @@ SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.comment, ps.imported_unde
        l.notes_count, l.last_note, l.last_note_at,
        a.verdict AS last_verdict, a.score AS last_score, a.created_at AS audited_at,
        pp.published AS placements_published,
-       op.names AS other_products_placed
+       op.names AS other_products
 FROM product_sites ps
 JOIN v_site_latest l ON l.id = ps.site_id
 LEFT JOIN LATERAL (SELECT (x.value->>'writing_eur')::integer * 100 AS writing_cents
@@ -1250,10 +1253,11 @@ LEFT JOIN LATERAL (SELECT * FROM site_audits x
 LEFT JOIN LATERAL (SELECT count(*) AS published FROM placements x
                    WHERE x.site_id = ps.site_id AND x.product_id = ps.product_id
                      AND x.status = 'placed') pp ON true
-LEFT JOIN LATERAL (SELECT array_agg(DISTINCT pr.name ORDER BY pr.name) AS names
-                   FROM placements x JOIN products pr ON pr.id = x.product_id
-                   WHERE x.site_id = ps.site_id AND x.product_id <> ps.product_id
-                     AND x.status = 'placed') op ON true;
+LEFT JOIN LATERAL (SELECT array_agg(pr.name ORDER BY pr.name) AS names
+                   FROM products pr
+                   WHERE pr.id <> ps.product_id
+                     AND EXISTS (SELECT 1 FROM placements x
+                                 WHERE x.site_id = ps.site_id AND x.product_id = pr.id)) op ON true;
 
 -- Последний замер площадки по каждой стране (ADR-045): колонки «трафик» и «ключи»
 -- выбранного региона в «Площадках». Страна здесь есть, только если под неё грузили

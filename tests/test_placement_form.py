@@ -162,7 +162,7 @@ class TestStatus:
             _panel_form(status="ordered", ordered_at="2026-10-02"),
             headers=PARTIAL,
         )
-        assert response.json()["message"] == "Размещение «example.com · Convertio» — сохранено."
+        assert response.json()["message"] == "Размещение «example.com» — сохранено."
         placement.refresh_from_db()
         assert placement.status == PlacementStatus.ORDERED
         decision = ProductSite.objects.get(site=placement.site, product=placement.product)
@@ -170,9 +170,10 @@ class TestStatus:
 
 
 class TestPanelLayout:
-    def test_site_and_product_in_title(self, admin_client: Client, placement: Placement) -> None:
+    def test_site_in_title(self, admin_client: Client, placement: Placement) -> None:
         page = admin_client.get(_url(placement), headers=PARTIAL).content.decode()
-        assert '<h2 class="seo-panel-title">example.com · Convertio</h2>' in page
+        # Продукт — рабочий, из шапки: в заголовке карточки его нет (E1-19).
+        assert '<h2 class="seo-panel-title">example.com</h2>' in page
         assert 'name="site"' not in page and 'name="product"' not in page
         card = reverse("admin:sites_site_card", args=[placement.site_id])
         assert f'<a href="{card}" data-panel>Карточка площадки</a>' in page

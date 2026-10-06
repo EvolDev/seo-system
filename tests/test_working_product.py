@@ -141,7 +141,7 @@ class TestSwitch:
 
 
 class TestFilters:
-    def test_placements_default_and_all(
+    def test_placements_follow_working_product(
         self,
         admin_client: Client,
         admin_user: User,
@@ -152,14 +152,9 @@ class TestFilters:
         assert _rows(admin_client.get(PLACEMENTS)) == {"conv.com"}
         choose_product(admin_user, clideo)
         assert _rows(admin_client.get(PLACEMENTS)) == {"clid.com"}
-        # Явный выбор в колонке главнее рабочего; «Все» — своим значением.
-        assert _rows(admin_client.get(PLACEMENTS, {"product__id__exact": convertio.pk})) == {
-            "conv.com"
-        }
-        assert _rows(admin_client.get(PLACEMENTS, {"product__id__exact": "all"})) == {
-            "conv.com",
-            "clid.com",
-        }
+        # Выбор в колонке рамку не меняет: чужих строк он не приносит (ADR-063).
+        assert _rows(admin_client.get(PLACEMENTS, {"product__id__exact": convertio.pk})) == set()
+        assert _rows(admin_client.get(PLACEMENTS, {"product__id__exact": "all"})) == {"clid.com"}
         page = admin_client.get(PLACEMENTS).content.decode()
         assert "?product__id__exact=all" in page
 
@@ -173,7 +168,7 @@ class TestFilters:
         rows = admin_client.get(SITES).context["cl"].result_list
         assert {row.product_id for row in rows} == {clideo.pk}
 
-    def test_invoices_default(
+    def test_invoices_open_on_all(
         self,
         admin_client: Client,
         admin_user: User,
@@ -186,21 +181,25 @@ class TestFilters:
             invoice = Invoice.objects.create(seller=seller, amount_cents=100, currency="EUR")
             InvoiceItem.objects.create(invoice=invoice, placement=placement, amount_cents=100)
         choose_product(admin_user, products[1])
-        listed = admin_client.get(INVOICES).context["cl"].result_list
+        # Счета — не рамка: открываются на «Все», выбор продукта их сужает (E1-19).
+        assert len(admin_client.get(INVOICES).context["cl"].result_list) == 2
+        listed = admin_client.get(INVOICES, {"product": products[1].pk}).context["cl"].result_list
         assert [item.placement.product_id for i in listed for item in i.items.all()] == [
             products[1].pk
         ]
-        assert len(admin_client.get(INVOICES, {"product": "all"}).context["cl"].result_list) == 2
 
-    def test_keywords_default(
+    def test_keywords_open_on_all(
         self, admin_client: Client, admin_user: User, products: tuple[Product, Product]
     ) -> None:
         convertio, clideo = products
         Keyword.objects.create(product=convertio, keyword="pdf to word", target_url="https://c.co/")
         Keyword.objects.create(product=clideo, keyword="cut video", target_url="https://cl.com/")
         choose_product(admin_user, clideo)
+        # Ключи — не рамка: по умолчанию видно оба продукта, выбор сужает (E1-19).
         listed = admin_client.get(KEYWORDS).context["cl"].result_list
-        assert [k.keyword for k in listed] == ["cut video"]
+        assert {k.keyword for k in listed} == {"pdf to word", "cut video"}
+        narrowed = admin_client.get(KEYWORDS, {"product__id__exact": clideo.pk})
+        assert [k.keyword for k in narrowed.context["cl"].result_list] == ["cut video"]
 
 
 class TestNewRecords:

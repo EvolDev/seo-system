@@ -56,7 +56,7 @@
     <div class="submit-row">
       {% if review_items %}<a class="seo-btn{% if review_pending %} seo-btn-primary{% endif %}" href="{% url 'admin:sites_upload_review' upload.pk %}">Разбор цен{% if review_pending %} — ждут {{ review_pending }}{% endif %}</a>{% endif %}
       {% if sites_url %}<a class="seo-btn" href="{{ sites_url }}">Открыть «Площадки»</a>{% endif %}
-      <a class="seo-btn" href="{{ placements_url }}">Размещения {{ upload.product.name }}</a>
+      <a class="seo-btn" href="{{ placements_url }}">Открыть «Размещения»</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}">Загрузить ещё файл</a>
       <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
       {% include "admin/sites/upload/_undo_button.html" %}

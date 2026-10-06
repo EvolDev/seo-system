@@ -263,23 +263,25 @@ def test_totals_sheet(admin_client: Client, base: dict[str, Any]) -> None:
     ]
 
 
-def test_all_products_and_statuses(admin_client: Client, base: dict[str, Any]) -> None:
-    # «Все» — явным выбором: без него — рабочий продукт (ADR-057).
+def test_working_product_and_statuses(admin_client: Client, base: dict[str, Any]) -> None:
+    # Выгрузка — под рабочий продукт: строки списка его, «Все» их не добавляет (ADR-063).
     _, book = _book(admin_client, product__id__exact="all")
     header = [cell.value for cell in next(book["Размещения"].iter_rows())]
-    assert "Пример статьи на Convertio" in header and "Пример статьи на Clideo" in header
+    # Выгрузка одного продукта: свой столбец примера не нужен, чужой остаётся.
+    assert "Пример статьи на Clideo" in header
+    assert "Пример статьи на Convertio" not in header
     rows = {(row["Target"], row["Продукт"]): row for row in _rows(book["Размещения"])}
-    assert len(rows) == 5
-    # Статья Clideo видит статью Convertio на той же площадке, а не саму себя.
-    clideo = rows[("eggradients.com", "Clideo")]
-    assert clideo["Пример статьи на Convertio"].endswith("image-file-conversion")
-    assert clideo["Пример статьи на Clideo"] is None
+    assert len(rows) == 4
+    assert ("eggradients.com", "Clideo") not in rows
+    # Статья Convertio видит статью Clideo на той же площадке.
+    convertio = rows[("eggradients.com", "Convertio")]
+    assert convertio["Пример статьи на Clideo"].endswith("top-7-color-perfection")
     totals = [[cell.value for cell in row] for row in book["Итого"].iter_rows()]
-    assert totals[1] == ["Всего", None, 5, 669.89, 3]
+    assert totals[1] == ["Всего", None, 4, 669.89, 2]
     groups = {(row[0], row[1]): row[2:] for row in totals[2:]}
-    assert groups[("Продукт", "Convertio")] == [4, 669.89, 2]
+    assert ("Продукт", "Convertio") not in groups
     assert groups[("Статус", "Заявка отправлена")] == [1, 0, 1]
-    assert groups[("Источник", "не указан")] == [3, 0, 3]
+    assert groups[("Источник", "не указан")] == [2, 0, 2]
 
 
 def test_csv_first_sheet_only(admin_client: Client, base: dict[str, Any]) -> None:

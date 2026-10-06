@@ -161,7 +161,8 @@ def test_home_product_and_year(
     s = admin_client.get(INDEX, {"product": str(clideo.pk), "year": "2026"}).context["home_stats"]
     assert s["tiles"][0]["value"] == "1"
     assert s["placed"].bars[8].value == 0
-    assert s["placed"].bars[9].url.endswith(f"month=2026-10&product__id__exact={clideo.pk}")
+    # «Размещения» всегда под рабочий продукт (ADR-063): в ссылке отбирается месяц.
+    assert s["placed"].bars[9].url.endswith("month=2026-10&product__id__exact=all")
     # Будущий год и мусор — текущий год; раньше первой публикации не листается.
     assert admin_client.get(INDEX, {"year": "2030"}).context["home_stats"]["year"] == 2026
     assert admin_client.get(INDEX, {"year": "x"}).context["home_stats"]["year"] == 2026

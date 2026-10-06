@@ -130,5 +130,6 @@ def test_ahrefs_link_for_chosen_list(admin_client: Client, base: dict[str, Site]
     site_list = SiteList.objects.create(name="Collaborator · 02.10.2026")
     SiteListItem.objects.create(site_list=site_list, site=base["egg"])
     link = reverse("admin:sites_sitelist_ahrefs", args=[site_list.pk])
-    assert link in admin_client.get(URL).content.decode()  # по умолчанию — новейший список
-    assert link not in admin_client.get(URL, {"list": "all"}).content.decode()
+    # По умолчанию — все площадки, и ссылка ни на один список не ведёт (E1-19).
+    assert link not in admin_client.get(URL).content.decode()
+    assert link in admin_client.get(URL, {"list": str(site_list.pk)}).content.decode()

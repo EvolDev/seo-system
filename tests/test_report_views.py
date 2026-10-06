@@ -262,14 +262,14 @@ class TestProductSiteLatest:
         assert row["status"] == SiteStatus.IN_WORK
         assert (row["last_verdict"], row["last_score"]) == (AuditVerdict.YES, 80)
         assert row["placements_published"] == 1
-        assert row["other_products_placed"] == ["Clideo"]
+        assert row["other_products"] == ["Clideo"]
 
         clideo_row = self._row(site, clideo)
         assert clideo_row["last_verdict"] == AuditVerdict.NO
-        assert clideo_row["other_products_placed"] == ["Convertio"]
+        assert clideo_row["other_products"] == ["Convertio"]
 
     def test_no_other_products_is_empty(self, site: Site, convertio: Product) -> None:
-        assert self._row(site, convertio)["other_products_placed"] is None
+        assert self._row(site, convertio)["other_products"] is None
 
 
 class TestSiteFunnel:

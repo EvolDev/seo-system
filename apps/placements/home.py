@@ -92,10 +92,10 @@ def context(request: HttpRequest) -> dict[str, Any]:
         return f"{reverse('admin:index')}?{query}" if query else reverse("admin:index")
 
     def placements(month: dt.date) -> str:
-        params: dict[str, Any] = {
-            "month": f"{month:%Y-%m}",
-            "product__id__exact": product_id or ALL,
-        }
+        # «Размещения» всегда под рабочий продукт (ADR-063), поэтому в адрес идёт
+        # «Все» — не сужать: отбирает месяц. У главной счёт может быть по обоим
+        # продуктам, у списка — по рабочему.
+        params: dict[str, Any] = {"month": f"{month:%Y-%m}", "product__id__exact": ALL}
         return f"{reverse('admin:placements_placement_changelist')}?{urlencode(params)}"
 
     due = invoices.seller_money(Invoice.objects.filter(status=InvoiceStatus.ISSUED))

@@ -301,7 +301,7 @@ class TestWrite:
         # У Convertio — «Новая» и «другие продукты: Clideo».
         latest = ProductSiteLatest.objects.get(site__domain="tomsguide.com", product=convertio)
         assert latest.status == SiteStatus.NEW
-        assert latest.other_products_placed == ["Clideo"]
+        assert latest.other_products == ["Clideo"]
 
         # Цена Clideo — предложение продавца на дату размещения; у новой площадки — рабочее.
         site = Site.objects.get(domain="tomsguide.com")

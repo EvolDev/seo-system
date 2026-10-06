@@ -101,7 +101,8 @@ def test_title_is_the_record(admin_client: Client) -> None:
     page = admin_client.get(
         _change_url("placements_placement", placement), headers=PARTIAL
     ).content.decode()
-    assert '<h2 class="seo-panel-title">example.com · Convertio</h2>' in page
+    # Продукт в заголовке не пишем: карточка всегда под рабочий продукт (ADR-063).
+    assert '<h2 class="seo-panel-title">example.com</h2>' in page
 
 
 class TestSave:

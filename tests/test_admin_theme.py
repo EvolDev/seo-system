@@ -16,7 +16,7 @@ from django.contrib.staticfiles import finders
 from django.test import Client
 from django.urls import reverse
 
-from apps.sites.admin import ProductFilter, SiteListFilter
+from apps.sites.admin import ProductFrameFilter, SiteListFilter
 from apps.sites.models import Product, SiteList
 
 pytestmark = pytest.mark.django_db
@@ -79,18 +79,20 @@ def test_debug_toolbar_starts_collapsed() -> None:
     assert settings.DEBUG_TOOLBAR_CONFIG["SHOW_COLLAPSED"] is True
 
 
-def test_product_and_list_filters_have_no_all_option(admin_client: Client) -> None:
-    # Без выбора — продукт и список по умолчанию; штатное «Все» ввело бы в заблуждение.
+def test_product_and_list_filters_open_on_all(admin_client: Client) -> None:
+    # Оба фильтра «Площадок» открываются на «Все» — своим пунктом, а не штатным (E1-19).
     Product.objects.create(name="Convertio", domain="convertio.co")
     SiteList.objects.create(name="Сентябрь")
     response = admin_client.get(reverse("admin:sites_productsitelatest_changelist"))
     changelist: ChangeList = response.context["cl"]
-    displays = {
-        type(spec).__name__: [choice["display"] for choice in spec.choices(changelist)]
+    chosen = {
+        type(spec).__name__: [
+            (choice["display"], choice["selected"]) for choice in spec.choices(changelist)
+        ]
         for spec in changelist.filter_specs
-        if isinstance(spec, ProductFilter | SiteListFilter)
+        if isinstance(spec, ProductFrameFilter | SiteListFilter)
     }
-    assert displays == {
-        "ProductFilter": ["Convertio"],
-        "SiteListFilter": ["Сентябрь", "Все площадки"],
+    assert chosen == {
+        "ProductFrameFilter": [("Все", True), ("Convertio", False)],
+        "SiteListFilter": [("Сентябрь", False), ("Все площадки", True)],
     }

@@ -563,8 +563,9 @@ class UploadAdmin(RecordAdmin):
             "counts": (upload.result or {}).get("counts") or {},
             "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
             "done": done,
-            "linking_url": f"{sites}?product={upload.product_id}&list=all&refs=only",
-            "lost_url": f"{sites}?product={upload.product_id}&list=all&refs=lost",
+            # Продукт списка задаёт шапка (ADR-063), в адрес его не кладём.
+            "linking_url": f"{sites}?list=all&refs=only",
+            "lost_url": f"{sites}?list=all&refs=lost",
             "list_url": f"{refs}?product__id__exact={upload.product_id}",
         }
         return TemplateResponse(request, "admin/sites/upload/refdomains.html", context)
@@ -613,11 +614,8 @@ class UploadAdmin(RecordAdmin):
             "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
             "done": done,
             "list_name": placements.list_name(upload.get_product(), upload.prices_date),
-            "sites_url": _sites_url(upload) + f"&product={upload.product_id}"
-            if upload.site_list_id
-            else None,
-            "placements_url": reverse("admin:placements_placement_changelist")
-            + f"?product__id__exact={upload.product_id}",
+            "sites_url": _sites_url(upload) if upload.site_list_id else None,
+            "placements_url": reverse("admin:placements_placement_changelist"),
         }
         if done:
             # Цены продавцов из файла — в разбор, как у прайса (ADR-060).

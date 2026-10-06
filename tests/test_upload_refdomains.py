@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import Client
@@ -26,6 +27,7 @@ from apps.sites.models import (
 from apps.sites.tasks import upload_check, upload_write
 from apps.sites.uploads import refdomains, service
 from apps.sites.uploads.files import read_table
+from apps.workspace.products import choose_product
 
 pytestmark = pytest.mark.django_db
 
@@ -170,9 +172,10 @@ class TestSitesScreen:
 
     @pytest.mark.usefixtures("linked")
     def test_linking_sites_are_hidden_for_the_product_only(
-        self, admin_client: Client, convertio: Product, clideo: Product
+        self, admin_client: Client, admin_user: User, convertio: Product, clideo: Product
     ) -> None:
-        base = f"?list=all&product={convertio.pk}"
+        # Продукт строк — рабочий, из шапки (ADR-063); Convertio первый активный.
+        base = "?list=all"
         assert self._domains(admin_client, base) == {"lost.com", "plain.com"}
         assert self._domains(admin_client, base + "&refs=only") == {"linking.com"}
         assert self._domains(admin_client, base + "&refs=lost") == {"lost.com"}
@@ -182,7 +185,8 @@ class TestSitesScreen:
             "plain.com",
         }
         # У другого продукта ничего не прячется.
-        assert self._domains(admin_client, f"?list=all&product={clideo.pk}") == {
+        choose_product(admin_user, clideo)
+        assert self._domains(admin_client, "?list=all") == {
             "linking.com",
             "lost.com",
             "plain.com",
