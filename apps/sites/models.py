@@ -11,6 +11,7 @@
 домены Ahrefs — ADR-051.
 """
 
+import logging
 from collections.abc import Iterable
 from typing import Any, ClassVar
 
@@ -23,6 +24,8 @@ from django.db.models.functions import Lower
 from apps.sites.domains import normalize_domain
 from config.changes import stamped
 from config.db import PgEnumField, PgNow
+
+logger = logging.getLogger(__name__)
 
 
 class WorkStatus(models.TextChoices):
@@ -251,10 +254,34 @@ class Seller(models.Model):
         self.currency = self.currency.upper()
         super().save(*args, **kwargs)
 
+    #: Поля каталога Collaborator — те же, что у миграции `0007`, которая его
+    #: заводит. Повторены здесь, чтобы запись можно было вернуть: удалить
+    #: можно любую запись (ADR-060), а каталог нужен загрузке и импорту.
+    COLLABORATOR_DEFAULTS: ClassVar[dict[str, Any]] = {
+        "name": "Collaborator",
+        "contacts": "collaborator.pro",
+        "currency": "EUR",
+        "metrics_trusted": True,
+    }
+
     @classmethod
     def collaborator(cls) -> "Seller":
-        """Каталог Collaborator — его заводит миграция `0007`."""
-        return cls.objects.get(is_collaborator=True)
+        """Каталог Collaborator; удалён — заводим заново, а не падаем.
+
+        `metrics_trusted` тут не случаен: замеры каталога идут как наши
+        (ADR-043). Заведи такого продавца руками — флаг будет выключен, и
+        DR с трафиком всей базы станут «со слов продавца». Поэтому запись
+        возвращает код, а не человек.
+
+        Гонки не будет: на `is_collaborator` стоит частичный уникальный
+        индекс, и `get_or_create` на нарушении перечитает чужую запись.
+        """
+        seller, created = cls.objects.get_or_create(
+            is_collaborator=True, defaults=dict(cls.COLLABORATOR_DEFAULTS)
+        )
+        if created:
+            logger.warning("каталог Collaborator заведён заново", extra={"seller": seller.pk})
+        return seller
 
 
 class ActiveSiteManager(models.Manager["Site"]):

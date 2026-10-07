@@ -126,6 +126,23 @@ class TestSteps:
         upload.refresh_from_db()
         assert (upload.mapping or {})[skipped["key"]] == "skip"
 
+    def test_catalog_upload_restores_deleted_collaborator(self, admin_client: Client) -> None:
+        """Каталог удалён — загрузка заводит его заново, а не падает с 500.
+
+        Удалить можно любую запись (ADR-060), в том числе посевного продавца
+        из миграции `0007`. До этого форма звала `Seller.objects.get` и
+        роняла шаг «Файл» на чистой базе (07.10.2026).
+        """
+        Seller.objects.filter(is_collaborator=True).delete()
+        response = _post_file(admin_client, CSV, kind="collaborator_catalog")
+        assert response.status_code == 302
+        seller = Seller.objects.get(is_collaborator=True)
+        # Флаг важнее имени: с выключенным замеры каталога станут «со слов
+        # продавца» по всей базе (ADR-043).
+        fields = (seller.name, seller.currency, seller.metrics_trusted)
+        assert fields == ("Collaborator", "EUR", True)
+        assert Upload.objects.get().seller == seller
+
     def test_new_seller_is_created_from_the_form(self, admin_client: Client, known: Site) -> None:
         ExchangeRate.objects.create(currency="USD", rate_date=PRICE_DATE, rate=Decimal("1.1"))
         _post_file(
