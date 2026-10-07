@@ -57,6 +57,7 @@ from apps.observability.models import Check, CheckStatus, Performer
 from apps.placements import indexation, invoices
 from apps.placements.matching import match_placement, match_without_url, moves_forward
 from apps.placements.models import Placement, PlacementLink, PlacementStatus
+from apps.sites import latest
 from apps.sites.models import (
     MetricSource,
     PlacementType,
@@ -679,6 +680,12 @@ class Writer:
         self.counts["needs_decision"] = sum(item.needs_decision for item in self.items)
         site_list = self._site_list()
         self.upload.site_list = site_list
+        # Копия «площадки на сегодня» (E1-11): площадки здесь заводятся и
+        # правятся пачками, мимо `save()`, — пересчитываем их той же
+        # транзакцией. Загрузка размещений пишет и цены (`price_paid`
+        # становится предложением продавца), поэтому пометки разбора у них
+        # тоже меняются.
+        latest.refresh(self.site_ids.values())
         return {"counts": dict(self.counts), "list": site_list.name}
 
     # --- Площадки, продавцы, сотрудники ---

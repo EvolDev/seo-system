@@ -639,3 +639,30 @@ class TestSentDate:
         sent = Placement.objects.get(site__domain="sent.com")
         assert timezone.localtime(sent.ordered_at).date() == dt.date(2026, 10, 5)
         assert sent.published_at is None
+
+
+class TestSiteLatest:
+    """Загрузка размещений пересчитывает копию «площадки на сегодня» (E1-11).
+
+    Площадки она заводит пачкой, мимо `save()`. Пропуск этого стоил 265 строк
+    без копии на рабочей базе — поймала команда `site_latest --check`.
+    """
+
+    def test_new_sites_get_a_copy(self, clideo: Product) -> None:
+        from apps.sites import latest
+        from apps.sites.models import SiteLatest
+
+        rows = [
+            {
+                "Target": "brandnew.com",
+                "Статус": "Размещено",
+                "Дата размещения": "06.10.2026",
+                "Анкор1": "video editor",
+                "Ссылка1": "https://clideo.com/video-editor",
+                "Итог цена": "100",
+            }
+        ]
+        _write(_check(_upload(clideo, rows)))
+        site = Site.objects.get(domain="brandnew.com")
+        assert SiteLatest.objects.filter(site=site).exists()
+        assert latest.stale() == []
