@@ -59,6 +59,7 @@ from apps.sites.display import (
     rating_html,
     rating_title,
     round_euros,
+    seller_cell,
     seller_mark,
     site_url,
     take_placement_html,
@@ -337,7 +338,7 @@ class SiteAdmin(RecordAdmin):
         gray = _gray_context(site, gray_form)
         context = {
             **self.admin_site.each_context(request),
-            **_card_context(site, working_product_id(request)),
+            **_card_context(site, working_product_id(request), request.user),
             "gray": gray,
             # Свёрнутые разделы — у пользователя, на все карточки (ADR-058):
             # сервер сразу отдаёт их свёрнутыми, без мигания при открытии.
@@ -402,7 +403,9 @@ class SiteAdmin(RecordAdmin):
         return HttpResponseRedirect(card_url(object_id))
 
 
-def _card_context(site: Site, working_product: int | None = None) -> dict[str, Any]:
+def _card_context(
+    site: Site, working_product: int | None = None, user: Any = None
+) -> dict[str, Any]:
     """Всё для карточки: метрики, статусы с историей, рабочая цена, предложения,
     история цен, заметки. Рабочий продукт пользователя — первым (E9-13)."""
     rows = sorted(
@@ -422,6 +425,9 @@ def _card_context(site: Site, working_product: int | None = None) -> dict[str, A
         )
     )
     current_ids = {offer.pk for offer in current}
+    # Оценка продавца рядом с именем (E1-24): среднее по всем и своя. Считаем
+    # разом на всех продавцов таблицы, а не запросом на строку.
+    seller_marks = rating.seller_marks({o.seller_id for o in current}, user)
     offer_rows = []
     for offer in current:
         amount = Amount(offer.placement_cents, offer.currency, offer.placement_eur_cents)
@@ -429,6 +435,7 @@ def _card_context(site: Site, working_product: int | None = None) -> dict[str, A
         offer_rows.append(
             {
                 "offer": offer,
+                "seller": seller_cell(offer.seller_id, offer.seller_name, seller_marks),
                 "price": price_html(amount),
                 "is_working": working is not None and offer.pk == working.pk,
                 "delta": delta_html(delta(amount, working_amount))
@@ -741,6 +748,39 @@ class ProductSiteAdmin(RecordAdmin):
         return TemplateResponse(request, "admin/sites/productsite/decision_body.html", context)
 
 
+class SellerForm(forms.ModelForm):  # type: ignore[type-arg]
+    """Карточка продавца: валюта прайсов — выбором, а не руками (E1-24).
+
+    Поле в базе — три буквы, и в форме это был обычный ввод: код приходилось
+    угадывать («доллар», «USD», «usd»). Теперь список известных валют плюс та,
+    что уже стоит у продавца, — чужое значение из старых данных не пропадёт.
+
+    Валюта — запасной вариант: она подставляется в выбор на шаге «Колонки»,
+    если в файле нигде нет знака валюты (ADR-043). У новой записи подставляется
+    умолчание поля модели.
+    """
+
+    currency = forms.ChoiceField(
+        label="Валюта прайсов",
+        choices=(),
+        widget=forms.Select(attrs={"data-search": "Найти валюту…"}),
+    )
+
+    class Meta:
+        model = Seller
+        fields = ("name", "currency", "contacts", "notes", "metrics_trusted")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        own = (self.instance.currency or "").upper()
+        codes = sorted({*offers.CURRENCIES, own} - {""})
+        self.fields["currency"].choices = [(code, code) for code in codes]  # type: ignore[attr-defined]
+        # У формы без записи Django не заполняет initial, а объявленное поле не
+        # наследует умолчание модели само. Берём его у модели, чтобы «EUR» не
+        # был записан в двух местах.
+        self.initial.setdefault("currency", own)
+
+
 @admin.register(Seller)
 class SellerAdmin(RecordAdmin):
     """Продавцы (ADR-041, ADR-043). Collaborator — тоже продавец, его заводит миграция.
@@ -749,9 +789,10 @@ class SellerAdmin(RecordAdmin):
     неоплаченные счета и ссылки на все счета и на новый.
     """
 
+    form = SellerForm
     panel = True
     list_display = (
-        "name",
+        "name_cell",
         "currency",
         "sites_count",
         "working_count",
@@ -761,6 +802,9 @@ class SellerAdmin(RecordAdmin):
         "metrics_trusted",
         "contacts",
     )
+    # Запись открывает имя в первой колонке (`name_cell`), а не обёртка Django:
+    # рядом с именем звезда оценки, а вложенные в ссылку кнопки недопустимы (E1-24).
+    list_display_links = None
     list_editable = ("metrics_trusted",)
     search_fields = ("name",)
     fields = ("name", "currency", "contacts", "notes", "metrics_trusted", "is_collaborator")
@@ -790,6 +834,34 @@ class SellerAdmin(RecordAdmin):
         chosen = "&".join(f"id={pk}" for pk in ids)
         return HttpResponseRedirect(f"{reverse('admin:sites_seller_merge')}?{chosen}")
 
+    def render_change_form(
+        self,
+        request: HttpRequest,
+        context: dict[str, Any],
+        add: bool = False,
+        change: bool = False,
+        form_url: str = "",
+        obj: Any = None,
+    ) -> HttpResponse:
+        """Звезда оценки у имени продавца в карточке (E1-24).
+
+        Два места: подзаголовок полной страницы и шапка панели — карточку
+        открывают и так, и так.
+        """
+        if obj is not None:
+            marks = rating.seller_marks([obj.pk], request.user)
+            average, count, mine = marks.get(obj.pk, (None, 0, None))
+            star = rating_html(
+                reverse("admin:sites_seller_rate", args=[obj.pk]),
+                average,
+                count,
+                mine,
+                "продавца",
+            )
+            context["rating_star"] = star
+            context["panel_title_tools"] = star
+        return super().render_change_form(request, context, add, change, form_url, obj)
+
     def get_urls(self) -> list[URLPattern]:
         own = [
             path(
@@ -797,8 +869,55 @@ class SellerAdmin(RecordAdmin):
                 self.admin_site.admin_view(self.merge_view),
                 name="sites_seller_merge",
             ),
+            path(
+                "<int:object_id>/rate/",
+                self.admin_site.admin_view(require_POST(self.rate_view)),
+                name="sites_seller_rate",
+            ),
         ]
         return own + super().get_urls()
+
+    def rate_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Оценка продавца звёздочкой (E1-24) — как у площадок (ADR-064)."""
+        seller = get_object_or_404(Seller, pk=object_id)
+        if not self.has_change_permission(request, seller):
+            return JsonResponse({"error": "Нет прав на изменение."}, status=403)
+        try:
+            value = rating.clean_value(request.POST.get("value"))
+        except ValueError:
+            return JsonResponse({"error": "Оценка — от 1 до 5 звёзд."}, status=400)
+        rating.set_seller_rating(seller, request.user, value)
+        average, count = rating.seller_summary(seller)
+        return JsonResponse(
+            {
+                "average": str(average) if average is not None else None,
+                "count": count,
+                "mine": value,
+                "title": rating_title(average, count, value, "продавца"),
+            }
+        )
+
+    @admin.display(description="имя", ordering="name")
+    def name_cell(self, obj: Seller) -> SafeString:
+        """Имя со звездой оценки слева — как у домена в «Площадках» (E1-24).
+
+        Ссылку на запись рисуем сами, а обёртку Django снимаем
+        (`list_display_links = None`): иначе звезда оказывается внутри ссылки,
+        и нажатие на неё уводит на карточку. Вложенная кнопка в ссылке и сама
+        по себе недопустима.
+        """
+        return format_html(
+            '{}<a href="{}" title="Карточка продавца">{}</a>',
+            rating_html(
+                reverse("admin:sites_seller_rate", args=[obj.pk]),
+                getattr(obj, "rating_avg", None),
+                getattr(obj, "rating_count", 0) or 0,
+                getattr(obj, rating.MINE, None),
+                "продавца",
+            ),
+            reverse("admin:sites_seller_change", args=[obj.pk]),
+            obj.name,
+        )
 
     def merge_view(self, request: HttpRequest) -> HttpResponse:
         """Граф слияния: клик по узлу делает его главным, наведение — карточка.
@@ -866,6 +985,8 @@ class SellerAdmin(RecordAdmin):
             .values("total")
         )
         queryset: models.QuerySet[Seller] = super().get_queryset(request)
+        # Оценка продавца (E1-24): среднее и своя — подзапросами.
+        queryset = rating.with_seller_rating(queryset, request.user)
         # Счета — одним запросом на страницу, суммы по валютам считает Python.
         live = Invoice.objects.exclude(status=InvoiceStatus.CANCELLED).only(
             "seller_id", "status", "amount_cents", "currency"
@@ -1749,7 +1870,10 @@ class ProductSiteLatestAdmin(RecordAdmin):
     )
     search_fields = ("domain",)
     ordering = (F("dr").desc(nulls_last=True), "domain")
-    list_per_page = 100
+    # Полсотни строк вместо сотни (просьба пользователя 07.10.2026): отрисовка
+    # строки стоит около 2,8 мс, и на сотне это треть времени страницы. Размер
+    # меняется на экране, выбор живёт в адресе (`per_page`).
+    list_per_page = 50
     # Полный счётчик без фильтров — лишний запрос на каждую страницу.
     show_full_result_count = False
     action_form = SellerActionForm

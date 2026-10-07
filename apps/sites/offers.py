@@ -20,6 +20,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from apps.sites import latest
 from apps.sites.models import (
     PlacementType,
     Product,
@@ -93,15 +94,23 @@ def set_working_price(offer: SitePrice, *, author: Any = None, source: str | Non
         new = describe(offer)
         change = f"{describe(old)} → {new}" if old else f"рабочей стала {new}"
         add_note(site, f"Цена: {change}", author=author, source=source)
+        # Пометки «новая цена» и «дешевле» считаются от рабочей цены, поэтому
+        # копия площадки пересчитывается здесь же (E1-11): новая цена видна в
+        # списке сразу, без полного пересчёта.
+        latest.refresh([site.pk])
     return True
 
 
 def keep_current(offers: Iterable[SitePrice | SiteOffer]) -> int:
     """«Оставить как есть» для выбранных предложений: разбирает, рабочую не трогает."""
     ids = [offer.pk for offer in offers]
-    return SitePrice.objects.filter(pk__in=ids, reviewed_at__isnull=True).update(
-        reviewed_at=timezone.now()
-    )
+    rows = SitePrice.objects.filter(pk__in=ids, reviewed_at__isnull=True)
+    # Площадки берём до update: после него отбор по «не разобрано» пуст.
+    touched = list(rows.values_list("site_id", flat=True).distinct())
+    changed = rows.update(reviewed_at=timezone.now())
+    # Разбор снимает пометки «не разобрано» — они в копии (E1-11).
+    latest.refresh(touched)
+    return changed
 
 
 def keep_current_for_sites(site_ids: Iterable[int]) -> int:
@@ -110,9 +119,10 @@ def keep_current_for_sites(site_ids: Iterable[int]) -> int:
     Возвращает, у скольких площадок было что разбирать.
     """
     pending = SitePrice.objects.filter(site_id__in=list(site_ids), reviewed_at__isnull=True)
-    sites = pending.values("site_id").distinct().count()
+    touched = list(pending.values_list("site_id", flat=True).distinct())
     pending.update(reviewed_at=timezone.now())
-    return sites
+    latest.refresh(touched)
+    return len(touched)
 
 
 @dataclass(frozen=True)
@@ -185,6 +195,11 @@ def _sites_with_price(site_ids: Iterable[int]) -> QuerySet[Site]:
 
 
 def _review_service(site_id: int, placement_type: str) -> None:
+    """Разобрать все предложения этой услуги: решение по одной — решение по всем.
+
+    Копию не пересчитываем: единственный вызов — внутри `set_working_price`,
+    который пересчитывает площадку в конце своей транзакции.
+    """
     SitePrice.objects.filter(
         site_id=site_id, placement_type=placement_type, reviewed_at__isnull=True
     ).update(reviewed_at=timezone.now())

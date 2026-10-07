@@ -9,6 +9,7 @@ import datetime as dt
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from django.contrib.auth.models import User
@@ -552,3 +553,89 @@ def test_human_mark_does_not_hide_newer_system_check(clideo: Product) -> None:
     placement.refresh_from_db()
     assert (placement.is_indexed, placement.indexed_checked_at) == (False, checked)
     assert Check.objects.filter(entity_id=placement.pk, performed_by=Performer.HUMAN).count() == 1
+
+
+class TestSentDate:
+    """Колонка «Дата отправки» рядом с «Датой размещения» (E1-23).
+
+    В таблице пользователя появилась вторая колонка с датой: когда заявка ушла
+    вебмастеру. Раньше дата была одна, и её раскладывал статус.
+    """
+
+    HEADERS: ClassVar[list[str]] = [
+        "Target", "Source", "URL статьи", "Статус", "Дата отправки", "Дата размещения",
+        "Анкор1", "Ссылка1", "Итог цена",
+    ]  # fmt: skip
+
+    def _rows(self) -> list[dict[str, str]]:
+        return [
+            {
+                "Target": "placed.com",
+                "Статус": "Размещено",
+                "Дата отправки": "01.10.2026",
+                "Дата размещения": "06.10.2026",
+                "URL статьи": "https://placed.com/article",
+                "Анкор1": "video editor",
+                "Ссылка1": "https://clideo.com/video-editor",
+                "Итог цена": "100",
+            },
+            {
+                "Target": "sent.com",
+                "Статус": "Заявка отправлена",
+                "Дата отправки": "07.10.2026",
+                "Анкор1": "video editor",
+                "Ссылка1": "https://clideo.com/video-editor",
+                "Итог цена": "100",
+            },
+            {
+                "Target": "old.com",
+                "Статус": "Размещено",
+                "Дата размещения": "11.09.2026",
+                "Анкор1": "video editor",
+                "Ссылка1": "https://clideo.com/video-editor",
+                "Итог цена": "100",
+            },
+        ]
+
+    def test_each_date_goes_to_its_own_field(self, clideo: Product) -> None:
+        upload = _upload(clideo, self._rows(), headers=self.HEADERS)
+        _write(_check(upload))
+
+        placed = Placement.objects.get(site__domain="placed.com")
+        assert timezone.localtime(placed.ordered_at).date() == dt.date(2026, 10, 1)
+        assert timezone.localtime(placed.published_at).date() == dt.date(2026, 10, 6)
+
+        sent = Placement.objects.get(site__domain="sent.com")
+        assert timezone.localtime(sent.ordered_at).date() == dt.date(2026, 10, 7)
+        assert sent.published_at is None
+
+    def test_empty_sent_date_stays_empty(self, clideo: Product) -> None:
+        """У старых размещений колонка пуста — поле остаётся пустым.
+
+        Прежнее поведение положило бы сюда дату размещения по статусу
+        (решение пользователя 07.10.2026).
+        """
+        upload = _upload(clideo, self._rows(), headers=self.HEADERS)
+        _write(_check(upload))
+        old = Placement.objects.get(site__domain="old.com")
+        assert old.ordered_at is None
+        assert timezone.localtime(old.published_at).date() == dt.date(2026, 9, 11)
+
+    def test_file_without_the_column_keeps_the_old_routing(self, clideo: Product) -> None:
+        """Файл старого вида: единственную дату по-прежнему раскладывает статус."""
+        rows = [
+            {
+                "Target": "sent.com",
+                "Статус": "Заявка отправлена",
+                "Дата размещения": "05.10.2026",
+                "Анкор1": "video editor",
+                "Ссылка1": "https://clideo.com/video-editor",
+                "Итог цена": "100",
+            }
+        ]
+        headers = [h for h in self.HEADERS if h != "Дата отправки"]
+        upload = _upload(clideo, rows, headers=headers)
+        _write(_check(upload))
+        sent = Placement.objects.get(site__domain="sent.com")
+        assert timezone.localtime(sent.ordered_at).date() == dt.date(2026, 10, 5)
+        assert sent.published_at is None

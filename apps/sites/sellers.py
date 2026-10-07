@@ -23,6 +23,7 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from apps.placements.models import Invoice, Placement
+from apps.sites import latest
 from apps.sites.models import Seller, Site, SiteMetric, SitePrice, Upload, UploadItem
 
 
@@ -121,6 +122,13 @@ def merge(
         )
     report = Report(target=target, sources=[s for s in sources if s.pk in ids])
     with transaction.atomic():
+        # Площадки слитых продавцов — до переноса: по ним пересчитаем копию
+        # «площадки на сегодня». Без этого в ней остались бы ссылки на
+        # удалённого продавца и на схлопнутые цены, а удаление продавца упало
+        # бы о PROTECT со стороны site_latest (E1-11).
+        touched = set(
+            SitePrice.objects.filter(seller_id__in=ids).values_list("site_id", flat=True)
+        ) | set(SiteMetric.objects.filter(seller_id__in=ids).values_list("site_id", flat=True))
         report.duplicates = _collapse_duplicates(target, ids)
         report.prices = SitePrice.objects.filter(seller_id__in=ids).update(seller=target)
         report.metrics = SiteMetric.objects.filter(seller_id__in=ids).update(seller=target)
@@ -128,6 +136,7 @@ def merge(
         report.placements = Placement.objects.filter(seller_id__in=ids).update(seller=target)
         report.invoices = Invoice.objects.filter(seller_id__in=ids).update(seller=target)
         _keep_notes(target, report.sources, currency)
+        latest.refresh(touched)
         if delete_sources:
             report.deleted = Seller.objects.filter(pk__in=ids).delete()[0]
     return report

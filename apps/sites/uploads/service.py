@@ -49,6 +49,7 @@ from apps.sites.uploads.columns import (
 )
 from apps.sites.uploads.files import Column, FileError, Table, read_table
 from apps.sites.uploads.placement_columns import PField
+from apps.sites.uploads.placement_columns import detect_currency as placement_detect_currency
 from apps.sites.uploads.placement_records import ParsedPlacements, parse_placements
 from apps.sites.uploads.plan import Plan, build_plan, start_of_day
 from apps.sites.uploads.records import Parsed, parse_price_list
@@ -220,6 +221,48 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
         upload.currency, _ = detect_currency(table.columns, mapping, seller.currency)
     upload.summary = None
     upload.save()
+
+
+#: Значения разметки, которые ещё узнаёт код: чужое в сохранённой разметке
+#: (поле переименовали, загрузка старая) не должно ронять подсказку.
+_FIELDS = frozenset(f.value for f in Field)
+_PFIELDS = frozenset(f.value for f in PField)
+
+
+def currency_hint(upload: Upload) -> str:
+    """Откуда взялась валюта цен: заголовок, значения или валюта продавца.
+
+    Шаг «Колонки» показывает это рядом с выбором (просьба пользователя
+    07.10.2026): «валюта продавца по умолчанию» значит, что знака валюты в
+    файле нет вовсе и система просто подставила запасной вариант — тут и
+    ошибаются, загружая долларовый прайс продавцу с евро.
+
+    Подсказку считаем заново из сохранённых колонок: держать её в базе ради
+    одной строки на экране незачем.
+    """
+    # У анкоров цен нет, валюту там не выбирают.
+    if not upload.columns or upload.kind not in (UploadKind.PRICE_LIST, UploadKind.PLACEMENTS):
+        return ""
+    columns = [
+        Column(
+            index=int(c["index"]),
+            letter=str(c["letter"]),
+            header=str(c["header"]),
+            key=str(c["key"]),
+            samples=tuple(str(s) for s in c.get("samples") or ()),
+            filled=int(c.get("filled") or 0),
+        )
+        for c in upload.columns
+    ]
+    saved = upload.mapping or {}
+    if upload.kind == UploadKind.PLACEMENTS:
+        chosen = {key: PField(value) for key, value in saved.items() if value in _PFIELDS}
+        _, hint = placement_detect_currency(columns, chosen)
+        return hint
+    fields = {key: Field(value) for key, value in saved.items() if value in _FIELDS}
+    seller = upload.seller.currency if upload.seller else "EUR"
+    _, hint = detect_currency(columns, fields, seller)
+    return hint
 
 
 def has_columns_step(upload: Upload) -> bool:

@@ -8,7 +8,9 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import SafeString, mark_safe
 
@@ -181,20 +183,26 @@ _STAR_EMPTY = mark_safe(
 )
 
 
-def rating_title(average: Decimal | None, count: int, mine: int | None) -> str:
+def rating_title(
+    average: Decimal | None, count: int, mine: int | None, what: str = "площадку"
+) -> str:
     """Подсказка звезды: среднее, сколько оценок и своя, если она есть.
 
     «оценок: 7», а не «7 оценок»: склонение по числу потребовало бы своего
     помощника, которого в проекте нет, а ради подсказки он лишний.
     """
     if not count or average is None:
-        return "Оценить площадку"
+        return f"Оценить {what}"
     own = f" · ваша {mine}" if mine else ""
     return f"{average} · оценок: {count}{own}"
 
 
 def rating_html(
-    url: str, average: Decimal | None, count: int, mine: int | None = None
+    url: str,
+    average: Decimal | None,
+    count: int,
+    mine: int | None = None,
+    what: str = "площадку",
 ) -> SafeString:
     """Звезда с числом перед доменом; число — одна цифра после точки.
 
@@ -209,10 +217,34 @@ def rating_html(
         "" if rated else " seo-rating-empty",
         url,
         mine or "",
-        rating_title(average, count, mine),
-        rating_title(average, count, mine),
+        rating_title(average, count, mine, what),
+        rating_title(average, count, mine, what),
         _STAR_FULL if rated else _STAR_EMPTY,
         format_html('<span class="seo-rating-value">{}</span>', average) if rated else "",
+    )
+
+
+def seller_cell(seller_id: int | None, name: str, marks: "dict[int, Any]") -> SafeString:
+    """Продавец в таблице предложений: звезда оценки и имя ссылкой (E1-24).
+
+    Имя открывает карточку продавца **в новой вкладке**: карточка площадки сама
+    живёт в панели поверх списка, и увести её на другую запись значит потерять
+    место, куда человек смотрел (просьба пользователя 07.10.2026).
+    """
+    if seller_id is None:
+        return format_html("<b>{}</b>", name)
+    average, count, mine = marks.get(seller_id, (None, 0, None))
+    return format_html(
+        '{}<a href="{}" target="_blank" rel="noopener" title="Карточка продавца"><b>{}</b></a>',
+        rating_html(
+            reverse("admin:sites_seller_rate", args=[seller_id]),
+            average,
+            count,
+            mine,
+            "продавца",
+        ),
+        reverse("admin:sites_seller_change", args=[seller_id]),
+        name,
     )
 
 

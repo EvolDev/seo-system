@@ -19,6 +19,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models import F
 from django.db.models.functions import Lower
 
 from apps.sites.domains import normalize_domain
@@ -347,10 +348,19 @@ class Site(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         self.domain = normalize_domain(self.domain)
         adding = self._state.adding
+        fields = kwargs.get("update_fields")
+        # Пометки «новая цена» и «дешевле» в копии считаются от рабочей цены
+        # (E1-11), поэтому её смену надо пересчитать. Новая площадка — тоже:
+        # без строки в копии список показал бы её без DR.
+        touches_price = adding or fields is None or "price" in fields
         with transaction.atomic():
             super().save(*args, **kwargs)
             if adding:
                 ensure_product_sites(site_ids=[self.pk])
+            if touches_price:
+                from apps.sites import latest
+
+                latest.refresh([self.pk])
 
     def clean(self) -> None:
         self.domain = _clean_domain(self.domain)
@@ -527,6 +537,18 @@ class SiteMetric(models.Model):
     def __str__(self) -> str:
         return f"{self.site} · {self.checked_at:%d.%m.%Y}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Сохранить и пересчитать копию «площадки на сегодня» (E1-11).
+
+        Одиночная запись — из админки или из кода; пачками пишет
+        `bulk_create`, он `save()` не зовёт, и там пересчёт стоит явно,
+        после всей загрузки.
+        """
+        super().save(*args, **kwargs)
+        from apps.sites import latest
+
+        latest.refresh([self.site_id])
+
 
 class SiteCountryMetric(models.Model):
     """Трафик и ключи площадки в одной стране — снимок (ADR-045).
@@ -628,6 +650,18 @@ class SitePrice(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site} · {self.seller} · {self.checked_at:%d.%m.%Y}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Сохранить и пересчитать копию «площадки на сегодня» (E1-11).
+
+        Одиночная запись — из админки или из кода; пачками пишет
+        `bulk_create`, он `save()` не зовёт, и там пересчёт стоит явно,
+        после всей загрузки.
+        """
+        super().save(*args, **kwargs)
+        from apps.sites import latest
+
+        latest.refresh([self.site_id])
 
 
 class GrayScan(models.Model):
@@ -809,6 +843,50 @@ class SiteNote(models.Model):
 
     def __str__(self) -> str:
         return f"{self.site} · {self.body[:40]}"
+
+
+class SellerRating(models.Model):
+    """Оценка продавца человеком, 1–5 звёзд (E1-24).
+
+    Устроена как оценка площадки (ADR-064): одна строка на пару человек ×
+    продавец, передумал — перезапись, история не ведётся. Среднее считается
+    на месте: продавцов полсотни, своего представления им не нужно.
+    """
+
+    seller = models.ForeignKey(
+        Seller, models.CASCADE, verbose_name="продавец", related_name="ratings", db_index=False
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.CASCADE,
+        verbose_name="кто оценил",
+        related_name="seller_ratings",
+        db_index=False,
+    )
+    value = models.SmallIntegerField("оценка")
+    created_at = models.DateTimeField("первая оценка", db_default=PgNow())
+    updated_at = models.DateTimeField("изменена", db_default=PgNow())
+
+    class Meta:
+        db_table = "seller_ratings"
+        verbose_name = "оценка продавца"
+        verbose_name_plural = "оценки продавцов"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["seller", "user"], name="seller_ratings_seller_user_key"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(value__gte=1, value__lte=5),
+                name="seller_ratings_value_check",
+                violation_error_message="Оценка — от 1 до 5 звёзд.",
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["seller"], name="idx_seller_ratings_seller"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.seller} · {self.value}"
 
 
 class SiteRating(models.Model):
@@ -1207,6 +1285,72 @@ def _clean_domain(value: str) -> str:
         return normalize_domain(value)
     except ValueError as error:
         raise ValidationError({"domain": str(error)}) from error
+
+
+class SiteLatest(models.Model):
+    """Заранее посчитанная «площадка на сегодня» (E1-11, ADR-065).
+
+    Дорогие части `v_site_latest`: последний доверенный замер, топ-регион,
+    пометки разбора цен. Представление их читает, а не считает — иначе на
+    каждый показ списка они считались бы по всем 45 000 площадкам.
+
+    Правила подсчёта и пересчёт — `apps/sites/latest.py`. Руками эти строки
+    не правят: они копия, расхождение ловит `check_site_latest`.
+    """
+
+    site = models.OneToOneField(
+        Site,
+        models.CASCADE,
+        verbose_name="площадка",
+        related_name="latest",
+        primary_key=True,
+        db_column="site_id",
+    )
+    dr = models.SmallIntegerField("DR", null=True)
+    organic_traffic = models.IntegerField("трафик", null=True)
+    total_keywords = models.IntegerField("ключей в органике", null=True)
+    metrics_at = models.DateTimeField("дата метрик", null=True)
+    metrics_trusted = models.BooleanField("метрики доверенного источника", null=True)
+    metrics_seller = models.ForeignKey(
+        Seller,
+        models.PROTECT,
+        verbose_name="метрики со слов продавца",
+        related_name="+",
+        null=True,
+        db_index=False,
+    )
+    top_geo = models.TextField("основное гео", null=True)
+    top_geo_traffic = models.IntegerField("трафик основного гео", null=True)
+    top_geo_at = models.DateTimeField("дата замера гео", null=True)
+    new_price_id = models.BigIntegerField("новая цена, id", null=True)
+    new_price_cents = models.IntegerField("новая цена, центы", null=True)
+    new_price_currency = models.CharField("валюта новой цены", max_length=3, null=True)
+    new_price_pending = models.BooleanField("новая цена не разобрана", null=True)
+    cheaper_id = models.BigIntegerField("дешевле, id", null=True)
+    cheaper_seller = models.ForeignKey(
+        Seller,
+        models.PROTECT,
+        verbose_name="дешевле у продавца",
+        related_name="+",
+        null=True,
+        db_index=False,
+    )
+    cheaper_cents = models.IntegerField("дешевле, центы", null=True)
+    cheaper_currency = models.CharField("валюта дешёвого", max_length=3, null=True)
+    cheaper_eur_cents = models.IntegerField("дешевле, евроценты", null=True)
+    cheaper_pending = models.BooleanField("дешёвое не разобрано", null=True)
+    computed_at = models.DateTimeField("пересчитано", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_latest"
+        verbose_name = "посчитанная площадка"
+        verbose_name_plural = "посчитанные площадки"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(F("dr").desc(nulls_last=True), "site", name="idx_site_latest_dr"),
+        ]
+
+    def __str__(self) -> str:
+        return str(self.site)
 
 
 class ProductSiteLatest(models.Model):

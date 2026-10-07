@@ -42,6 +42,10 @@ def sites() -> None:
             SiteCountryMetric.objects.create(site=site, country="us", organic_traffic=number)
 
 
+#: Строк на странице «Площадок» по умолчанию (E1-24).
+PER_PAGE = 50
+
+
 def test_admin_opens(admin_page: Page, live_server: LiveServer) -> None:
     admin_page.goto(f"{live_server.url}/admin/")
     expect(admin_page.locator("#site-name")).to_contain_text("SEO-система")
@@ -86,10 +90,16 @@ def test_screens_switch_without_reload(
     assert same_document(page)
 
 
-def at(page: Page, expected: int) -> None:
+def at(page: Page, expected: int, slack: int = 12) -> None:
     """Прокрутка вернулась на место. С допуском: липкая строка действий сдвигает
-    страницу на несколько пикселей, а проверяем мы возврат, а не пиксель."""
-    assert abs(page.evaluate("window.scrollY") - expected) <= 12, page.evaluate("window.scrollY")
+    страницу на несколько пикселей, а проверяем мы возврат, а не пиксель.
+
+    `slack` побольше — для возврата по истории браузера: там место
+    восстанавливает он сам, пока раскладка ещё устаканивается, и на короткой
+    странице (полсотни строк, E1-24) промах доходит до четырёх десятков
+    пикселей. Обновление списка на месте остаётся строгим.
+    """
+    assert abs(page.evaluate("window.scrollY") - expected) <= slack, page.evaluate("window.scrollY")
 
 
 def test_back_returns_to_same_place(admin_page: Page, live_server: LiveServer, sites: None) -> None:
@@ -97,7 +107,11 @@ def test_back_returns_to_same_place(admin_page: Page, live_server: LiveServer, s
     page.goto(f"{live_server.url}{SITES}")
     mark(page)
     page.evaluate("window.scrollTo(0, 900)")
-    at(page, 900)
+    # Куда прокрутилось на самом деле: высота страницы зависит от числа строк,
+    # и у короткой браузер упрётся в конец раньше 900. Проверяем возврат на то
+    # же место, а не конкретный пиксель.
+    where = int(page.evaluate("window.scrollY"))
+    assert where > 0
 
     with soft_load(page):
         page.locator("#nav-sidebar a", has_text="Размещения").click()
@@ -106,7 +120,7 @@ def test_back_returns_to_same_place(admin_page: Page, live_server: LiveServer, s
     with soft_load(page):
         page.evaluate("history.back()")
     expect(page).to_have_url(f"{live_server.url}{SITES}")
-    at(page, 900)
+    at(page, where, slack=48)
 
     with soft_load(page):
         page.evaluate("history.forward()")
@@ -271,7 +285,7 @@ def test_sites_filters_without_reload(
     page = admin_page
     page.goto(f"{live_server.url}{SITES}")
     mark(page)
-    assert _rows(page) == 100
+    assert _rows(page) == PER_PAGE
     page.evaluate("window.scrollTo(0, 300)")
 
     # «от — до»: Enter в поле — как «Найти»; прокрутка на месте.
@@ -306,7 +320,7 @@ def test_sites_filters_without_reload(
     # Сортировка по колонке — прокрутка на месте. Сначала без фильтров — по меню.
     with soft_load(page):
         page.locator("#nav-sidebar a", has_text="Площадки").click()
-    assert _rows(page) == 100
+    assert _rows(page) == PER_PAGE
     page.evaluate("window.scrollTo(0, 300)")
     # Нажатие без прокрутки к заголовку: click() Playwright сначала прокрутил бы
     # к нему страницу, и проверять было бы нечего.
@@ -325,7 +339,7 @@ def test_sites_filters_without_reload(
     with soft_load(page):
         page.evaluate("history.back()")
     assert "p=2" not in page.url
-    at(page, 300)
+    at(page, 300, slack=48)
     assert same_document(page)
 
 

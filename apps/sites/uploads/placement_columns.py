@@ -31,6 +31,7 @@ class PField(StrEnum):
     DOMAIN = "domain"
     ARTICLE_URL = "article_url"
     PUBLISHED = "published_at"
+    ORDERED = "ordered_at"
     STATUS = "status"
     SERVICE = "service"
     SELLER = "seller"
@@ -59,6 +60,7 @@ FIELD_LABELS: dict[PField, str] = {
     PField.DOMAIN: "Площадка (домен или адрес)",
     PField.ARTICLE_URL: "Адрес статьи",
     PField.PUBLISHED: "Дата размещения",
+    PField.ORDERED: "Дата отправки заявки",
     PField.STATUS: "Статус (Размещено, Заявка отправлена…)",
     PField.SERVICE: "Тип размещения (публикация, вставка ссылки)",
     PField.SELLER: "Продавец — через кого куплено",
@@ -153,6 +155,23 @@ _EXACT: dict[str, PField] = {
             "posted on",
         ),
         PField.PUBLISHED,
+    ),
+    # Дата отправки заявки вебмастеру — своя колонка (E1-23). «Дата» без
+    # уточнения остаётся датой размещения: так её понимали все прежние файлы.
+    **dict.fromkeys(
+        (
+            "дата отправки",
+            "дата заявки",
+            "дата отправки заявки",
+            "отправлено",
+            "sent",
+            "sent on",
+            "date sent",
+            "ordered",
+            "ordered on",
+            "order date",
+        ),
+        PField.ORDERED,
     ),
     **dict.fromkeys(("статус", "status"), PField.STATUS),
     **dict.fromkeys(

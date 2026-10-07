@@ -88,6 +88,10 @@ TABLES = [
     "invoice_items",
     # E1-21
     "site_ratings",
+    # E1-11
+    "site_latest",
+    # E1-24
+    "seller_ratings",
 ]
 
 VIEWS = [

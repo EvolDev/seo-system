@@ -36,7 +36,7 @@ from apps.placements.models import (
     PlacementLink,
     PlacementStatus,
 )
-from apps.sites import statuses
+from apps.sites import latest, statuses
 from apps.sites.importing import values
 from apps.sites.importing.report import Outcome, Report, Section
 from apps.sites.importing.rows import CopyRow, KeywordData, Link, PlacementData, SiteData
@@ -345,6 +345,9 @@ class Importer:
         if undecided:
             ProductSite.objects.filter(pk__in=undecided).update(imported_undecided=True)
             self.report.count("product_sites", Outcome.UPDATED, len(undecided))
+        # Копия «площадки на сегодня» (E1-11) — той же транзакцией, что замеры
+        # и цены: иначе список показывал бы прежние числа.
+        latest.refresh(site_ids)
 
     def _create_sites(self, rows: Sequence[SiteData]) -> tuple[dict[str, Site], set[str]]:
         known = {

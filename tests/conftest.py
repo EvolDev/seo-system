@@ -264,6 +264,7 @@ def offer(db: None) -> OfferFactory:
     # Модели — внутри: conftest читается до того, как Django готов.
     from django.utils import timezone
 
+    from apps.sites import latest
     from apps.sites.models import Seller, Site, SitePrice
 
     def make(
@@ -282,6 +283,9 @@ def offer(db: None) -> OfferFactory:
         if working:
             Site.all_objects.filter(pk=site.pk).update(price=price)
             site.price = price
+            # `.update()` не зовёт save(), поэтому копию «площадки на сегодня»
+            # пересчитываем сами — как это делает импорт после bulk_update.
+            latest.refresh([site.pk])
         return price
 
     return make

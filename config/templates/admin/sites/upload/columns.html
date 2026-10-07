@@ -26,7 +26,7 @@
       Строка заголовков — <input type="number" name="header_row" value="{{ upload.header_row }}" min="0" class="seo-num">
       (если не та — впишите номер и нажмите «Дальше»{% if upload.header_row == 0 %}; 0 — заголовков нет, в файле одни домены{% endif %}).{% if not anchors_kind %}
       Валюта цен —
-      <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>.{% endif %}
+      <select name="currency">{% for code in currencies %}<option value="{{ code }}"{% if code == upload.currency %} selected{% endif %}>{{ code }}</option>{% endfor %}</select>{% if currency_hint %} — {{ currency_hint }}{% endif %}.{% endif %}
     </p>
     <ul>
       <li>Галочка «грузить» у колонки: снимите — и колонка в загрузку не попадёт совсем, что в «куда записать» неважно.</li>

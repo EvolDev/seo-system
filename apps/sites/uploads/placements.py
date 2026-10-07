@@ -446,8 +446,8 @@ class _Planner:
             "placement_type": record.placement_type,
             "extra": record.extra or None,
         }
-        if record.published_on is not None:
-            row.fill[_date_field(row.status)] = start_of_day(record.published_on)
+        for day_field, day in self._dates(record, row.status):
+            row.fill[day_field] = start_of_day(day)
         if row.paid_cents is not None:
             row.fill["price_paid"] = row.paid_cents
         if row.seller:
@@ -456,6 +456,26 @@ class _Planner:
             row.fill["employee"] = row.employee
         # Следующая строка того же файла должна видеть адрес нового размещения.
         target.article_url = record.article_url
+
+    def _dates(self, record: PlacementRecord, status: PlacementStatus) -> list[tuple[str, dt.date]]:
+        """Какие даты записать: поле → день из файла.
+
+        Колонка «Дата отправки» размечена — каждая дата идёт в своё поле, и
+        пустая колонка оставляет поле пустым (решение пользователя 07.10.2026).
+        Колонки нет — файл старого вида с единственной датой, и её по-прежнему
+        раскладывает статус: у опубликованного это день публикации, у
+        остального — день заявки.
+        """
+        if not self.plan.parsed.has_ordered_column:
+            if record.published_on is None:
+                return []
+            return [(_date_field(status), record.published_on)]
+        found = []
+        if record.published_on is not None:
+            found.append(("published_at", record.published_on))
+        if record.ordered_on is not None:
+            found.append(("ordered_at", record.ordered_on))
+        return found
 
     def _existing(self, row: PlanRow) -> None:
         record = row.record
@@ -470,13 +490,12 @@ class _Planner:
             row.fill["article_url"] = record.article_url
             target.article_url = record.article_url
         status = row.status if row.status_moves else PlacementStatus(target.status)
-        day_field = _date_field(status)
-        if record.published_on is not None:
+        for day_field, day in self._dates(record, status):
             current_day = getattr(target, day_field)
-            wanted = start_of_day(record.published_on)
+            wanted = start_of_day(day)
             if current_day is None:
                 row.fill[day_field] = wanted
-            elif timezone.localtime(current_day).date() != record.published_on:
+            elif timezone.localtime(current_day).date() != day:
                 self._conflict(row, day_field, _day(current_day), _day(wanted), value=wanted)
         if record.placement_type is not None:
             if not target.placement_type:

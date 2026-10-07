@@ -36,6 +36,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import connection, models, transaction
 
+from apps.sites import latest
 from apps.sites.models import Upload, UploadStatus
 from config import db, deletion
 
@@ -127,6 +128,11 @@ def undo(upload: Upload) -> Report:
         # Имена таблиц — пока журнал цел: отмена удаляет его вместе с загрузкой.
         tables = _tables(locked.pk)
         report = _run(locked)
+        # Отмена вернула прежние цены и замеры, а то, что загрузка завела, —
+        # удалила. Копию «площадки на сегодня» считаем заново целиком (E1-11):
+        # отмена редка и уже тяжела, а полный пересчёт заведомо верен — список
+        # затронутых площадок по журналу собирать надёжнее нечем.
+        latest.refresh_all()
         path = Path(settings.UPLOADS_DIR) / locked.file_path
         transaction.on_commit(lambda: path.unlink(missing_ok=True))
     db.analyze(tables)

@@ -43,6 +43,10 @@ def sites() -> None:
             SiteCountryMetric.objects.create(site=site, country="us", organic_traffic=number)
 
 
+#: Строк на странице «Площадок» по умолчанию (E1-24).
+PER_PAGE = 50
+
+
 def _hold(page: Page, name: str, selector: str) -> None:
     page.evaluate(f"window.__held_{name} = document.querySelector({selector!r})")
 
@@ -119,12 +123,12 @@ def test_actions_work_after_refresh(admin_page: Page, live_server: LiveServer, s
     with soft_load(page):
         page.locator("#result_list thead th.column-domain_link .text a").dispatch_event("click")
     assert "o=" in page.url
-    assert _rows(page) == 100
+    assert _rows(page) == PER_PAGE
     page.locator("#result_list tbody input.action-select").nth(0).check()
     page.locator("#result_list tbody input.action-select").nth(1).check()
     expect(page.locator(".action-counter")).to_contain_text("2")
     page.locator("#action-toggle").check()
-    expect(page.locator(".action-counter")).to_contain_text("100")
+    expect(page.locator(".action-counter")).to_contain_text(str(PER_PAGE))
 
     # Следующая страница — отметки сброшены (строки другие), счётчик с нуля.
     with soft_load(page):

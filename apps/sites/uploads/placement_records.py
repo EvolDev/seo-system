@@ -100,6 +100,7 @@ class PlacementRecord:
     source_value: str | None = None  # адрес из колонки площадки, если там не просто домен
     article_url: str | None = None
     published_on: dt.date | None = None
+    ordered_on: dt.date | None = None  # колонка «Дата отправки», если она есть
     status: PlacementStatus | None = None  # пусто — в файле нет статуса
     placement_type: PlacementType | None = None
     seller: str | None = None
@@ -128,6 +129,10 @@ class RowError:
 @dataclass
 class ParsedPlacements:
     records: list[PlacementRecord]
+    # Размечена ли колонка «Дата отправки» (E1-23). Если да — каждая дата берётся
+    # строго из своей колонки; если нет, файл старого вида, и единственную дату
+    # по-прежнему раскладывает статус.
+    has_ordered_column: bool = False
     errors: list[RowError] = field(default_factory=list)
     issues: dict[str, list[Issue]] = field(default_factory=dict)  # вид → строки
     duplicates: list[tuple[str, tuple[int, ...]]] = field(default_factory=list)
@@ -160,7 +165,7 @@ def parse_placements(
     extra = [
         c for c in table.columns if mapping.get(c.key, PField.EXTRA) == PField.EXTRA and c.filled
     ]
-    parsed = ParsedPlacements(records=[])
+    parsed = ParsedPlacements(records=[], has_ordered_column=PField.ORDERED in columns)
     seen: dict[tuple[str, str], list[int]] = {}
     for row in table.rows:
         try:
@@ -277,10 +282,14 @@ def _row(
     record.seller = _text(cell(PField.SELLER))
     record.employee = _text(cell(PField.EMPLOYEE))
 
-    try:
-        record.published_on = parse_day(cell(PField.PUBLISHED))
-    except ValueError as error:
-        parsed.issue(BAD_DATE, record, f"{error} — оставлена пустой")
+    for date_field, date_column in (
+        ("published_on", PField.PUBLISHED),
+        ("ordered_on", PField.ORDERED),
+    ):
+        try:
+            setattr(record, date_field, parse_day(cell(date_column)))
+        except ValueError as error:
+            parsed.issue(BAD_DATE, record, f"{error} — оставлена пустой")
 
     money = _money_reader(cell, columns, record, parsed, decimal_comma=decimal_comma)
     record.paid_cents = money(PField.PAID)

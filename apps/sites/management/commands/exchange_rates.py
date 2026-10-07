@@ -10,6 +10,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.integrations import ecb
+from apps.sites import latest
 from apps.sites.models import ExchangeRate
 from apps.sites.rates import save_rates
 from config.run_id import bind_run_id, new_run_id
@@ -27,6 +28,11 @@ class Command(BaseCommand):
             except ecb.EcbError as error:
                 raise CommandError(str(error)) from error
         self.stdout.write(f"Новых курсов: {saved}")
+        if saved:
+            # «Дешевле» сравнивается в евро по последнему курсу, поэтому новые
+            # курсы меняют пометки разбора у всех площадок (E1-11, ADR-065).
+            rows = latest.refresh_all()
+            self.stdout.write(f"Пересчитано площадок: {rows}")
         for currency in SHOWN:
             rate = ExchangeRate.objects.filter(currency=currency).order_by("-rate_date").first()
             if rate is not None:

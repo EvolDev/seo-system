@@ -480,6 +480,9 @@ class UploadAdmin(RecordAdmin):
             "anchors_kind": upload.kind == UploadKind.ANCHORS,
             "confidence": {c.value: _confidence_class(c) for c in Confidence},
             "currencies": sorted({*CURRENCIES, upload.currency or "EUR"}),
+            # Откуда система взяла валюту: «валюта продавца по умолчанию» значит,
+            # что знака валюты в файле нет и её стоит проверить глазами (E1-24).
+            "currency_hint": service.currency_hint(upload),
             "rates": latest_rates(),
         }
         return TemplateResponse(request, "admin/sites/upload/columns.html", context)

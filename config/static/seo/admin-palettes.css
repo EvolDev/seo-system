@@ -541,6 +541,23 @@ body.admin-interface .module.filtered #changelist-filter details.seo-multi > sum
 }
 body.admin-interface .seo-multi > summary::after { content: "▾"; color: var(--body-quiet-color); }
 body.admin-interface .seo-multi[open] > summary::after { content: "▴"; }
+/* Поиск по длинному списку фильтра (E1-24): продавцов полсотни. */
+body.admin-interface .seo-multi-search {
+  width: 100%;
+  margin: 4px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline-color);
+  border-radius: var(--seo-radius, 6px);
+  background: var(--body-bg);
+  color: var(--body-fg);
+  font-size: 12px;
+}
+body.admin-interface .seo-multi-empty {
+  margin: 6px 4px;
+  color: var(--body-quiet-color);
+  font-size: 12px;
+}
+
 body.admin-interface .seo-multi-list {
   max-height: 260px;
   margin-top: 4px;
@@ -551,6 +568,12 @@ body.admin-interface .seo-multi-list {
   border-radius: 12px;
   background: var(--body-bg);
 }
+/* Поиск прячет пункт атрибутом hidden. Прятать его должен сам браузер, но
+   правило `[hidden] { display: none }` слабее авторских, а у Django в
+   changelists.css стоит `#changelist-filter a { display: block }` — селектор
+   по идентификатору, он сильнее любых классов. Поэтому и здесь берём
+   идентификатор, иначе пункт остаётся на экране (E1-24). */
+#changelist-filter .seo-multi-item[hidden] { display: none; }
 body.admin-interface .seo-multi-item {
   display: flex;
   align-items: center;

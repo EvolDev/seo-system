@@ -17,6 +17,7 @@ from pytest_django import DjangoAssertNumQueries
 
 from apps.content.models import DomainSetting
 from apps.placements.models import Placement, PlacementStatus
+from apps.sites import latest
 from apps.sites.admin import SellerFilter, _euros
 from apps.sites.models import (
     AuditAuthor,
@@ -296,22 +297,23 @@ class TestPerPage:
             _site(f"site{number}.com", dr=number % 100)
 
     @pytest.mark.usefixtures("many")
-    def test_default_is_hundred(self, admin_client: Client) -> None:
+    def test_default_is_fifty(self, admin_client: Client) -> None:
+        """Полсотни по умолчанию (просьба пользователя 07.10.2026)."""
         response = admin_client.get(URL, {"list": "all"})
-        assert len(response.context["cl"].result_list) == 100
+        assert len(response.context["cl"].result_list) == 50
         assert "На странице:" in response.content.decode()
 
     @pytest.mark.usefixtures("many")
     def test_chosen_size_applies(self, admin_client: Client) -> None:
-        response = admin_client.get(URL, {"list": "all", "per_page": "50"})
-        assert len(response.context["cl"].result_list) == 50
+        response = admin_client.get(URL, {"list": "all", "per_page": "100"})
+        assert len(response.context["cl"].result_list) == 100
 
     @pytest.mark.usefixtures("many")
     def test_unknown_size_is_ignored_and_filters_still_work(self, admin_client: Client) -> None:
         # Чужой параметр админка приняла бы за отбор по полю — список бы упал.
         response = admin_client.get(URL, {"list": "all", "per_page": "7", "language": "en"})
         assert response.status_code == 200
-        assert len(response.context["cl"].result_list) == 100
+        assert len(response.context["cl"].result_list) == 50
 
 
 class TestSearch:
@@ -394,6 +396,9 @@ def test_query_count(
         if number % 3 == 0:
             Placement.objects.create(site=site, product=clideo, status=PlacementStatus.PLACED)
     ExchangeRate.objects.create(currency="USD", rate_date=datetime(2026, 9, 30).date(), rate=1.1355)
+    # «Дешевле» сравнивается в евро, поэтому новый курс меняет пометки у всех
+    # площадок: в работе это делает команда `exchange_rates` (E1-11).
+    latest.refresh_all()
     params = {
         "worked": "no",
         "dr__range__gte": "0",
@@ -413,5 +418,5 @@ def test_query_count(
     with django_assert_max_num_queries(15):
         response = admin_client.get(URL, params)
     assert response.status_code == 200
-    assert len(response.context["cl"].result_list) == 100
+    assert len(response.context["cl"].result_list) == 50
     assert "трафик US" in response.content.decode()

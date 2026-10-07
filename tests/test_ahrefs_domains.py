@@ -7,7 +7,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from apps.sites import ahrefs_domains
+from apps.sites import ahrefs_domains, latest
 from apps.sites.models import Site, SiteList, SiteListItem, SiteMetric
 
 pytestmark = pytest.mark.django_db
@@ -23,6 +23,9 @@ def big_list() -> SiteList:
     )
     SiteListItem.objects.bulk_create(SiteListItem(site_list=site_list, site=s) for s in sites)
     Site.objects.filter(domain="site0099.com").update(is_deleted=True)
+    # Площадки и замеры заведены пачками, минуя save(): копию «площадки на
+    # сегодня» пересчитываем явно, как это делает загрузка (E1-11).
+    latest.refresh_all()
     return site_list
 
 

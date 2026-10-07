@@ -1,0 +1,7 @@
+{% extends "admin/change_form.html" %}
+{% comment %}
+Карточка продавца: звезда оценки у имени (E1-24). Имя показывает штатный
+подзаголовок формы, и своего места под значки у него нет — поэтому блок
+переопределён целиком. В панели звезду ставит `panel_title_tools`.
+{% endcomment %}
+{% block content_subtitle %}{% if subtitle %}<h2>{{ rating_star }}{{ subtitle }}</h2>{% endif %}{% endblock %}

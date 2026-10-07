@@ -97,7 +97,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
           <tbody>
           {% for row in offer_rows %}
             <tr class="{% if row.is_working %}seo-working{% endif %}">
-              <td><b>{{ row.offer.seller_name }}</b>{% if row.pending and not row.is_working %} <span class="seo-chip seo-info">новое</span>{% endif %}</td>
+              <td>{{ row.seller }}{% if row.pending and not row.is_working %} <span class="seo-chip seo-info">новое</span>{% endif %}</td>
               <td>{{ row.offer.get_placement_type_display }}</td>
               <td class="seo-right">{{ row.price }}</td>
               <td>{% if row.is_working %}<span class="seo-chip seo-down">рабочая</span>{% elif row.other_service %}<span class="seo-flat">другая услуга</span>{% elif row.delta %}{{ row.delta }}{% endif %}</td>

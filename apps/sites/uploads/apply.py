@@ -22,6 +22,7 @@ from typing import Any
 
 from django.utils import timezone
 
+from apps.sites import latest
 from apps.sites.models import (
     MetricSource,
     Seller,
@@ -125,6 +126,10 @@ class Writer:
         if Part.PRICES in self.parts:
             self._items(prices)
         self.upload.site_list = site_list
+        # Копия «площадки на сегодня» (E1-11): пересчитываем площадки загрузки
+        # здесь же, одной транзакцией с записью. Иначе список показывал бы
+        # прежние DR и цены до следующего полного пересчёта.
+        latest.refresh(self.site_ids.values())
         return {
             "counts": dict(self.counts),
             "list": site_list.name,

@@ -108,6 +108,11 @@ class MultiChoiceFilter(admin.SimpleListFilter):
 
     template = "admin/seo_multiselect_filter.html"
     all_label = "Все"
+    #: Со скольких пунктов показывать поле поиска (E1-24). Продавцов полсотни,
+    #: и нужного искали глазами — просьба пользователя 07.10.2026. На коротком
+    #: списке поле только мешает.
+    search_from = 12
+    search_label = "Начните печатать…"
     # «Все» — переключатель: отмечены все (параметра нет) → не отмечен никто.
     # Пустому выбору нужен свой след в адресе, иначе он неотличим от «все».
     none_token = "-"
@@ -139,6 +144,11 @@ class MultiChoiceFilter(admin.SimpleListFilter):
     def narrow(self, queryset: Any, values: list[str]) -> Any:
         """Отбор по отмеченным значениям — его пишет наследник."""
         raise NotImplementedError
+
+    @property
+    def show_search(self) -> bool:
+        """Нужно ли поле поиска: пунктов больше порога."""
+        return len(self.lookup_choices) >= self.search_from
 
     def choices(self, changelist: Any) -> "Iterator[_ListFilterChoices]":
         """Пункты меню. Ничего не отмечено — значит показаны все, и галочки стоят у всех.

@@ -3,6 +3,8 @@
 можно отметить несколько значений сразу — просьба пользователя 05.10.2026.
 Каждый пункт — ссылка, которая добавляет или снимает своё значение, поэтому
 меню работает и без скрипта; открытое состояние держит <details>.
+Длинный список (продавцов полсотни) получает поле поиска — оно сужает пункты
+на месте, seo/multifilter.js. Без скрипта поле просто ничего не делает.
 {% endcomment %}
 <div class="list-filter-dropdown seo-multifilter">
   <h3{% if spec.values %} class="active"{% endif %}>{{ title|capfirst }}</h3>
@@ -10,6 +12,10 @@
     <summary>
       {% if spec.values %}отмечено: {{ spec.values|length }}{% elif spec.is_empty %}никто не отмечен{% else %}{{ spec.all_label }} — отмечены все{% endif %}
     </summary>
+    {% if spec.show_search %}
+      <input type="search" class="seo-multi-search" placeholder="{{ spec.search_label }}"
+             aria-label="Найти в списке «{{ title|capfirst }}»" autocomplete="off">
+    {% endif %}
     <div class="seo-multi-list" role="group" aria-label="{{ title|capfirst }}">
       {% for choice in choices %}
         <a href="{{ choice.query_string|iriencode }}" class="seo-multi-item{% if choice.selected %} is-on{% endif %}">
