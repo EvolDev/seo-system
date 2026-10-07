@@ -10,4 +10,7 @@
   {% else %}
   <button type="button" class="seo-btn" data-panel-cancel>Закрыть</button>
   {% endif %}
+  {% if panel_upload_price_url %}
+  <a href="{{ panel_upload_price_url }}" class="seo-btn" target="_blank" rel="noopener">Загрузить прайс</a>
+  {% endif %}
 </footer>

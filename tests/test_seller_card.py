@@ -204,3 +204,33 @@ class TestInSiteCard:
         star = table.index('class="seo-rating"')
         assert star < table.index("Athena Smith", star)
         assert '<span class="seo-rating-value">4.0</span>' in table
+
+
+class TestPriceUploadButton:
+    def test_seller_card_links_to_upload_in_new_tab(self, admin_client: Client) -> None:
+        seller = Seller.objects.create(name="Nick Hemenway")
+        response = admin_client.get(
+            reverse("admin:sites_seller_change", args=[seller.pk]), HTTP_X_SEO_PARTIAL="1"
+        )
+        assert response.status_code == 200
+        expected = f"{reverse('admin:sites_upload_add')}?kind=price_list&seller={seller.pk}"
+        assert response.context["panel_upload_price_url"] == expected
+        html = response.content.decode()
+        assert 'target="_blank" rel="noopener">Загрузить прайс</a>' in html
+
+    @pytest.mark.parametrize("seller_value", ["", "invalid", "999999999"])
+    def test_invalid_seller_is_not_selected(self, admin_client: Client, seller_value: str) -> None:
+        page = admin_client.get(
+            reverse("admin:sites_upload_add"), {"kind": "price_list", "seller": seller_value}
+        )
+        assert page.status_code == 200
+        assert page.context["form"]["seller"].value() is None
+
+    def test_explicit_seller_selected_without_remembering_it(self, admin_client: Client) -> None:
+        seller = Seller.objects.create(name="Nick Hemenway")
+        url = reverse("admin:sites_upload_add")
+        page = admin_client.get(url, {"kind": "price_list", "seller": str(seller.pk)})
+        assert str(page.context["form"]["seller"].value()) == str(seller.pk)
+        assert page.context["form"]["kind"].value() == "price_list"
+        ordinary = admin_client.get(url)
+        assert ordinary.context["form"]["seller"].value() is None

@@ -24,13 +24,14 @@ from apps.sites.models import (
     Site,
     SiteCountryLatest,
     SiteCountryMetric,
+    SiteLatest,
     SiteMetric,
     Upload,
     UploadKind,
     UploadStatus,
 )
 from apps.sites.tasks import upload_check, upload_write
-from apps.sites.uploads import ahrefs, service
+from apps.sites.uploads import ahrefs, review, service
 from apps.sites.uploads.files import read_table
 from apps.sites.uploads.plan import start_of_day
 
@@ -271,6 +272,84 @@ class TestWrite:
         assert SiteCountryMetric.objects.count() == 2
         latest = SiteCountryLatest.objects.get(site=sites["eggradients.com"])
         assert latest.checked_at == start_of_day(dt.date(2026, 10, 2))
+
+
+class TestLatestAfterBatch:
+    """Пакетная запись должна обновлять и данные списка/карточки (ADR-065)."""
+
+    def test_new_snapshot_updates_screen(self, sites: dict[str, Site]) -> None:
+        _load(batch(EGG, CMD))
+        row = ProductSiteLatest.objects.get(site=sites["eggradients.com"])
+        assert (row.dr, row.organic_traffic, row.total_keywords) == (55, 99979, 16245)
+        assert (row.top_geo, row.top_geo_traffic) == ("us", 53814)
+        assert row.metrics_at == start_of_day(DAY)
+        other = ProductSiteLatest.objects.get(site=sites["commandlinux.com"])
+        assert (other.dr, other.organic_traffic, other.total_keywords) == (59, 178262, 3966)
+
+    def test_same_day_update_refreshes_screen(self, sites: dict[str, Site]) -> None:
+        _load(batch(EGG))
+        fresher = ("eggradients.com/", "subdomains", "57", "17000", "100000", "(gb, 60000)")
+        _load(batch(fresher))
+        assert SiteMetric.objects.count() == 1
+        row = ProductSiteLatest.objects.get(site=sites["eggradients.com"])
+        assert (row.dr, row.organic_traffic, row.total_keywords) == (57, 100000, 17000)
+        assert (row.top_geo, row.top_geo_traffic) == ("gb", 60000)
+
+    def test_new_day_preserves_history_and_refreshes_screen(self, sites: dict[str, Site]) -> None:
+        _load(batch(EGG))
+        tomorrow = dt.date(2026, 10, 2)
+        fresher = ("eggradients.com/", "subdomains", "57", "17000", "100000", "(gb, 60000)")
+        _load(batch(fresher), day=tomorrow)
+        assert SiteMetric.objects.count() == 2
+        assert SiteMetric.objects.get(checked_at=start_of_day(DAY)).organic_traffic == 99979
+        row = ProductSiteLatest.objects.get(site=sites["eggradients.com"])
+        assert (row.dr, row.organic_traffic, row.metrics_at) == (57, 100000, start_of_day(tomorrow))
+
+    def test_unchanged_snapshot_repairs_stale_screen(self, sites: dict[str, Site]) -> None:
+        _load(batch(EGG))
+        site = sites["eggradients.com"]
+        SiteLatest.objects.filter(site=site).update(dr=None, organic_traffic=None)
+        # Другой файл, те же метрики: повторная запись, а не открытие прежней загрузки.
+        upload = _load(batch(EGG, UG))
+        assert (upload.result or {})["counts"]["measures_unchanged"] == 1
+        row = ProductSiteLatest.objects.get(site=site)
+        assert (row.dr, row.organic_traffic) == (55, 99979)
+
+    @pytest.mark.parametrize("seller_first", [True, False])
+    def test_own_snapshot_wins_same_date_tie(
+        self, sites: dict[str, Site], seller_first: bool
+    ) -> None:
+        def seller_snapshot() -> None:
+            SiteMetric.objects.create(
+                site=sites["eggradients.com"],
+                seller=Seller.collaborator(),
+                source=MetricSource.CSV_IMPORT,
+                checked_at=start_of_day(DAY),
+                dr=99,
+                organic_traffic=1,
+                total_keywords=1,
+                top_geo="gb",
+                top_geo_traffic=1,
+            )
+
+        if seller_first:
+            seller_snapshot()
+        _load(batch(EGG))
+        if not seller_first:
+            seller_snapshot()
+        row = ProductSiteLatest.objects.get(site=sites["eggradients.com"])
+        assert (row.dr, row.organic_traffic, row.total_keywords) == (55, 99979, 16245)
+        assert (row.top_geo, row.top_geo_traffic) == ("us", 53814)
+        assert row.metrics_seller is None
+        assert review._metrics([sites["eggradients.com"].pk]) == {
+            sites["eggradients.com"].pk: (55, 99979, None)
+        }
+
+    def test_refresh_only_affects_uploaded_sites(self, sites: dict[str, Site]) -> None:
+        untouched = sites["commandlinux.com"]
+        before = SiteLatest.objects.get(site=untouched).computed_at
+        _load(batch(EGG))
+        assert SiteLatest.objects.get(site=untouched).computed_at == before
 
 
 class TestTopGeoInLatest:

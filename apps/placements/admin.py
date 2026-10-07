@@ -33,7 +33,7 @@ from django.contrib.admin.views.main import ChangeList
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db.models import Exists, OuterRef, QuerySet
-from django.db.models.functions import TruncMonth
+from django.db.models.functions import Coalesce, TruncMonth
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import URLPattern, path, reverse
@@ -56,9 +56,9 @@ from apps.placements.models import (
     PlacementLink,
 )
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
-from apps.sites import rating
+from apps.sites import countries, rating
 from apps.sites.display import domain_tools_html, rating_html, remove_placement_html
-from apps.sites.models import Product, StatusSource, WorkStatus
+from apps.sites.models import Product, SiteLatest, StatusSource, WorkStatus
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
 from apps.workspace.products import FrameProductFilter, working_product_id
@@ -291,10 +291,17 @@ class PlacementAdmin(RecordAdmin):
     form = PlacementForm
     list_display = (
         "site_link",
+        "working_seller_cell",
         "status_link",
+        "dr_cell",
+        "traffic_cell",
+        "top_geo_cell",
         "placement_type",
         "ordered_day",
         "published_day",
+        "publication_price_cell",
+        "announce_price_cell",
+        "writing_price_cell",
         "paid_cell",
         "indexed_cell",
         "indexed_at_cell",
@@ -314,7 +321,7 @@ class PlacementAdmin(RecordAdmin):
         "skip_checks",
     )
     search_fields = ("site__domain", "article_url", "collaborator_order_id")
-    list_select_related = ("site", "product")
+    list_select_related = ("site", "product", "seller", "site__price__seller", "site__latest")
     autocomplete_fields = ("site", "seller")
     # «В индексе» и время проверки пишет проверка; результат, увиденный
     # человеком, — запись в журнале проверок (E1-09), а не правка поля.
@@ -394,8 +401,11 @@ class PlacementAdmin(RecordAdmin):
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Placement]:
         # Колонка «заплачено»: из счёта ли сумма и оплачен ли он — без запроса на строку.
-        queryset: QuerySet[Placement] = super().get_queryset(request)
+        queryset: QuerySet[Placement] = (
+            super().get_queryset(request).select_related(*self.list_select_related)
+        )
         queryset = queryset.annotate(
+            display_seller_name=Coalesce("site__price__seller__name", "seller__name"),
             invoice_issued=_in_invoice(InvoiceStatus.ISSUED),
             invoice_paid=_in_invoice(InvoiceStatus.PAID),
         )
@@ -827,6 +837,58 @@ class PlacementAdmin(RecordAdmin):
             skip_checks=False, updated_at=timezone.now()
         )
         self.message_user(request, f"Снова проверяется по расписанию: {count}.")
+
+    @admin.display(description="продавец", ordering="display_seller_name")
+    def working_seller_cell(self, obj: Placement) -> SafeString | str:
+        price = obj.site.price
+        seller = price.seller if price is not None else obj.seller
+        if seller is None:
+            return ""
+        link = format_html(
+            '<a href="{}" data-panel title="Карточка продавца">{}</a>',
+            reverse("admin:sites_seller_change", args=[seller.pk]),
+            seller.name,
+        )
+        if price is None:
+            return format_html('{}<div class="seo-sub">рабочая цена не выбрана</div>', link)
+        return link
+
+    @admin.display(description="DR", ordering="site__latest__dr")
+    def dr_cell(self, obj: Placement) -> int | str:
+        row: SiteLatest | None = getattr(obj.site, "latest", None)
+        return row.dr if row is not None and row.dr is not None else ""
+
+    @admin.display(description="трафик", ordering="site__latest__organic_traffic")
+    def traffic_cell(self, obj: Placement) -> int | str:
+        row: SiteLatest | None = getattr(obj.site, "latest", None)
+        return row.organic_traffic if row is not None and row.organic_traffic is not None else ""
+
+    @admin.display(description="топ регион", ordering="site__latest__top_geo_traffic")
+    def top_geo_cell(self, obj: Placement) -> SafeString | str:
+        row: SiteLatest | None = getattr(obj.site, "latest", None)
+        if row is None or not row.top_geo:
+            return ""
+        return format_html(
+            '<span title="{}">{} {}</span>',
+            countries.name(row.top_geo),
+            row.top_geo.upper(),
+            "" if row.top_geo_traffic is None else row.top_geo_traffic,
+        )
+
+    @admin.display(description="цена публикации", ordering="site__price__placement_cents")
+    def publication_price_cell(self, obj: Placement) -> str:
+        price = obj.site.price
+        return money(price.placement_cents, price.currency) if price is not None else ""
+
+    @admin.display(description="цена анонса", ordering="site__price__announce_cents")
+    def announce_price_cell(self, obj: Placement) -> str:
+        price = obj.site.price
+        return money(price.announce_cents, price.currency) if price is not None else ""
+
+    @admin.display(description="цена написания", ordering="site__price__writing_cents")
+    def writing_price_cell(self, obj: Placement) -> str:
+        price = obj.site.price
+        return money(price.writing_cents, price.currency) if price is not None else ""
 
     @admin.display(description="заплачено", ordering="price_paid_cents")
     def paid_cell(self, obj: Placement) -> SafeString | str:

@@ -872,6 +872,16 @@ def _last_choice(request: HttpRequest) -> dict[str, Any]:
     asked = request.GET.get("kind")
     if asked in UploadKind.values:
         initial["kind"] = asked
+        # Продавец подставляется только по явной ссылке из его карточки.
+        if asked == UploadKind.PRICE_LIST:
+            try:
+                seller_id = int(request.GET.get("seller", ""))
+            except ValueError:
+                pass
+            else:
+                seller = Seller.objects.filter(pk=seller_id, is_collaborator=False).first()
+                if seller is not None:
+                    initial["seller"] = seller.pk
         if (request.GET.get("product") or "").isdigit():
             initial["product"] = int(request.GET["product"])
         return initial

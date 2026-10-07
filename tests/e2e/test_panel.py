@@ -431,3 +431,75 @@ def test_panel_width_fits_content(
     size = page.evaluate(PANEL_SIZE)
     assert 480 <= size["width"] <= 720, size
     assert size["overflow"] <= 0, size
+
+
+def test_working_seller_card_from_placements(
+    admin_page: Page, live_server: LiveServer, known: Site
+) -> None:
+    """Из размещений открывается и сохраняется штатная карточка рабочей цены."""
+    seller = Seller.objects.create(name="Working seller", contacts="working@example.com")
+    historical = Seller.objects.create(name="Historical seller")
+    price = SitePrice.objects.create(site=known, seller=seller, placement_cents=12300)
+    known.price = price
+    known.save(update_fields=["price"])
+    Placement.objects.create(
+        site=known, product=Product.objects.get(name="Convertio"), seller=historical
+    )
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/")
+    mark(page)
+    row = page.locator("#result_list tbody tr", has_text="known.com")
+    link = row.locator(".field-working_seller_cell a")
+    expect(link).to_have_text("Working seller")
+    expect(link).to_have_attribute("href", f"/admin/sites/seller/{seller.pk}/change/")
+    link.click()
+    panel = page.locator(PANEL)
+    expect(panel.locator("input[name=name]")).to_have_value("Working seller")
+    expect(panel.locator("input[name=contacts]")).to_have_value("working@example.com")
+    expect(panel.locator("textarea[name=notes]")).to_be_visible()
+    expect(panel.locator("input[name=metrics_trusted]")).to_be_visible()
+    assert same_document(page)
+    panel.locator("input[name=name]").fill("Updated working seller")
+    panel.locator("[data-panel-save]").click()
+    expect(panel).to_be_hidden()
+    expect(row.locator(".field-working_seller_cell a")).to_have_text("Updated working seller")
+    assert same_document(page)
+
+
+def test_seller_upload_button_opens_prefilled_new_tab(
+    admin_page: Page, live_server: LiveServer
+) -> None:
+    seller = Seller.objects.create(name="Nick Hemenway", currency="USD")
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/sites/seller/")
+    page.locator(f'#result_list a[href="/admin/sites/seller/{seller.pk}/change/"]').click()
+    panel = page.locator(PANEL)
+    expect(panel.locator("input[name=name]")).to_have_value("Nick Hemenway")
+    old_url = page.url
+    with page.expect_popup() as popup:
+        panel.get_by_role("link", name="Загрузить прайс").click()
+    new_tab = popup.value
+    new_tab.wait_for_load_state()
+    expect(new_tab.locator("input[name=kind][value=price_list]")).to_be_checked()
+    expect(new_tab.locator("select[name=seller]")).to_have_value(str(seller.pk))
+    expect(new_tab.locator("#id_seller_search")).to_have_value("Nick Hemenway")
+    assert page.url == old_url
+    expect(panel).to_be_visible()
+    new_tab.close()
+
+
+def test_placement_seller_without_working_price(admin_page: Page, live_server: LiveServer) -> None:
+    seller = Seller.objects.create(name="Zain MediaX")
+    product = Product.objects.create(name="Convertio", domain="convertio.co")
+    site = Site.objects.create(domain="mailtrap.io")
+    Placement.objects.create(site=site, product=product, seller=seller)
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/")
+    row = page.locator("#result_list tbody tr", has_text="mailtrap.io")
+    cell = row.locator(".field-working_seller_cell")
+    expect(cell.locator("a")).to_have_text("Zain MediaX")
+    expect(cell.locator(".seo-sub")).to_have_text("рабочая цена не выбрана")
+    cell.locator("a").click()
+    expect(page.locator(PANEL).locator("input[name=name]")).to_have_value("Zain MediaX")
+    site.refresh_from_db()
+    assert site.price_id is None

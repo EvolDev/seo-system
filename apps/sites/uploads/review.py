@@ -458,8 +458,11 @@ def _latest_metric() -> QuerySet[SiteMetric]:
     )
     return (
         SiteMetric.objects.filter(site_id=OuterRef("site_id"))
-        .annotate(trusted=trusted)
-        .order_by("-trusted", "-checked_at", "-pk")
+        .annotate(
+            trusted=trusted,
+            ours=ExpressionWrapper(Q(seller__isnull=True), output_field=BooleanField()),
+        )
+        .order_by("-trusted", "-checked_at", "-ours", "-pk")
     )
 
 
@@ -469,9 +472,12 @@ def _metrics(site_ids: Sequence[int]) -> dict[int, tuple[int | None, int | None,
     )
     latest = (
         SiteMetric.objects.filter(site_id__in=list(site_ids))
-        .annotate(trusted=trusted)
+        .annotate(
+            trusted=trusted,
+            ours=ExpressionWrapper(Q(seller__isnull=True), output_field=BooleanField()),
+        )
         .select_related("seller")
-        .order_by("site_id", "-trusted", "-checked_at", "-pk")
+        .order_by("site_id", "-trusted", "-checked_at", "-ours", "-pk")
         .distinct("site_id")
     )
     result = {}

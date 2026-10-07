@@ -22,7 +22,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from apps.sites import countries
+from apps.sites import countries, latest
 from apps.sites.models import MetricSource, Site, SiteCountryMetric, SiteMetric
 from apps.sites.uploads import values
 from apps.sites.uploads.files import Table, is_blank, show
@@ -256,6 +256,10 @@ def write(plan: Plan) -> dict[str, Any]:
             changed.append(row)
     model.objects.bulk_create(new, batch_size=BATCH)
     model.objects.bulk_update(changed, names, batch_size=BATCH)
+    # Пачки обходят save(): обновляем копию для списка и карточки (ADR-065).
+    # Даже неизменённый снимок может иметь устаревшую копию после прежнего импорта.
+    if not plan.country:
+        latest.refresh(measures)
     return {
         "counts": {
             "measures_created": len(new),

@@ -57,12 +57,14 @@ LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.checked_a
                           x.seller_id, x.seller_id IS NULL OR xs.metrics_trusted AS trusted
                    FROM site_metrics x LEFT JOIN sellers xs ON xs.id = x.seller_id
                    WHERE x.site_id = s.id
-                   ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC
+                   ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC,
+                            (x.seller_id IS NULL) DESC, x.id DESC
                    LIMIT 1) m ON true
 LEFT JOIN LATERAL (SELECT x.top_geo, x.top_geo_traffic, x.checked_at
                    FROM site_metrics x LEFT JOIN sellers xs ON xs.id = x.seller_id
                    WHERE x.site_id = s.id AND x.top_geo IS NOT NULL
-                   ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC
+                   ORDER BY x.seller_id IS NULL OR xs.metrics_trusted DESC, x.checked_at DESC,
+                            (x.seller_id IS NULL) DESC, x.id DESC
                    LIMIT 1) tg ON true
 LEFT JOIN site_prices pr ON pr.id = s.price_id
 LEFT JOIN LATERAL (SELECT o.id, o.placement_cents, o.currency, o.reviewed_at

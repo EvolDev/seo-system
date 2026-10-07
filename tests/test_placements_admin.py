@@ -1,6 +1,7 @@
 """Админка блока 2: размещение со ссылками, запрет удаления (E1-02)."""
 
 import datetime as dt
+from typing import Any
 
 import pytest
 from django.test import Client
@@ -8,7 +9,7 @@ from django.urls import reverse
 
 from apps.keywords.models import Keyword
 from apps.placements.models import Placement, PlacementLink
-from apps.sites.models import Product, Site
+from apps.sites.models import Product, Seller, Site, SiteMetric, SitePrice
 
 pytestmark = pytest.mark.django_db
 
@@ -203,3 +204,80 @@ def test_delete_page_deletes(admin_client: Client, site: Site, convertio: Produc
     assert admin_client.post(url, {"post": "yes"}).status_code == 302
     assert not Placement.objects.filter(pk=placement.pk).exists()
     assert Site.objects.filter(pk=site.pk).exists()
+
+
+class TestWorkingPriceColumns:
+    def test_columns_use_working_price_and_current_metrics(
+        self, admin_client: Client, site: Site, convertio: Product, django_assert_num_queries: Any
+    ) -> None:
+        working = Seller.objects.create(name="Working seller")
+        historical = Seller.objects.create(name="Placement seller")
+        price = SitePrice.objects.create(
+            site=site,
+            seller=working,
+            placement_cents=12300,
+            announce_cents=0,
+            writing_cents=4500,
+            currency="USD",
+        )
+        site.price = price
+        site.save(update_fields=["price"])
+        SiteMetric.objects.create(
+            site=site, dr=59, organic_traffic=22961, top_geo="us", top_geo_traffic=13921
+        )
+        Placement.objects.create(
+            site=site, product=convertio, seller=historical, price_paid_cents=5000, currency="EUR"
+        )
+        response = admin_client.get(reverse("admin:placements_placement_changelist"))
+        assert response.status_code == 200
+        changelist = response.context["cl"]
+        columns = changelist.list_display
+        start = columns.index("site_link")
+        assert columns[start : start + 6] == [
+            "site_link",
+            "working_seller_cell",
+            "status_link",
+            "dr_cell",
+            "traffic_cell",
+            "top_geo_cell",
+        ]
+        paid = columns.index("paid_cell")
+        assert columns[paid - 3 : paid] == [
+            "publication_price_cell",
+            "announce_price_cell",
+            "writing_price_cell",
+        ]
+        row = next(iter(changelist.result_list))
+        admin = changelist.model_admin
+        # Все семь колонок читаются из одной выборки, без запросов на каждую строку.
+        with django_assert_num_queries(0):
+            seller_html = admin.working_seller_cell(row)
+            assert reverse("admin:sites_seller_change", args=[working.pk]) in seller_html
+            assert "data-panel" in seller_html
+            assert ">Working seller</a>" in seller_html
+            assert admin.dr_cell(row) == 59
+            assert admin.traffic_cell(row) == 22961
+            assert "US 13921" in admin.top_geo_cell(row)
+            assert admin.publication_price_cell(row) == "$123"
+            assert admin.announce_price_cell(row) == "$0"
+            assert admin.writing_price_cell(row) == "$45"
+            assert admin.paid_cell(row) == "€50"
+
+    def test_without_working_price_shows_placement_seller_with_note(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        seller = Seller.objects.create(name="Placement seller")
+        Placement.objects.create(site=site, product=convertio, seller=seller)
+        response = admin_client.get(reverse("admin:placements_placement_changelist"))
+        row = next(iter(response.context["cl"].result_list))
+        admin = response.context["cl"].model_admin
+        seller_html = admin.working_seller_cell(row)
+        assert ">Placement seller</a>" in seller_html
+        assert "рабочая цена не выбрана" in seller_html
+        assert reverse("admin:sites_seller_change", args=[seller.pk]) in seller_html
+        assert admin.publication_price_cell(row) == ""
+        assert admin.announce_price_cell(row) == ""
+        assert admin.writing_price_cell(row) == ""
+        assert admin.dr_cell(row) == ""
+        assert admin.traffic_cell(row) == ""
+        assert admin.top_geo_cell(row) == ""

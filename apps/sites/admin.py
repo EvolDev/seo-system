@@ -860,6 +860,10 @@ class SellerAdmin(RecordAdmin):
             )
             context["rating_star"] = star
             context["panel_title_tools"] = star
+            if not obj.is_collaborator and request.user.has_perm("sites.add_upload"):
+                context["panel_upload_price_url"] = (
+                    f"{reverse('admin:sites_upload_add')}?kind=price_list&seller={obj.pk}"
+                )
         return super().render_change_form(request, context, add, change, form_url, obj)
 
     def get_urls(self) -> list[URLPattern]:
