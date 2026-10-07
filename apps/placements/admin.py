@@ -48,9 +48,16 @@ from apps.placements import export as placement_export
 from apps.placements import invoices, other_products
 from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLinkFormSet
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
-from apps.placements.models import InvoiceItem, InvoiceStatus, Placement, PlacementLink
+from apps.placements.models import (
+    STATUS_STAMPS,
+    InvoiceItem,
+    InvoiceStatus,
+    Placement,
+    PlacementLink,
+)
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
-from apps.sites.display import domain_tools_html, remove_placement_html
+from apps.sites import rating
+from apps.sites.display import domain_tools_html, rating_html, remove_placement_html
 from apps.sites.models import Product, StatusSource, WorkStatus
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
@@ -286,6 +293,7 @@ class PlacementAdmin(RecordAdmin):
         "site_link",
         "status_link",
         "placement_type",
+        "ordered_day",
         "published_day",
         "paid_cell",
         "indexed_cell",
@@ -319,13 +327,14 @@ class PlacementAdmin(RecordAdmin):
         "indexation_history",
         "indexation_button",
         "status_history",
+        "status_date",
         "extra_data",
         "paid_from_invoice",
     )
     fieldsets = (
         (None, {"fields": ("site", "product")}),
         # История — сразу под кнопками статуса (E1-13); у новой записи её нет.
-        (None, {"fields": ("status", "status_history")}),
+        (None, {"fields": ("status", "status_date", "status_history")}),
         # По одному полю в строке (сумма с валютой — вместе): панель — по ширине
         # содержимого, без пустого места справа (пользователь, 03.10.2026).
         (
@@ -386,10 +395,12 @@ class PlacementAdmin(RecordAdmin):
     def get_queryset(self, request: HttpRequest) -> QuerySet[Placement]:
         # Колонка «заплачено»: из счёта ли сумма и оплачен ли он — без запроса на строку.
         queryset: QuerySet[Placement] = super().get_queryset(request)
-        return queryset.annotate(
+        queryset = queryset.annotate(
             invoice_issued=_in_invoice(InvoiceStatus.ISSUED),
             invoice_paid=_in_invoice(InvoiceStatus.PAID),
         )
+        # Оценка площадки (E1-21): среднее и своя — подзапросами, представления тут нет.
+        return rating.with_mine(rating.with_summary(queryset), request.user)
 
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
         if export.is_export(request):
@@ -556,8 +567,15 @@ class PlacementAdmin(RecordAdmin):
         нужна из-за значков: вкладывать их в обёртку Django нельзя.
         """
         remove = remove_placement_html(reverse("admin:placements_placement_delete", args=[obj.pk]))
+        stars = rating_html(
+            reverse("admin:sites_site_rate", args=[obj.site_id]),
+            getattr(obj, "rating_avg", None),
+            getattr(obj, "rating_count", 0) or 0,
+            getattr(obj, rating.MINE, None),
+        )
         return format_html(
-            '<a href="{}" title="Карточка размещения">{}</a>{}',
+            '{}<a href="{}" title="Карточка размещения">{}</a>{}',
+            stars,
             reverse("admin:placements_placement_change", args=[obj.pk]),
             obj.site.domain,
             domain_tools_html(obj.site.domain, remove),
@@ -673,6 +691,33 @@ class PlacementAdmin(RecordAdmin):
             url,
             obj.get_status_display(),
         )
+
+    @admin.display(description="когда")
+    def status_date(self, obj: Placement) -> SafeString | str:
+        """Дата текущего статуса под кнопками (E1-22): одна, не обе.
+
+        «Заявка отправлена» — когда ушла заявка, «Размещено» — когда вышла
+        статья. У остальных статусов своей даты нет, и строка пустая: старая
+        дата рядом с новым статусом читалась бы как дата этого статуса
+        (просьба пользователя 07.10.2026). Сами поля остаются в своих
+        разделах — там их и правят.
+        """
+        field = STATUS_STAMPS.get(obj.status)
+        when = getattr(obj, field, None) if field else None
+        if when is None:
+            return "—"
+        return format_html(
+            '<span class="seo-sub">{}</span> {}',
+            obj.get_status_display(),
+            f"{timezone.localtime(when):%d.%m.%Y}",
+        )
+
+    @admin.display(description="отправлена", ordering="ordered_at")
+    def ordered_day(self, obj: Placement) -> str:
+        """Когда заявка ушла вебмастеру (E1-22). День без времени, как и остальные."""
+        if obj.ordered_at is None:
+            return ""
+        return f"{timezone.localtime(obj.ordered_at):%d.%m.%Y}"
 
     @admin.display(description="опубликовано", ordering="published_at")
     def published_day(self, obj: Placement) -> str:

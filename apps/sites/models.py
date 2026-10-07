@@ -811,6 +811,53 @@ class SiteNote(models.Model):
         return f"{self.site} · {self.body[:40]}"
 
 
+class SiteRating(models.Model):
+    """Оценка площадки человеком, 1–5 звёзд (E1-21, ADR-064).
+
+    Одна строка на пару человек × площадка: человек передумал — строка
+    перезаписывается, история оценок не ведётся (решение пользователя
+    07.10.2026). Это не замер, поэтому правило «снапшоты вместо
+    перезаписи» (ADR-043) сюда не распространяется.
+
+    Оценка общая для площадки, а не для пары с продуктом: оценивается
+    сама площадка как партнёр. Среднее считает `v_site_latest`, здесь
+    колонки со средним нет — производные признаки не дублируются.
+    """
+
+    site = models.ForeignKey(
+        Site, models.CASCADE, verbose_name="площадка", related_name="ratings", db_index=False
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.CASCADE,
+        verbose_name="кто оценил",
+        related_name="site_ratings",
+        db_index=False,
+    )
+    value = models.SmallIntegerField("оценка")
+    created_at = models.DateTimeField("первая оценка", db_default=PgNow())
+    updated_at = models.DateTimeField("изменена", db_default=PgNow())
+
+    class Meta:
+        db_table = "site_ratings"
+        verbose_name = "оценка площадки"
+        verbose_name_plural = "оценки площадок"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=["site", "user"], name="site_ratings_site_user_key"),
+            models.CheckConstraint(
+                condition=models.Q(value__gte=1, value__lte=5),
+                name="site_ratings_value_check",
+                violation_error_message="Оценка — от 1 до 5 звёзд.",
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["site"], name="idx_site_ratings_site"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site} · {self.value}"
+
+
 class ExchangeRate(models.Model):
     """Курс ЕЦБ на дату: сколько единиц валюты за 1 евро (ADR-043).
 
@@ -1230,6 +1277,10 @@ class ProductSiteLatest(models.Model):
     notes_count = models.BigIntegerField("заметок")
     last_note = models.TextField("последняя заметка", null=True)
     last_note_at = models.DateTimeField("дата последней заметки", null=True)
+    # Оценка площадки (E1-21): среднее по всем людям и сколько их. Считает
+    # представление, колонки в `sites` нет.
+    rating_avg = models.DecimalField("оценка", max_digits=3, decimal_places=1, null=True)
+    rating_count = models.BigIntegerField("оценок")
     last_verdict = PgEnumField(
         "вердикт", enum_type="audit_verdict", choices=AuditVerdict.choices, null=True
     )

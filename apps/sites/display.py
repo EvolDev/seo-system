@@ -7,6 +7,7 @@
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from django.utils.html import format_html
 from django.utils.safestring import SafeString, mark_safe
@@ -163,6 +164,56 @@ _REMOVE_ICON = mark_safe(
     '<path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'
     "</svg>"
 )
+
+
+# Оценка площадки (E1-21): звезда с числом перед доменом. Полная звезда — есть
+# оценки, контурная — нет. Нажатие открывает окошко выбора (seo/rating.js).
+_STAR_FULL = mark_safe(
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="currentColor">'
+    '<path d="M12 2.5l2.9 5.9 6.6.9-4.8 4.6 1.2 6.5-5.9-3.1-5.9 3.1 1.2-6.5L2.5 9.3l6.6-.9z"/>'
+    "</svg>"
+)
+_STAR_EMPTY = mark_safe(
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none"'
+    ' stroke="currentColor" stroke-width="2" stroke-linejoin="round">'
+    '<path d="M12 2.5l2.9 5.9 6.6.9-4.8 4.6 1.2 6.5-5.9-3.1-5.9 3.1 1.2-6.5L2.5 9.3l6.6-.9z"/>'
+    "</svg>"
+)
+
+
+def rating_title(average: Decimal | None, count: int, mine: int | None) -> str:
+    """Подсказка звезды: среднее, сколько оценок и своя, если она есть.
+
+    «оценок: 7», а не «7 оценок»: склонение по числу потребовало бы своего
+    помощника, которого в проекте нет, а ради подсказки он лишний.
+    """
+    if not count or average is None:
+        return "Оценить площадку"
+    own = f" · ваша {mine}" if mine else ""
+    return f"{average} · оценок: {count}{own}"
+
+
+def rating_html(
+    url: str, average: Decimal | None, count: int, mine: int | None = None
+) -> SafeString:
+    """Звезда с числом перед доменом; число — одна цифра после точки.
+
+    Без оценок число не рисуем вовсе: «0.0» читалось бы как плохая площадка,
+    а это «никто не оценивал». Своя оценка — отдельным классом, по ней
+    окошко подсвечивает выбранное.
+    """
+    rated = bool(count) and average is not None
+    return format_html(
+        '<button type="button" class="seo-rating{}" data-rate="{}" data-mine="{}"'
+        ' title="{}" aria-label="{}">{}{}</button>',
+        "" if rated else " seo-rating-empty",
+        url,
+        mine or "",
+        rating_title(average, count, mine),
+        rating_title(average, count, mine),
+        _STAR_FULL if rated else _STAR_EMPTY,
+        format_html('<span class="seo-rating-value">{}</span>', average) if rated else "",
+    )
 
 
 def site_url(domain: str) -> str:

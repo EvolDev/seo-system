@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.21 от 07.10.2026 — оценка площадки звёздочкой, 1–5 (ADR-064)
 -- Версия 1.20 от 06.10.2026 — память выбора фильтров у пользователя (ADR-063)
 -- Версия 1.19 от 06.10.2026 — общий статус работы: площадка и размещение (ADR-062)
 -- Версия 1.18 от 05.10.2026 — журнал загрузок: отмена загрузки целиком (ADR-060)
@@ -269,6 +270,22 @@ CREATE TABLE site_notes (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_site_notes_site ON site_notes(site_id, created_at DESC);
+
+-- Оценка площадки человеком, 1–5 звёзд (E1-21, ADR-064). Одна строка на пару
+-- человек × площадка: передумал — строка перезаписывается, история оценок не
+-- ведётся. Это не замер, поэтому снапшотами (ADR-043) не хранится. Оценка общая
+-- для площадки, не для пары с продуктом: оценивается площадка как партнёр.
+-- Среднее считает v_site_latest, колонки со средним в sites нет.
+CREATE TABLE site_ratings (
+    id          bigserial PRIMARY KEY,
+    site_id     bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    user_id     integer NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
+    value       smallint NOT NULL CONSTRAINT site_ratings_value_check CHECK (value >= 1 AND value <= 5),
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT site_ratings_site_user_key UNIQUE (site_id, user_id)
+);
+CREATE INDEX idx_site_ratings_site ON site_ratings(site_id);
 
 -- Курс ЕЦБ: сколько единиц валюты за 1 евро на дату. Для сравнения цен в разных
 -- валютах; деньги в разных валютах не складываются (ADR-043).
@@ -1148,6 +1165,8 @@ JOIN sellers sl ON sl.id = o.seller_id;
 -- offers_pending — у площадки есть неразобранные предложения.
 -- Заметки — одним подзапросом на все площадки, а не подзапросом на строку: на
 -- 45 000 площадках каталога тот давал полный просмотр site_notes на каждую (E1-08).
+-- Оценка — среднее по всем людям и сколько их (E1-21); сгруппирована разом, по
+-- той же причине. Нет оценок — rating_avg пусто, rating_count 0.
 CREATE VIEW v_site_latest AS
 SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        s.links_allowed, s.link_type, s.marks_as_ad,
@@ -1170,7 +1189,8 @@ SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
        EXISTS (SELECT 1 FROM site_prices x
                WHERE x.site_id = s.id AND x.reviewed_at IS NULL) AS offers_pending,
        g.ratio AS gray_ratio,
-       coalesce(ln.notes, 0) AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at
+       coalesce(ln.notes, 0) AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at,
+       rt.rating_avg, coalesce(rt.rating_count, 0) AS rating_count
 FROM sites s
 LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.checked_at,
                           x.seller_id, x.seller_id IS NULL OR xs.metrics_trusted AS trusted
@@ -1203,6 +1223,10 @@ LEFT JOIN (SELECT DISTINCT ON (x.site_id) x.site_id, x.body, x.created_at,
                   count(*) OVER (PARTITION BY x.site_id) AS notes
            FROM site_notes x
            ORDER BY x.site_id, x.created_at DESC, x.id DESC) ln ON ln.site_id = s.id
+LEFT JOIN (SELECT x.site_id, round(avg(x.value), 1) AS rating_avg,
+                  count(*) AS rating_count
+           FROM site_ratings x
+           GROUP BY x.site_id) rt ON rt.site_id = s.id
 WHERE NOT s.is_deleted;
 
 -- Площадка в работе продукта «на сегодня»: статус, последний аудит под этот
@@ -1237,6 +1261,7 @@ SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.comment, ps.imported_unde
        l.cheaper_eur_cents, l.cheaper_pending, l.offers_pending,
        l.gray_ratio,
        l.notes_count, l.last_note, l.last_note_at,
+       l.rating_avg, l.rating_count,
        a.verdict AS last_verdict, a.score AS last_score, a.created_at AS audited_at,
        pp.published AS placements_published,
        op.names AS other_products

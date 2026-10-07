@@ -45,7 +45,7 @@ from apps.content.domain_settings import gray_terms, gray_zones
 from apps.content.models import DomainSetting
 from apps.placements import invoices, other_products
 from apps.placements.models import Invoice, InvoiceStatus, Placement
-from apps.sites import ahrefs_domains, countries, gray_scan, offers, sellers
+from apps.sites import ahrefs_domains, countries, gray_scan, offers, rating, sellers
 from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
@@ -56,6 +56,8 @@ from apps.sites.display import (
     domain_tools_html,
     placement_card_html,
     price_html,
+    rating_html,
+    rating_title,
     round_euros,
     seller_mark,
     site_url,
@@ -288,8 +290,38 @@ class SiteAdmin(RecordAdmin):
                 self.admin_site.admin_view(require_POST(self.card_gray_view)),
                 name="sites_site_card_gray",
             ),
+            path(
+                "<int:object_id>/rate/",
+                self.admin_site.admin_view(require_POST(self.rate_view)),
+                name="sites_site_rate",
+            ),
         ]
         return own + super().get_urls()
+
+    def rate_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Оценка площадки звёздочкой (E1-21): ставит, меняет или снимает.
+
+        Пустое `value` — снять оценку: промах мышью иначе не отменить.
+        Отвечает JSON со средним и подсказкой — строку списка обновит сам
+        скрипт, без перезагрузки.
+        """
+        site = get_object_or_404(Site.all_objects, pk=object_id)
+        if not self.has_change_permission(request, site):
+            return JsonResponse({"error": "Нет прав на изменение."}, status=403)
+        try:
+            value = rating.clean_value(request.POST.get("value"))
+        except ValueError:
+            return JsonResponse({"error": "Оценка — от 1 до 5 звёзд."}, status=400)
+        rating.set_rating(site, request.user, value)
+        average, count = rating.summary(site)
+        return JsonResponse(
+            {
+                "average": str(average) if average is not None else None,
+                "count": count,
+                "mine": value,
+                "title": rating_title(average, count, value),
+            }
+        )
 
     def card_view(
         self, request: HttpRequest, object_id: int, gray_form: "GrayReadingForm | None" = None
@@ -1784,6 +1816,8 @@ class ProductSiteLatestAdmin(RecordAdmin):
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[Any]:
         queryset: models.QuerySet[Any] = _with_gray_zone(super().get_queryset(request))
+        # Среднее приходит из представления, своя оценка — подзапросом (E1-21).
+        queryset = rating.with_mine(queryset, request.user)
         region = _region(request)
         if region is None:
             return queryset
@@ -1841,7 +1875,13 @@ class ProductSiteLatestAdmin(RecordAdmin):
             else take_placement_html(other_products.add_url(obj.site_id, obj.product_id))
         )
         return format_html(
-            '<a href="{}" data-panel title="Карточка площадки">{}</a>{}',
+            '{}<a href="{}" data-panel title="Карточка площадки">{}</a>{}',
+            rating_html(
+                reverse("admin:sites_site_rate", args=[obj.site_id]),
+                obj.rating_avg,
+                obj.rating_count,
+                getattr(obj, rating.MINE, None),
+            ),
             card_url(obj.site_id),
             obj.domain,
             domain_tools_html(obj.domain, tool),

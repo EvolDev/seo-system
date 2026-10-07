@@ -15,6 +15,7 @@ from typing import Any, ClassVar
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.utils import timezone
 
 from apps.keywords.models import AnchorType
 from apps.sites import statuses
@@ -38,6 +39,15 @@ SITE_STATUS_BY_PLACEMENT: dict[str, WorkStatus] = {
     WorkStatus.ORDERED: WorkStatus.ORDERED,
     WorkStatus.WRITING: WorkStatus.WRITING,
     WorkStatus.PLACED: WorkStatus.PLACED,
+}
+
+# Какую дату отмечает сам статус, если она ещё не проставлена (E1-22). Раньше
+# это делал только скрипт формы (`data-fills`, seo/widgets.js), поэтому при
+# массовом «Поставить статус…», при смене статуса из решения по площадке и при
+# импорте дата не появлялась. Отмечает код, а не страница: путей несколько.
+STATUS_STAMPS: dict[str, str] = {
+    WorkStatus.ORDERED: "ordered_at",
+    WorkStatus.PLACED: "published_at",
 }
 # Поля, от которых зависит статус площадки; в update_fields — имя или колонка.
 _SITE_STATUS_FIELDS = frozenset({"status", "site", "site_id", "product", "product_id"})
@@ -162,6 +172,8 @@ class Placement(models.Model):
         """
         update_fields = kwargs.get("update_fields")
         watched = update_fields is None or not _SITE_STATUS_FIELDS.isdisjoint(update_fields)
+        # `watched` включает «status», поэтому лишнего запроса при правке
+        # комментария или проверке индексации не будет: там статус не меняется.
         before = None
         if watched and not self._state.adding:
             before = (
@@ -169,6 +181,11 @@ class Placement(models.Model):
                 .values_list("status", "site_id", "product_id")
                 .first()
             )
+        # Дату, проставленную кодом, дописываем в update_fields: выборочное
+        # сохранение иначе её не запишет.
+        stamped_field = self._stamp_status_date(before, update_fields)
+        if stamped_field is not None and update_fields is not None:
+            kwargs["update_fields"] = [*list(update_fields), stamped_field]
         # atomic — размещение и статус площадки записываются вместе или никак.
         # Смену статуса размещения запишет триггер, кто и откуда — отметка (ADR-049).
         with transaction.atomic():
@@ -178,6 +195,33 @@ class Placement(models.Model):
             moved = before != (self.status, self.site_id, self.product_id)
             if watched and target is not None and moved:
                 statuses.advance(self.site_id, self.product_id, target, placement_id=self.pk)
+
+    def _stamp_status_date(self, before: Any, update_fields: Any) -> str | None:
+        """Отметить дату статуса, если её нет: «Заявка отправлена» и «Размещено».
+
+        Отмечаем только **смену** статуса у существующей записи: человек
+        передвинул размещение сегодня, значит заявка ушла сегодня. Новую
+        запись не отмечаем — её заводит импорт со статусом и датой из файла, и
+        сегодняшний день вместо пустой даты был бы выдумкой: статья могла выйти
+        месяцы назад. В форме пустую дату подставляет сама страница
+        (`data-fills`).
+
+        Заполненную дату не трогаем — она от человека или из файла. Назад дата
+        не стирается: ушли дальше по лесенке, а заявка всё равно была
+        отправлена тогда-то (просьба пользователя 07.10.2026).
+
+        Возвращает имя поля, если дата проставлена: его нужно дописать в
+        `update_fields`, иначе выборочное сохранение её потеряет.
+        """
+        if before is None or before[0] == self.status:
+            return None
+        field = STATUS_STAMPS.get(self.status)
+        if field is None or getattr(self, field) is not None:
+            return None
+        setattr(self, field, timezone.now())
+        if update_fields is not None and field not in update_fields:
+            return field
+        return None
 
 
 class PlacementStatusChange(models.Model):

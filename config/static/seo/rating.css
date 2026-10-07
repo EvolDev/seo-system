@@ -1,0 +1,67 @@
+/* Оценка площадки звёздочкой (E1-21): звезда с числом перед доменом и окошко
+   выбора рядом с ней. Цвета — от расцветки (admin-palettes.css); звезда
+   жёлтая во всех четырёх, иначе её не прочесть как оценку. */
+
+body.admin-interface .seo-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 5px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #e0a307;
+  cursor: pointer;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+body.admin-interface .seo-rating:hover,
+body.admin-interface .seo-rating:focus-visible { color: #c98a00; }
+/* Без оценок — контурная звезда приглушённым цветом: «никто не оценивал», а не
+   «плохая площадка». Числа рядом с ней нет вовсе. */
+body.admin-interface .seo-rating-empty {
+  color: var(--body-quiet-color, #999);
+  opacity: 0.55;
+}
+body.admin-interface .seo-rating-empty:hover,
+body.admin-interface .seo-rating-empty:focus-visible {
+  color: #e0a307;
+  opacity: 1;
+}
+.seo-rating-value { font-weight: 600; }
+html[data-mode="dark"] body.admin-interface .seo-rating { color: #f0bf4c; }
+
+/* Окошко выбора: кладётся в body и ставится по координатам кнопки, поэтому
+   absolute, а не относительно ячейки — ячейка таблицы обрезала бы его. */
+.seo-rating-pick {
+  position: absolute;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 6px;
+  border: 1px solid var(--hairline-color, #e0e0e0);
+  border-radius: var(--seo-radius, 8px);
+  background: var(--body-bg, #fff);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.seo-rating-pick .seo-rating-star,
+.seo-rating-pick .seo-rating-clear {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--body-quiet-color, #bbb);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+.seo-rating-pick .seo-rating-star.is-on { color: #e0a307; }
+.seo-rating-pick .seo-rating-star:hover { color: #e0a307; }
+.seo-rating-pick .seo-rating-clear {
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--hairline-color, #e0e0e0);
+  font-size: 15px;
+}
+.seo-rating-pick .seo-rating-clear:hover { color: #c0392b; }
