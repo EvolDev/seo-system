@@ -503,3 +503,40 @@ def test_placement_seller_without_working_price(admin_page: Page, live_server: L
     expect(page.locator(PANEL).locator("input[name=name]")).to_have_value("Zain MediaX")
     site.refresh_from_db()
     assert site.price_id is None
+
+
+def test_take_site_prefills_and_saves_in_work(
+    admin_page: Page, live_server: LiveServer, known: Site
+) -> None:
+    price = known.price
+    assert price is not None
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/sites/productsitelatest/?list=all")
+    row = page.locator("#result_list tbody tr", has_text="known.com")
+    row.locator('a[title="Взять в размещение"]').click()
+    panel = page.locator(PANEL)
+    expect(panel.locator("select[name=seller]")).to_have_value(str(price.seller_id))
+    expect(panel.locator("select[name=placement_type]")).to_have_value(price.placement_type)
+    panel.locator("[data-panel-save]").click()
+    expect(panel).to_be_hidden()
+    placement = Placement.objects.get(site=known, product__name="Convertio")
+    assert placement.status == PlacementStatus.IN_WORK
+    assert placement.seller_id == price.seller_id
+    assert placement.price_paid_cents is None
+
+
+def test_placements_seller_filter_checkboxes(admin_page: Page, live_server: LiveServer) -> None:
+    product = Product.objects.create(name="Convertio", domain="convertio.co")
+    first = Seller.objects.create(name="Seller Alpha")
+    second = Seller.objects.create(name="Seller Beta")
+    for name, seller in [("alpha.com", first), ("beta.com", second)]:
+        Placement.objects.create(
+            site=Site.objects.create(domain=name), product=product, seller=seller
+        )
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/")
+    group = page.locator(".seo-multifilter", has=page.locator("h3", has_text="Продавец"))
+    group.locator("summary").click()
+    group.get_by_role("link", name="Seller Beta (1)", exact=True).click()
+    expect(page.locator("#result_list tbody tr")).to_have_count(1)
+    expect(page.locator("#result_list tbody tr")).to_contain_text("alpha.com")

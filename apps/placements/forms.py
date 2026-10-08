@@ -64,17 +64,6 @@ class PlacementForm(DayFieldsForm):
         value: str = self.cleaned_data.get("currency") or ""
         return value or None
 
-    def clean(self) -> dict[str, Any] | None:
-        cleaned: dict[str, Any] | None = super().clean()
-        # Карточка площадки без размещения рабочего продукта открывается пустой
-        # формой (E1-19). Нажатие «Сохранить» по привычке не должно заводить
-        # размещение, которого человек не заполнял.
-        # Площадка и продукт подставлены формой, их человек не выбирал.
-        touched = set(self.changed_data) - {"site", "product"}
-        if self.instance.pk is None and not touched:
-            raise forms.ValidationError("Размещение пустое: заполните хотя бы одно поле.")
-        return cleaned
-
 
 def _currency_choices(form: forms.ModelForm, *, blank: bool) -> None:  # type: ignore[type-arg]
     """Валюты на выбор; валюта не из списка (так записал импорт) остаётся выбранной."""

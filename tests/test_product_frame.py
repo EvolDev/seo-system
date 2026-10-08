@@ -17,7 +17,7 @@ from pytest_django import DjangoAssertNumQueries
 
 from apps.keywords.models import Keyword
 from apps.placements.models import Placement, PlacementStatus
-from apps.sites.models import Product, ProductSite, Site, SiteList, SiteListItem
+from apps.sites.models import Product, ProductSite, Seller, Site, SiteList, SiteListItem, SitePrice
 from apps.workspace.models import UserSettings
 from apps.workspace.products import WorkingProductFilter, choose_product
 
@@ -212,13 +212,17 @@ class TestDoor:
         assert initial["site"] == str(both["theirs"].pk)
         assert initial["product"] == str(convertio.pk)
 
-    def test_untouched_form_is_not_saved(
+    def test_in_work_form_can_be_saved_without_extra_fields(
         self, admin_client: Client, both: dict[str, Any], convertio: Product
     ) -> None:
         before = Placement.objects.count()
         response = admin_client.post(ADD, _untouched(both["theirs"].pk, convertio.pk))
-        assert "Размещение пустое" in response.content.decode()
-        assert Placement.objects.count() == before
+        assert response.status_code == 302
+        assert Placement.objects.count() == before + 1
+        assert (
+            Placement.objects.get(site=both["theirs"], product=convertio).status
+            == PlacementStatus.IN_WORK
+        )
 
     def test_one_filled_field_is_enough(
         self, admin_client: Client, both: dict[str, Any], convertio: Product
@@ -238,6 +242,15 @@ class TestTakePlacement:
     def test_creates_for_sites_without_our_placement(
         self, admin_client: Client, both: dict[str, Any], convertio: Product
     ) -> None:
+        seller = Seller.objects.create(name="Working seller")
+        price = SitePrice.objects.create(
+            site=both["theirs"],
+            seller=seller,
+            placement_type="link_insertion",
+            placement_cents=12300,
+        )
+        both["theirs"].price = price
+        both["theirs"].save(update_fields=["price"])
         response = admin_client.post(
             SITES + "?list=all",
             {"action": "take_placement_action", "_selected_action": self._rows(admin_client)},
@@ -249,6 +262,7 @@ class TestTakePlacement:
         assert "Пропущено, размещение уже есть: 2" in page
         fresh = Placement.objects.get(site=both["theirs"], product=convertio)
         assert fresh.status == PlacementStatus.IN_WORK
+        assert (fresh.seller_id, fresh.placement_type) == (seller.pk, "link_insertion")
 
     def test_site_status_follows_the_placement(
         self, admin_client: Client, both: dict[str, Any], convertio: Product

@@ -281,3 +281,51 @@ class TestWorkingPriceColumns:
         assert admin.dr_cell(row) == ""
         assert admin.traffic_cell(row) == ""
         assert admin.top_geo_cell(row) == ""
+
+
+class TestPlacementPrefillAndSellerFilter:
+    def test_working_price_prefills_seller_and_service(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        seller = Seller.objects.create(name="uniguide")
+        price = SitePrice.objects.create(
+            site=site, seller=seller, placement_type="link_insertion", placement_cents=12300
+        )
+        site.price = price
+        site.save(update_fields=["price"])
+        page = admin_client.get(ADD_URL, {"site": str(site.pk), "product": str(convertio.pk)})
+        form = page.context["adminform"].form
+        assert str(form["seller"].value()) == str(seller.pk)
+        assert form["placement_type"].value() == "link_insertion"
+        assert form["status"].value() == "in_work"
+        assert form["price_paid_cents"].value() is None
+        other = Seller.objects.create(name="Explicit seller")
+        page = admin_client.get(
+            ADD_URL, {"site": str(site.pk), "seller": str(other.pk), "placement_type": "guest_post"}
+        )
+        form = page.context["adminform"].form
+        assert str(form["seller"].value()) == str(other.pk)
+        assert form["placement_type"].value() == "guest_post"
+
+    def test_filter_matches_working_or_placement_seller(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        working = Seller.objects.create(name="Working seller")
+        historical = Seller.objects.create(name="Historical seller")
+        price = SitePrice.objects.create(site=site, seller=working, placement_cents=12300)
+        site.price = price
+        site.save(update_fields=["price"])
+        first = Placement.objects.create(site=site, product=convertio, seller=historical)
+        second = Placement.objects.create(
+            site=Site.objects.create(domain="no-price.com"), product=convertio, seller=historical
+        )
+        url = reverse("admin:placements_placement_changelist")
+        for seller, expected in [(working, {first.pk}), (historical, {second.pk})]:
+            page = admin_client.get(url, {"seller": str(seller.pk)})
+            assert page.status_code == 200
+            assert {row.pk for row in page.context["cl"].result_list} == expected
+            assert f"{seller.name} (1)" in page.content.decode()
+        page = admin_client.get(f"{url}?seller={working.pk}&seller={historical.pk}")
+        assert {row.pk for row in page.context["cl"].result_list} == {first.pk, second.pk}
+        assert not list(admin_client.get(url, {"seller": "-"}).context["cl"].result_list)
+        assert not list(admin_client.get(url, {"seller": "invalid"}).context["cl"].result_list)

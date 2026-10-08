@@ -3,6 +3,7 @@
 import datetime as dt
 
 import pytest
+from django.contrib.admin.templatetags.admin_list import result_headers
 from django.test import Client
 from django.urls import reverse
 
@@ -133,3 +134,54 @@ def test_ahrefs_link_for_chosen_list(admin_client: Client, base: dict[str, Site]
     # По умолчанию — все площадки, и ссылка ни на один список не ведёт (E1-19).
     assert link not in admin_client.get(URL).content.decode()
     assert link in admin_client.get(URL, {"list": str(site_list.pk)}).content.decode()
+
+
+@pytest.mark.parametrize("country", ["us", "gb"])
+def test_region_traffic_header_sorts_selected_country(
+    admin_client: Client, base: dict[str, Site], country: str
+) -> None:
+    SiteCountryMetric.objects.create(
+        site=base["pod"],
+        country="us",
+        organic_traffic=90000,
+        source=MetricSource.AHREFS_BATCH,
+        checked_at=DAY,
+    )
+    for site, traffic in ((base["egg"], 800), (base["pod"], 200)):
+        SiteCountryMetric.objects.create(
+            site=site,
+            country="gb",
+            organic_traffic=traffic,
+            source=MetricSource.AHREFS_BATCH,
+            checked_at=DAY,
+        )
+    response = admin_client.get(URL, {"list": "all", "region": country})
+    header = next(
+        item
+        for item in result_headers(response.context["cl"])
+        if item["text"] == f"трафик {country.upper()}"
+    )
+    assert header["sortable"]
+    ascending_url = header["url_primary"]
+    assert isinstance(ascending_url, str)
+    ascending = admin_client.get(URL + ascending_url)
+    rows = [row.domain for row in ascending.context["cl"].result_list]
+    expected = ["egg.com", "pod.com"] if country == "us" else ["pod.com", "egg.com"]
+    assert rows == [*expected, "plain.com"]
+    selected = next(
+        item
+        for item in result_headers(ascending.context["cl"])
+        if item["text"] == f"трафик {country.upper()}"
+    )
+    descending_url = selected["url_primary"]
+    assert isinstance(descending_url, str)
+    descending = admin_client.get(URL + descending_url)
+    assert [row.domain for row in descending.context["cl"].result_list] == [
+        "plain.com",
+        *reversed(expected),
+    ]
+    without_region = admin_client.get(URL, {"list": "all"})
+    assert not any(
+        item["text"] == f"трафик {country.upper()}"
+        for item in result_headers(without_region.context["cl"])
+    )

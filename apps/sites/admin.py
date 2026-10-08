@@ -1968,6 +1968,12 @@ class ProductSiteLatestAdmin(RecordAdmin):
             columns[at:at] = _region_columns(region)
         return columns
 
+    def get_sortable_by(self, request: HttpRequest) -> Any:
+        # Региональные колонки создаются заново при каждом get_list_display.
+        # Сравнение callable по идентичности убирает у них ссылки сортировки.
+        # None разрешает колонки с admin_order_field, включая выбранный регион.
+        return None
+
     def get_list_filter(self, request: HttpRequest) -> Any:
         filters = list(self.list_filter)
         region = _region(request)
@@ -2202,8 +2208,14 @@ class ProductSiteLatestAdmin(RecordAdmin):
         )
         fresh = [site_id for site_id in sites if site_id not in have]
         with stamped(source=StatusSource.FORM):
-            for site_id in fresh:
-                Placement.objects.create(site_id=site_id, product_id=working)
+            for site in Site.all_objects.filter(pk__in=fresh).select_related("price"):
+                price = site.price
+                Placement.objects.create(
+                    site=site,
+                    product_id=working,
+                    seller_id=price.seller_id if price is not None else None,
+                    placement_type=price.placement_type if price is not None else None,
+                )
         text = f"Взято в размещение: {len(fresh)}."
         if have:
             text += f" Пропущено, размещение уже есть: {len(have)}."

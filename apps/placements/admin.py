@@ -19,7 +19,7 @@
 размещения в счёте — из счёта: в форме оно текстом со ссылкой на счёт.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from collections.abc import Set as AbstractSet
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
@@ -32,7 +32,7 @@ from django.contrib.admin.utils import display_for_value
 from django.contrib.admin.views.main import ChangeList
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Count, Exists, OuterRef, QuerySet
 from django.db.models.functions import Coalesce, TruncMonth
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -58,12 +58,12 @@ from apps.placements.models import (
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
 from apps.sites import countries, rating
 from apps.sites.display import domain_tools_html, rating_html, remove_placement_html
-from apps.sites.models import Product, SiteLatest, StatusSource, WorkStatus
+from apps.sites.models import Product, Seller, Site, SiteLatest, StatusSource, WorkStatus
 from apps.sites.offers import money
 from apps.sites.status_history import placement_history
 from apps.workspace.products import FrameProductFilter, working_product_id
 from config import export
-from config.admin import PerPageChangeList, RecordAdmin, StackedInline
+from config.admin import MultiChoiceFilter, PerPageChangeList, RecordAdmin, StackedInline
 from config.assets import Css, Js
 from config.changes import stamped
 from config.export import month_name
@@ -274,6 +274,53 @@ class PlacementChangeList(PerPageChangeList):
             row.page_products = found.get(row.site_id, [])
 
 
+class PlacementSellerFilter(MultiChoiceFilter):
+    """Тот же выбор галочками, что у площадок; продавец совпадает с колонкой."""
+
+    title = "продавец"
+    parameter_name = "seller"
+    _counted: dict[int, int] | None = None
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            (str(pk), name)
+            for pk, name in Seller.objects.order_by("name").values_list("pk", "name")
+        ]
+
+    def narrow(self, queryset: Any, values: list[str]) -> Any:
+        if not all(value.isdigit() for value in values):
+            return queryset.none()
+        return queryset.filter(display_seller_id__in=[int(value) for value in values])
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        if self._counted is None:
+            rows = changelist.root_queryset
+            for spec in changelist.filter_specs:
+                if spec is self:
+                    continue
+                narrowed = spec.queryset(self.request, rows)
+                if narrowed is not None:
+                    rows = narrowed
+            if changelist.query:
+                rows, _ = changelist.model_admin.get_search_results(
+                    self.request, rows, changelist.query
+                )
+            self._counted = dict(
+                rows.order_by()
+                .filter(display_seller_id__isnull=False)
+                .values("display_seller_id")
+                .annotate(total=Count("pk", distinct=True))
+                .values_list("display_seller_id", "total")
+            )
+        picked = set(self.values())
+        items = super().choices(changelist)
+        yield next(items)
+        for (value, _), choice in zip(self.lookup_choices, items, strict=True):
+            count = self._counted.get(int(value), 0)
+            if count or value in picked:
+                yield {**choice, "display": f"{choice['display']} ({count})"}
+
+
 @admin.register(Placement)
 class PlacementAdmin(RecordAdmin):
     """Размещения. Проверка индексации без перезагрузки страницы — кнопка ↻ в
@@ -313,6 +360,7 @@ class PlacementAdmin(RecordAdmin):
     list_display_links = None
     list_filter = (
         FrameProductFilter,
+        PlacementSellerFilter,
         PublishedMonthFilter,
         "status",
         InvoiceFilter,
@@ -399,12 +447,25 @@ class PlacementAdmin(RecordAdmin):
             )
         }
 
+    def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, Any]:
+        initial = super().get_changeform_initial_data(request)
+        try:
+            site_id = int(initial.get("site", ""))
+        except (TypeError, ValueError):
+            return initial
+        site = Site.objects.select_related("price").filter(pk=site_id).first()
+        if site is not None and site.price is not None:
+            initial.setdefault("seller", site.price.seller_id)
+            initial.setdefault("placement_type", site.price.placement_type)
+        return initial
+
     def get_queryset(self, request: HttpRequest) -> QuerySet[Placement]:
         # Колонка «заплачено»: из счёта ли сумма и оплачен ли он — без запроса на строку.
         queryset: QuerySet[Placement] = (
             super().get_queryset(request).select_related(*self.list_select_related)
         )
         queryset = queryset.annotate(
+            display_seller_id=Coalesce("site__price__seller_id", "seller_id"),
             display_seller_name=Coalesce("site__price__seller__name", "seller__name"),
             invoice_issued=_in_invoice(InvoiceStatus.ISSUED),
             invoice_paid=_in_invoice(InvoiceStatus.PAID),
