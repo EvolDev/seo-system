@@ -83,7 +83,7 @@ def test_withdraw_needs_the_full_catalog_mark(admin_page: Page, live_server: Liv
     page.wait_for_timeout(1500)
     page.screenshot(path="/app/test-results/withdraw-before.png", full_page=True)
 
-    panel.get_by_label("Файл — полный каталог Collaborator, без фильтров").check()
+    panel.get_by_label("Подтверждаю: файл выгружен из Collaborator целиком, без фильтров").check()
     button.click()
     expect(page.get_by_text("Сняты с продажи")).to_be_visible()
     expect(panel.get_by_role("heading")).to_have_text("Нет в этом файле — 0")

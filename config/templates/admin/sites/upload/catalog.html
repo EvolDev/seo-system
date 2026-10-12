@@ -108,7 +108,7 @@
   <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="seo-run-form" data-run-form="withdraw">
     {% csrf_token %}
     <input type="hidden" name="action" value="withdraw">
-    <label class="seo-parts"><input type="checkbox" name="full" value="1" required> Файл — полный каталог Collaborator, без фильтров</label>
+    <label class="seo-parts"><input type="checkbox" name="full" value="1" required> Подтверждаю: файл выгружен из Collaborator целиком, без фильтров</label>
     <button type="submit" class="default seo-run-btn" data-swap="absent-btn"{% if not absent or not absent.total or absent.looks_partial %} disabled{% endif %}>Снять с продажи</button>
   </form>
   <div class="seo-inline-loader" data-loader hidden></div>
