@@ -49,7 +49,9 @@ def test_price_editor(admin_page: Page, live_server: LiveServer, panel: bool) ->
     assert SitePrice.objects.filter(site=site).count() == 2
     form.locator("[name=amount]").fill("900,00")
     page.screenshot(
-        path=f"/app/.price-previews/editing-{panel}.png", full_page=True, animations="disabled"
+        path=f"/app/test-results/price-previews/editing-{panel}.png",
+        full_page=True,
+        animations="disabled",
     )
     form.get_by_role("button", name="Сохранить", exact=True).click()
     expect(card.locator(".seo-card-big")).to_contain_text("$900")
@@ -76,5 +78,7 @@ def test_price_editor(admin_page: Page, live_server: LiveServer, panel: bool) ->
     other.refresh_from_db()
     assert other.placement_cents == 67329
     page.screenshot(
-        path=f"/app/.price-previews/saved-{panel}.png", full_page=True, animations="disabled"
+        path=f"/app/test-results/price-previews/saved-{panel}.png",
+        full_page=True,
+        animations="disabled",
     )

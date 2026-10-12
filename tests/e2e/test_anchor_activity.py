@@ -51,7 +51,9 @@ def test_single_and_bulk_activity(
     page.get_by_role("link", name="Неактивные (1)", exact=True).click()
     expect(page.locator("#result_list tbody")).to_contain_text("present")
     page.screenshot(
-        path="/app/.activity-previews/inactive.png", full_page=True, animations="disabled"
+        path="/app/test-results/activity-previews/inactive.png",
+        full_page=True,
+        animations="disabled",
     )
     page.get_by_role("button", name="Включить", exact=True).click()
     expect(page.get_by_role("link", name="Неактивные (0)", exact=True)).to_be_visible()
@@ -100,7 +102,9 @@ def test_complete_list_upload(
     expect(page.locator(".seo-stat", has_text="станут неактивными")).to_contain_text("1")
     expect(page.locator(".seo-stat", has_text="снова включатся")).to_contain_text("1")
     page.screenshot(
-        path=f"/app/.activity-previews/summary-{naked}.png", full_page=True, animations="disabled"
+        path=f"/app/test-results/activity-previews/summary-{naked}.png",
+        full_page=True,
+        animations="disabled",
     )
     page.get_by_role("button", name="Записать в базу", exact=True).click()
     expect(page.get_by_role("link", name="К анкорам", exact=True)).to_be_visible()
@@ -112,5 +116,7 @@ def test_complete_list_upload(
         upload.status == UploadStatus.DONE and anchors.policy(upload.mapping) == anchors.Policy.SYNC
     )
     page.screenshot(
-        path=f"/app/.activity-previews/done-{naked}.png", full_page=True, animations="disabled"
+        path=f"/app/test-results/activity-previews/done-{naked}.png",
+        full_page=True,
+        animations="disabled",
     )

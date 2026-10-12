@@ -41,13 +41,13 @@ def test_offer_select_autosaves(admin_page: Page, live_server: LiveServer, panel
     other.refresh_from_db()
     assert offer.link_type == "nofollow"
     assert other.link_type is None
-    card.screenshot(path=f"/app/.link-type-previews/known-{panel}.png")
+    card.screenshot(path=f"/app/test-results/link-type-previews/known-{panel}.png")
     card.locator("select[data-link-type]").first.select_option("")
     expect(card.locator("select[data-link-type]").nth(1)).to_have_value("")
     offer.refresh_from_db()
     assert offer.link_type is None and offer.link_type_manual
     page.screenshot(
-        path=f"/app/.link-type-previews/link-types-{'panel' if panel else 'full'}.png",
+        path=f"/app/test-results/link-type-previews/link-types-{'panel' if panel else 'full'}.png",
         full_page=True,
     )
 
@@ -77,4 +77,6 @@ def test_placement_selector_and_column(admin_page: Page, live_server: LiveServer
     paid = next(i for i, value in enumerate(headers) if "Заплачено" in value)
     assert "Тип ссылки" in headers[paid + 1]
     expect(page.locator("#result_list tbody")).to_contain_text("nofollow")
-    page.screenshot(path="/app/.link-type-previews/link-types-placements.png", full_page=True)
+    page.screenshot(
+        path="/app/test-results/link-type-previews/link-types-placements.png", full_page=True
+    )

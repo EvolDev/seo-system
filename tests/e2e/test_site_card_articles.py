@@ -60,8 +60,10 @@ def test_article_tabs_and_spoiler(admin_page: Page, live_server: LiveServer, par
     assert popup.url == "https://articles.example/old"
     popup.close()
     assert page.url == original
-    page.screenshot(path=f"/app/.article-previews/card-{partial}-expanded.png", full_page=False)
+    page.screenshot(
+        path=f"/app/test-results/article-previews/card-{partial}-expanded.png", full_page=False
+    )
     other.locator(".seo-card-articles summary").click()
     expect(old).to_be_hidden()
     expect(latest).to_be_visible()
-    page.screenshot(path=f"/app/.article-previews/card-{partial}.png", full_page=False)
+    page.screenshot(path=f"/app/test-results/article-previews/card-{partial}.png", full_page=False)

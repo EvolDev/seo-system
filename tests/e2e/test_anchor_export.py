@@ -56,7 +56,7 @@ def test_copy_all_and_subset(admin_page: Page, live_server: LiveServer, product:
     assert text.splitlines() == [f"audio {i:03}" for i in range(548)]
     assert same_document(page)
     page.locator(".actions").screenshot(
-        path="/app/.anchor-export-previews/copied-buttons.png", animations="disabled"
+        path="/app/test-results/anchor-export-previews/copied-buttons.png", animations="disabled"
     )
     page.locator(".actions .clear a").click()
     page.locator('input[name="_selected_action"]').nth(3).check()

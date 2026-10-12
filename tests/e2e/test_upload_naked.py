@@ -51,7 +51,9 @@ def test_explicit_naked_upload_with_manual_share(admin_page: Page, live_server: 
     expect(page.get_by_text("Безанкорка: Бренд", exact=False)).to_be_visible()
     expect(page.get_by_text("Безанкорка: Голый адрес", exact=False)).to_be_visible()
     expect(page.get_by_text("Безанкорка: Нейтральное слово", exact=False)).to_be_visible()
-    page.screenshot(path="/app/.naked-previews/summary.png", full_page=True, animations="disabled")
+    page.screenshot(
+        path="/app/test-results/naked-previews/summary.png", full_page=True, animations="disabled"
+    )
     page.get_by_role("button", name="Записать в базу", exact=True).click()
     expect(page.get_by_role("link", name="К анкорам", exact=True)).to_be_visible()
     upload = Upload.objects.latest("pk")
@@ -61,7 +63,9 @@ def test_explicit_naked_upload_with_manual_share(admin_page: Page, live_server: 
     assert Keyword.objects.get(product=product, keyword="here").share == Decimal("1.13")
     assert Keyword.objects.get(product=product, keyword="here").anchor_type == AnchorType.GENERIC
     assert service.anchors_plan(upload).nothing
-    page.screenshot(path="/app/.naked-previews/done.png", full_page=True, animations="disabled")
+    page.screenshot(
+        path="/app/test-results/naked-previews/done.png", full_page=True, animations="disabled"
+    )
 
 
 def test_naked_selector_tracks_upload_kind(admin_page: Page, live_server: LiveServer) -> None:
@@ -72,4 +76,6 @@ def test_naked_selector_tracks_upload_kind(admin_page: Page, live_server: LiveSe
     expect(page.locator("#id_anchor_mode")).to_be_hidden()
     page.locator('input[name="kind"][value="anchors"]').check()
     expect(page.locator("#id_anchor_mode")).to_be_visible()
-    page.screenshot(path="/app/.naked-previews/new.png", full_page=True, animations="disabled")
+    page.screenshot(
+        path="/app/test-results/naked-previews/new.png", full_page=True, animations="disabled"
+    )
