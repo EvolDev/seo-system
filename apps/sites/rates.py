@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from decimal import ROUND_HALF_UP, Decimal
 
 from apps.integrations.ecb import Rate
+from apps.sites import latest
 from apps.sites.models import ExchangeRate
 
 
@@ -23,6 +24,19 @@ def save_rates(rates: Iterable[Rate]) -> int:
     before = ExchangeRate.objects.count()
     ExchangeRate.objects.bulk_create(rows, ignore_conflicts=True)
     return ExchangeRate.objects.count() - before
+
+
+def update(rates: Iterable[Rate]) -> tuple[int, int]:
+    """Курсы ЕЦБ в базу и пересчёт копии «площадки на сегодня» — одним путём
+    для задачи по расписанию и ручной команды.
+
+    «Дешевле» сравнивается в евро по последнему курсу (E1-11, ADR-065): новые
+    курсы меняют пометки у всех площадок. Пересчитываем и без новых курсов:
+    повтор задачи после сбоя пересчёта иначе оставил бы копию со старым курсом.
+    Возвращает, сколько курсов новых и сколько площадок пересчитано.
+    """
+    saved = save_rates(rates)
+    return saved, latest.refresh_all()
 
 
 def latest_rates() -> dict[str, Decimal]:

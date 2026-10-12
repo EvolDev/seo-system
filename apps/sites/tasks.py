@@ -1,8 +1,9 @@
 """Задачи очереди блока площадок: курсы валют (E1-07), загрузки файлов (E1-08).
 
 - `exchange_rates_update` — beat раз в сутки, вечером, после публикации
-  курсов ЕЦБ: записывает курсы, которых ещё нет. Повторный запуск ничего
-  не дублирует: курс валюты на дату один.
+  курсов ЕЦБ: записывает курсы, которых ещё нет, и пересчитывает пометки
+  «дешевле» у всех площадок. Повторный запуск ничего не дублирует: курс
+  валюты на дату один.
 - `upload_check` — сводка до записи по загруженному файлу; базу не меняет.
 - `upload_write` — запись загрузки в одной транзакции (ADR-044). Повтор уже
   записанную загрузку не трогает.
@@ -18,7 +19,7 @@ from typing import Any
 from celery import shared_task
 
 from apps.integrations import ecb
-from apps.sites.rates import save_rates
+from apps.sites import rates
 from apps.sites.uploads import service
 from config.queue import QueueTask
 
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 @shared_task(base=QueueTask, name="exchange_rates_update")
 def exchange_rates_update() -> int:
-    saved = save_rates(ecb.fetch_rates())
-    logger.info("курсы ЕЦБ записаны", extra={"new_rates": saved})
+    saved, refreshed = rates.update(ecb.fetch_rates())
+    logger.info("курсы ЕЦБ записаны", extra={"new_rates": saved, "sites_refreshed": refreshed})
     return saved
 
 

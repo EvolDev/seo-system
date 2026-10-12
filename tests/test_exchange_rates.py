@@ -14,7 +14,7 @@ from django.conf import settings
 from django.core.management import call_command
 
 from apps.integrations import ecb
-from apps.sites.models import ExchangeRate
+from apps.sites.models import ExchangeRate, Seller, Site, SiteLatest, SitePrice
 from apps.sites.rates import save_rates
 from apps.sites.tasks import exchange_rates_update
 
@@ -84,6 +84,55 @@ class TestSaving:
         out = capsys.readouterr().out
         assert "Новых курсов: 3" in out
         assert "1 € = 1.135500 USD на 30.09.2026" in out
+
+
+# Новый курс доллара 1.0: $110 становятся €110 — дороже рабочих €100.
+PARITY = (
+    "KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE,OBS_STATUS\n"
+    "EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-10-01,1.0000,A\n"
+)
+
+
+@pytest.mark.django_db
+class TestCheaperFollowsRates:
+    """«Дешевле» — в евро по последнему курсу: курсы по расписанию пересчитывают
+    копию «площадки на сегодня» (E1-11, ADR-065), а не только ручная команда."""
+
+    @pytest.fixture
+    def site(self) -> Site:
+        ExchangeRate.objects.create(currency="USD", rate_date=dt.date(2026, 9, 30), rate="1.1355")
+        site = Site.objects.create(domain="cheaper.com")
+        working = SitePrice.objects.create(
+            site=site, seller=Seller.objects.create(name="Euro Seller"), placement_cents=10000
+        )
+        site.price = working
+        site.save(update_fields=["price"])
+        # $110 по 1.1355 — €96,87: дешевле рабочей.
+        SitePrice.objects.create(
+            site=site,
+            seller=Seller.objects.create(name="Dollar Seller", currency="USD"),
+            placement_cents=11000,
+            currency="USD",
+        )
+        assert SiteLatest.objects.get(site=site).cheaper_id is not None
+        return site
+
+    def test_scheduled_rates_refresh_cheaper(
+        self, monkeypatch: pytest.MonkeyPatch, site: Site
+    ) -> None:
+        _patch_fetch(monkeypatch, PARITY)
+        assert exchange_rates_update.delay().get() == 1
+        assert SiteLatest.objects.get(site=site).cheaper_id is None
+
+    def test_repeat_without_new_rates_heals_the_copy(
+        self, monkeypatch: pytest.MonkeyPatch, site: Site
+    ) -> None:
+        # Курс записан, а пересчёт не случился — как при сбое после записи.
+        save_rates(ecb.parse_csv(PARITY))
+        assert SiteLatest.objects.get(site=site).cheaper_id is not None
+        _patch_fetch(monkeypatch, PARITY)
+        assert exchange_rates_update.delay().get() == 0
+        assert SiteLatest.objects.get(site=site).cheaper_id is None
 
 
 def test_rates_update_daily_in_the_evening() -> None:
