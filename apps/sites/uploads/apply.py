@@ -58,7 +58,6 @@ PRICE_FIELDS = (
     "extra",
     "link_type",
     "link_type_manual",
-    "withdrawn",
 )
 METRIC_FIELDS = ("dr", "organic_traffic", "total_keywords")
 BATCH = 1000
@@ -260,7 +259,9 @@ class Writer:
             reviewed = None if item.decision.needs_decision else self.now
             existing = today.get((site_id, item.service))
             working_id = item.site.working.id if item.site and item.site.working else None
-            if existing is not None and existing.pk != working_id:
+            # Снимок «снято с продажи» той же даты не перезаписываем (ADR-068): цена
+            # встаёт рядом новой строкой — она новее, а снятие остаётся в истории.
+            if existing is not None and existing.pk != working_id and not existing.withdrawn:
                 # Снимок этой даты — обновляется на месте.
                 for name, value in values.items():
                     setattr(existing, name, value)
@@ -299,9 +300,6 @@ class Writer:
             "extra": record.extra or None,
             "link_type": record.link_types.get(item.service, record.link_type),
             "link_type_manual": False,
-            # Снимок той же даты мог быть снятием с продажи (ADR-068): цена из
-            # файла возвращает площадку в продажу.
-            "withdrawn": False,
         }
 
     def _move_working(self, prices: Sequence[SitePrice]) -> None:

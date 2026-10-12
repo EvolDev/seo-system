@@ -205,8 +205,9 @@ def classify(
     """Куда попадёт предложение и нужно ли решение человека. Правило — в начале модуля."""
     first_service = service == PlacementType.GUEST_POST or not record_has_gp
     working = site.working if site is not None else None
-    if working is None and site is not None and service in site.withdrawn:
-        # Снято с продажи позже этой цены — это история, а не новое предложение.
+    if site is not None and service in site.withdrawn:
+        # Продавец снял услугу с продажи позже этой цены (ADR-068) — это история:
+        # ни рабочей, ни на разбор, какой бы ни была рабочая цена площадки.
         return Decision(ReviewGroup.SAME, needs_decision=False, becomes_working=False)
     if working is None:
         rejected = site is not None and bool(site.rejected)

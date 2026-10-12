@@ -309,6 +309,53 @@ class TestReturn:
         assert not SiteOffer.objects.filter(site=gone).exists()
         assert SiteLatest.objects.get(site=gone).withdrawn_at == start_of_day(NEW)
 
+    def test_same_date_catalog_brings_it_back_keeping_history(
+        self, base: dict[str, Site], collaborator: Seller
+    ) -> None:
+        """Загрузка той же даты — позже снятия: цена встаёт рядом, снятие в истории."""
+        _press(_new_catalog(collaborator, "kept.com"), "withdraw")
+        _press(_new_catalog(collaborator, "kept.com", "gone.com"), "known")
+        gone = Site.objects.get(domain="gone.com")
+        assert gone.price is not None and not gone.price.withdrawn
+        assert gone.price.checked_at == start_of_day(NEW)
+        assert SitePrice.objects.filter(site=gone, withdrawn=True).count() == 1
+        assert SiteLatest.objects.get(site=gone).withdrawn_at is None
+
+    def test_newer_price_list_of_the_seller_brings_it_back(
+        self, base: dict[str, Site], collaborator: Seller
+    ) -> None:
+        """Возвращает свежая цена самого продавца, не только каталог (ADR-068)."""
+        _press(_new_catalog(collaborator, "kept.com"), "withdraw")
+        file = SimpleUploadedFile("collab-prices.csv", b"Website,Price\ngone.com,130\n")
+        upload = service.create_upload(
+            file,
+            kind=UploadKind.PRICE_LIST,
+            seller=collaborator,
+            prices_date=NEW + dt.timedelta(days=1),
+        ).upload
+        if service.needs_questions(upload):
+            assert service.confirm_mapping(upload, upload.mapping or {}, "EUR") == []
+        service.start(upload, UploadStatus.CHECKING)
+        upload_check.delay(upload.pk)
+        upload.refresh_from_db()
+        _press(upload, "all")
+        gone = Site.objects.get(domain="gone.com")
+        assert gone.price is not None and gone.price.placement_cents == 13000
+        assert SiteLatest.objects.get(site=gone).withdrawn_at is None
+
+    def test_older_catalog_is_not_pending_beside_other_working(
+        self, base: dict[str, Site], collaborator: Seller, linkhub: Seller
+    ) -> None:
+        """Старая цена после снятия — история и при рабочей цене другого продавца."""
+        _press(_new_catalog(collaborator, "kept.com"), "withdraw")
+        older = _new_catalog(collaborator, "kept.com", "side.com", day=dt.date(2026, 10, 10))
+        _press(older, "known")
+        side = Site.objects.get(domain="side.com")
+        assert side.price is not None and side.price.seller_id == linkhub.pk
+        assert not SitePrice.objects.filter(site=side, reviewed_at__isnull=True).exists()
+        assert ProductSiteLatest.objects.get(site_id=side.pk).offers_pending is False
+        assert not SiteOffer.objects.filter(site=side, seller_id=collaborator.pk).exists()
+
     def test_undo_restores_everything(self, base: dict[str, Site], collaborator: Seller) -> None:
         working = Site.objects.get(domain="gone.com").price_id
         upload = _press(_new_catalog(collaborator, "kept.com"), "withdraw")
