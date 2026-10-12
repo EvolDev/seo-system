@@ -1,0 +1,9 @@
+{% comment %}Страницы разбора и размер страницы — над таблицей и под ней, как в «Площадках».{% endcomment %}
+<p class="seo-pages">
+  {% if page.has_previous %}<a href="?{{ page_query }}&p={{ page.previous_page_number }}">← назад</a>{% endif %}
+  {% if page.has_other_pages %}страница {{ page.number }} из {{ page.paginator.num_pages }} · {% endif %}строк {{ page.paginator.count }}
+  {% if page.has_next %}<a href="?{{ page_query }}&p={{ page.next_page_number }}">дальше →</a>{% endif %}
+  <span class="seo-per-page">На странице:
+    {% for choice in per_page_choices %}{% if choice.selected %}<b>{{ choice.size }}</b>{% else %}<a href="?{{ choice.query }}">{{ choice.size }}</a>{% endif %} {% endfor %}
+  </span>
+</p>

@@ -182,15 +182,34 @@ def first_tab(upload: Upload, all_tabs: Sequence[Tab]) -> str:
     return ReviewGroup.NEW
 
 
-def page(
-    upload: Upload, group: str, *, sort: str = "gain", hide_done: bool = True, number: int = 1
-) -> tuple[Page[UploadItem], list[Row]]:
-    """Страница строк вкладки: сначала ждущие решения, затем по выгоде или DR."""
-    queryset = visible(UploadItem.objects.filter(upload=upload, review_group=group)).select_related(
-        "site__price__seller", "price__seller", "ref_price__seller"
-    )
+def _tab(upload: Upload, group: str, *, hide_done: bool) -> QuerySet[UploadItem]:
+    """Строки вкладки, как их видит разбор: без удалённых, разобранные — по выбору."""
+    queryset = visible(UploadItem.objects.filter(upload=upload, review_group=group))
     if hide_done:
         queryset = queryset.exclude(needs_decision=True, price__reviewed_at__isnull=False)
+    return queryset
+
+
+def domains(upload: Upload, group: str, *, hide_done: bool = True) -> list[str]:
+    """Домены всех строк вкладки, со всех страниц, по порядку файла, без повторов —
+    для «Скопировать все домены»."""
+    found = _tab(upload, group, hide_done=hide_done).order_by("line", "pk")
+    return list(dict.fromkeys(found.values_list("site__domain", flat=True)))
+
+
+def page(
+    upload: Upload,
+    group: str,
+    *,
+    sort: str = "gain",
+    hide_done: bool = True,
+    number: int = 1,
+    size: int = PAGE_SIZE,
+) -> tuple[Page[UploadItem], list[Row]]:
+    """Страница строк вкладки: сначала ждущие решения, затем по выгоде или DR."""
+    queryset = _tab(upload, group, hide_done=hide_done).select_related(
+        "site__price__seller", "price__seller", "ref_price__seller"
+    )
     queryset = queryset.annotate(
         waiting=Case(
             When(_pending_q(), then=Value(0)), default=Value(1), output_field=IntegerField()
@@ -213,7 +232,7 @@ def page(
         queryset = queryset.annotate(gain=gain).order_by(
             "waiting", F("gain").asc(nulls_last=True), "pk"
         )
-    paginator: Paginator[UploadItem] = Paginator(queryset, PAGE_SIZE)
+    paginator: Paginator[UploadItem] = Paginator(queryset, size)
     current = paginator.get_page(number)
     return current, rows(list(current.object_list))
 

@@ -11,6 +11,7 @@ import datetime as dt
 import json
 from collections.abc import Iterable
 from typing import Any, ClassVar
+from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import admin, messages
@@ -44,7 +45,7 @@ from apps.sites.uploads import anchors, filters, placements, review, service, un
 from apps.sites.uploads.apply import Part
 from apps.sites.uploads.columns import Confidence
 from apps.workspace.products import working_product_id
-from config.admin import RecordAdmin
+from config.admin import PER_PAGE_CHOICES, PER_PAGE_PARAM, RecordAdmin
 from config.assets import Css
 from config.run_id import bind_run_id, new_run_id
 
@@ -800,12 +801,37 @@ class UploadAdmin(RecordAdmin):
         }
         if tab == review.ISSUES:
             context["rows"] = []
-        else:
-            current, rows = review.page(
-                upload, tab, sort=sort, hide_done=hide_done, number=_int(request.GET.get("p")) or 1
-            )
-            context["page"] = current
-            context["rows"] = [_row_context(row) for row in rows]
+            return TemplateResponse(request, "admin/sites/upload/review.html", context)
+        if request.GET.get("domains") == "1":
+            # «Скопировать все домены»: вся вкладка, со всех страниц, а не отмеченные.
+            found = review.domains(upload, tab, hide_done=hide_done)
+            return JsonResponse({"text": "\n".join(found), "count": len(found)})
+        size = _int(request.GET.get(PER_PAGE_PARAM))
+        size = size if size in PER_PAGE_CHOICES else review.PAGE_SIZE
+        current, rows = review.page(
+            upload,
+            tab,
+            sort=sort,
+            hide_done=hide_done,
+            number=_int(request.GET.get("p")) or 1,
+            size=size,
+        )
+        # Ссылки страниц и размеров сохраняют вкладку, порядок и «показать разобранные».
+        query = {"tab": tab, "sort": sort, **({} if hide_done else {"all": "1"})}
+        context["page"] = current
+        context["rows"] = [_row_context(row) for row in rows]
+        context["page_query"] = urlencode({**query, PER_PAGE_PARAM: size})
+        context["per_page_choices"] = [
+            {
+                "size": choice,
+                "selected": choice == size,
+                "query": urlencode({**query, PER_PAGE_PARAM: choice}),
+            }
+            for choice in PER_PAGE_CHOICES
+        ]
+        context["domains_url"] = "?" + urlencode({**query, "domains": "1"})
+        # Выбранный размер страницы переживает смену вкладки и порядка.
+        context["size_query"] = "" if size == review.PAGE_SIZE else f"&{PER_PAGE_PARAM}={size}"
         return TemplateResponse(request, "admin/sites/upload/review.html", context)
 
     def decide_view(self, request: HttpRequest, upload_id: int) -> JsonResponse:

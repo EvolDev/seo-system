@@ -4,6 +4,9 @@
  * в заголовке карточки площадки. Скрипт один на все страницы — обработчик на
  * document, новое содержимое (подгрузка, панель) его не теряет.
  *
+ * Вся вкладка разбора — `<button data-copy-all="адрес">`: сервер отдаёт домены
+ * всех строк, со всех страниц.
+ *
  * Пачкой — `<button data-copy-domains>` в строке действий любого списка
  * (admin/actions.html) и на разборе загрузки: домены отмеченных строк
  * столбиком, по одному на строке. Домен строки ищется по порядку: `data-domain`
@@ -48,7 +51,7 @@
   }
 
   function done(button) {
-    if (button.hasAttribute("data-copy-domains")) {
+    if (button.hasAttribute("data-copy-domains") || button.hasAttribute("data-copy-all")) {
       if (!button.dataset.label) button.dataset.label = button.textContent;
       button.textContent = "Скопировано";
       button.classList.add("seo-copied");
@@ -108,6 +111,28 @@
     }
     return domains;
   }
+
+  // Все домены списка со всех страниц: адрес отдаёт {text, count} (разбор загрузки).
+  document.addEventListener("click", function (event) {
+    var all = event.target.closest && event.target.closest("[data-copy-all]");
+    if (!all) return;
+    event.preventDefault();
+    fetch(all.getAttribute("data-copy-all"), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.json();
+      })
+      .then(function (answer) {
+        if (!answer.count) throw new Error("пусто");
+        return copy(answer.text).then(function () {
+          done(all);
+          if (window.seoNav) window.seoNav.toast("Скопировано: " + answer.count + plural(answer.count), "success");
+        });
+      })
+      .catch(function () {
+        if (window.seoNav) window.seoNav.toast("Не удалось скопировать", "error");
+      });
+  });
 
   document.addEventListener("click", function (event) {
     var bulk = event.target.closest && event.target.closest("[data-copy-domains]");

@@ -179,6 +179,30 @@ class TestSteps:
         assert "Дешевле рабочей" in page and "known.com" in page
         assert "Сделать рабочей" in page
 
+    def test_review_copies_all_domains_and_pages_by_choice(
+        self, admin_client: Client, linkhub: Seller, known: Site
+    ) -> None:
+        """«Скопировать все домены» — вся вкладка; «На странице» — 50…500."""
+        upload = _uploaded(admin_client, linkhub)
+        url = reverse("admin:sites_upload_review", args=[upload.pk])
+        item = UploadItem.objects.filter(upload=upload).first()
+        assert item is not None
+        tab = item.review_group
+        answer = admin_client.get(url, {"tab": tab, "all": "1", "domains": "1"}).json()
+        expected = list(
+            dict.fromkeys(
+                UploadItem.objects.filter(upload=upload, review_group=tab)
+                .order_by("line", "pk")
+                .values_list("site__domain", flat=True)
+            )
+        )
+        assert answer == {"text": "\n".join(expected), "count": len(expected)}
+        page = admin_client.get(url, {"tab": tab, "all": "1", "per_page": "250"}).content.decode()
+        assert "На странице:" in page and "<b>250</b>" in page
+        assert "per_page=250" in page  # вкладки и порядок помнят размер
+        assert f'data-domain="{item.site.domain}"' in page
+        assert "Скопировать все домены" in page
+
     def test_summary_page_shows_counts(
         self, admin_client: Client, linkhub: Seller, known: Site
     ) -> None:

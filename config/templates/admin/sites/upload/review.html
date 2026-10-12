@@ -30,7 +30,7 @@ price-review.html. Вкладки — ссылки; решения в строк
 
 <nav class="seo-tabs" aria-label="Вкладки разбора">
   {% for t in tabs %}
-    <a href="?tab={{ t.key }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}"
+    <a href="?tab={{ t.key }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}{{ size_query }}"
        class="seo-tab{% if t.key == tab %} seo-tab-on{% endif %}{% if not t.badge %} seo-tab-zero{% endif %}{% if t.pending %} seo-tab-pending{% endif %}"
        data-tab="{{ t.key }}">{{ t.title }}<b data-badge>{{ t.badge }}</b></a>
   {% endfor %}
@@ -41,23 +41,26 @@ price-review.html. Вкладки — ссылки; решения в строк
   <div class="seo-boxes">{% include "admin/sites/upload/_issues.html" with data=data %}</div>
 {% elif not rows %}
   <div class="seo-note">{% if hide_done and page.paginator.count == 0 %}На этой вкладке всё разобрано или ничего нет.{% else %}Таких строк нет.{% endif %}
-    {% if hide_done %}<a href="?tab={{ tab }}&sort={{ sort }}&all=1">Показать разобранные</a>{% endif %}</div>
+    {% if hide_done %}<a href="?tab={{ tab }}&sort={{ sort }}&all=1{{ size_query }}">Показать разобранные</a>{% endif %}</div>
 {% else %}
   <div class="seo-toolbar">
     {% if can_decide %}<label><input type="checkbox" data-select-all> отметить все на странице</label>{% endif %}
     <button type="button" class="seo-btn seo-copy-domains" data-copy-domains
-      title="Скопировать домены отмеченных строк — по одному на строке">Скопировать домены</button>
+      title="Скопировать домены отмеченных строк — по одному на строке">Скопировать отмеченные</button>
+    <button type="button" class="seo-btn" data-copy-all="{{ domains_url }}"
+      title="Домены всех строк этой вкладки, со всех страниц — по одному на строке">Скопировать все домены ({{ page.paginator.count }})</button>
     <span>Порядок:
       {% for key, label in sorts.items %}
-        {% if key == sort %}<b>{{ label }}</b>{% else %}<a href="?tab={{ tab }}&sort={{ key }}{% if not hide_done %}&all=1{% endif %}">{{ label }}</a>{% endif %}{% if not forloop.last %} · {% endif %}
+        {% if key == sort %}<b>{{ label }}</b>{% else %}<a href="?tab={{ tab }}&sort={{ key }}{% if not hide_done %}&all=1{% endif %}{{ size_query }}">{{ label }}</a>{% endif %}{% if not forloop.last %} · {% endif %}
       {% endfor %}
     </span>
     {% if decidable %}
-      {% if hide_done %}<a href="?tab={{ tab }}&sort={{ sort }}&all=1">показать разобранные</a>{% else %}<a href="?tab={{ tab }}&sort={{ sort }}">скрыть разобранные</a>{% endif %}
+      {% if hide_done %}<a href="?tab={{ tab }}&sort={{ sort }}&all=1{{ size_query }}">показать разобранные</a>{% else %}<a href="?tab={{ tab }}&sort={{ sort }}{{ size_query }}">скрыть разобранные</a>{% endif %}
     {% endif %}
     <a href="{{ sites_url }}">Открыть список в «Площадках»</a>
   </div>
 
+  {% include "admin/sites/upload/_review_pages.html" %}
   <div class="seo-table-wrap">
     <table class="seo-upload-table seo-review" data-review
            data-decide-url="{% url 'admin:sites_upload_decide' upload.pk %}"
@@ -77,7 +80,7 @@ price-review.html. Вкладки — ссылки; решения в строк
               <td class="seo-cb"><input type="checkbox" data-select aria-label="Отметить {{ r.domain }}"></td>
             {% endif %}
             <td>
-              <a href="{{ r.card_url }}" data-panel data-open>{{ r.domain }}</a>
+              <a href="{{ r.card_url }}" data-panel data-open data-domain="{{ r.domain }}">{{ r.domain }}</a>
               {% if r.item.site_created %}<span class="seo-chip seo-info">новая в базе</span>{% endif %}
               {% if r.item.source_value %}<span class="seo-chip" title="В файле: {{ r.item.source_value }}">из адреса</span>{% endif %}
               {% for reason in r.row.rejected %}<div class="seo-warnline">{{ reason }}</div>{% endfor %}
@@ -110,13 +113,7 @@ price-review.html. Вкладки — ссылки; решения в строк
     </table>
   </div>
 
-  {% if page.has_other_pages %}
-    <p class="seo-pages">
-      {% if page.has_previous %}<a href="?tab={{ tab }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}&p={{ page.previous_page_number }}">← назад</a>{% endif %}
-      страница {{ page.number }} из {{ page.paginator.num_pages }} · строк {{ page.paginator.count }}
-      {% if page.has_next %}<a href="?tab={{ tab }}&sort={{ sort }}{% if not hide_done %}&all=1{% endif %}&p={{ page.next_page_number }}">дальше →</a>{% endif %}
-    </p>
-  {% endif %}
+  {% include "admin/sites/upload/_review_pages.html" %}
 
   {% if can_decide %}
     <p class="seo-keys"><kbd>J</kbd>/<kbd>K</kbd> — по строкам{% if decidable %} · <kbd>A</kbd> — сделать рабочей · <kbd>S</kbd> — оставить{% endif %} · <kbd>X</kbd> — отметить · <kbd>O</kbd> — карточка площадки · <kbd>D</kbd> — удалить из базы · <kbd>B</kbd> — заблокировать · <kbd>U</kbd> — отменить последнее</p>
