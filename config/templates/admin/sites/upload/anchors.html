@@ -1,8 +1,8 @@
 {% extends "admin/base_site.html" %}
 {% comment %}
 Файл анкоров продукта (E3-05, ADR-059): сводка «что сведётся с базой» до записи
-и итог после. Разбора нет: запись ничего не стирает — новое добавляется,
-знакомое обновляется значениями файла, позиции ложатся снимками. Пока идёт
+и итог после. Полный список отключает отсутствующие; дополнение оставляет их активными.
+Новое добавляется, знакомое обновляется, позиции ложатся снимками. Пока идёт
 проверка или запись, страница опрашивает состояние (seo/uploads.js).
 {% endcomment %}
 
@@ -32,6 +32,8 @@
     <div class="seo-stats">
       <div class="seo-stat seo-good"><b>{{ counts.created|default:0 }}</b><span>новых анкоров</span></div>
       <div class="seo-stat"><b>{{ counts.updated|default:0 }}</b><span>обновлено</span></div>
+      <div class="seo-stat seo-warn"><b>{{ counts.deactivated|default:0 }}</b><span>отключено анкоров</span></div>
+      <div class="seo-stat seo-good"><b>{{ counts.reactivated|default:0 }}</b><span>снова включено</span></div>
       <div class="seo-stat"><b>{{ counts.positions|default:0 }}</b><span>позиций записано</span></div>
       <div class="seo-stat"><b>{{ counts.naked|default:0 }}</b><span>безанкорных</span></div>
       <div class="seo-stat"><b>{{ counts.types|default:0 }}</b><span>долей типов страниц</span></div>
@@ -44,16 +46,18 @@
       {% include "admin/sites/upload/_undo_button.html" %}
     </div>
   {% else %}
-    <p class="seo-lead">В базу ещё ничего не записано. Запись сведёт файл с тем, что есть: новое добавится, у знакомых анкоров значения файла заменят прежние, пустые ячейки ничего не сотрут. Чего нет в файле — останется.</p>
+    <p class="seo-lead">В базу ещё ничего не записано. Запись сведёт файл с тем, что есть: новое добавится, у знакомых анкоров значения файла заменят прежние, пустые ячейки ничего не сотрут. {% if anchor_sync %}Отсутствующие в полном списке анкоры станут неактивными; старые размещения не изменятся.{% else %}Чего нет в файле — останется активным. Для отключения отсутствующих выберите «Полный список» на шаге «Колонки».{% endif %}</p>
     <div class="seo-stats">
       <div class="seo-stat"><b>{{ summary.anchors }}</b><span>анкоров в файле</span></div>
       <div class="seo-stat seo-good"><b>{{ summary.new_total }}</b><span>новых</span></div>
       <div class="seo-stat seo-warn"><b>{{ summary.changed_total }}</b><span>изменятся</span></div>
+      <div class="seo-stat seo-warn"><b>{{ summary.deactivated_total }}</b><span>станут неактивными</span></div>
+      <div class="seo-stat seo-good"><b>{{ summary.reactivated_total }}</b><span>снова включатся</span></div>
       <div class="seo-stat"><b>{{ summary.same }}</b><span>без изменений</span></div>
       <div class="seo-stat"><b>{{ summary.positions_new }}</b><span>новых позиций{% if summary.dates %} · {{ summary.dates|join:", " }}{% endif %}</span></div>
       <div class="seo-stat seo-warn"><b>{{ summary.positions_changed }}</b><span>позиций изменится</span></div>
       <div class="seo-stat"><b>{{ summary.types_new|add:summary.types_changed }}</b><span>долей типов страниц</span></div>
-      <div class="seo-stat"><b>{{ summary.naked_new|add:summary.naked_changed }}</b><span>безанкорных</span></div>
+      <div class="seo-stat"><b>{{ summary.naked_total }}</b><span>безанкорных{% if summary.naked_same %} · {{ summary.naked_same }} без изменений{% endif %}</span></div>
       <div class="seo-stat"><b>{{ summary.countries_new|add:summary.countries_changed }}</b><span>долей стран</span></div>
       <div class="seo-stat seo-warn"><b>{{ summary.issues_total }}</b><span>замечаний</span></div>
     </div>
@@ -70,7 +74,7 @@
     <div class="seo-box">
       <h3>Новые анкоры — {{ summary.new_total }}</h3>
       <ul>
-        {% for row in summary.new %}<li><b>{{ row.keyword }}</b> <span class="seo-sub">{{ row.url }}{% if row.page_type %} · {{ row.page_type }}{% endif %}</span></li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
+        {% for row in summary.new %}<li><b>{{ row.keyword }}</b> <span class="seo-sub">{{ row.url }}{% if row.naked_type %} · Безанкорка: {{ row.naked_type }}{% endif %}{% if row.page_type %} · {{ row.page_type }}{% endif %}</span></li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
         {% if summary.new_total > summary.new|length %}<li class="seo-flat">всего {{ summary.new_total }}</li>{% endif %}
       </ul>
     </div>
@@ -101,7 +105,7 @@
     {% endif %}
     {% if summary.missing_total %}
       <div class="seo-box">
-        <h3>Есть в системе, в файле нет — останутся</h3>
+        <h3>Есть в системе, в файле нет — {% if anchor_sync %}станут неактивными{% else %}останутся активными{% endif %}</h3>
         <ul>
           {% for keyword in summary.missing %}<li>{{ keyword }}</li>{% endfor %}
           {% if summary.missing_total > summary.missing|length %}<li class="seo-flat">всего {{ summary.missing_total }}</li>{% endif %}

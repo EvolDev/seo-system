@@ -1,8 +1,8 @@
 {% extends "admin/actions.html" %}
 {% comment %}
-Строка действий любого списка: слева от выбора действия — «Скопировать домены»
-(просьба пользователя 05.10.2026). Копирует домены отмеченных строк столбиком,
-по одному на строке; откуда берётся домен строки — seo/domain-tools.js.
+Строка действий: в «Анкорах» — копирование анкоров со всех выбранных страниц
+и Excel всего текущего фильтра (seo/anchor-export.js). В остальных списках —
+копирование доменов отмеченных строк (seo/domain-tools.js).
 {% endcomment %}
 {% block actions-submit %}
 {{ block.super }}
@@ -18,7 +18,14 @@
 {% endblock %}
 
 {% block actions-form %}
+{% if anchor_copy_url %}
+<button type="button" class="seo-btn" data-copy-anchors="{{ anchor_copy_url }}"
+  title="Скопировать выбранные анкоры; выбор всех охватывает все страницы">Скопировать анкоры</button>
+<a class="seo-btn" href="{{ anchor_export_url }}" data-no-soft
+  title="Все анкоры по текущим фильтрам, со всех страниц">Экспорт в Excel</a>
+{% else %}
 <button type="button" class="seo-btn seo-copy-domains" data-copy-domains
   title="Скопировать домены отмеченных строк — по одному на строке">Скопировать домены</button>
+{% endif %}
 {{ block.super }}
 {% endblock %}

@@ -66,7 +66,7 @@ def base(offer: OfferFactory) -> dict[str, Any]:
     ExchangeRate.objects.create(
         currency="USD", rate_date=dt.date(2026, 9, 30), rate=Decimal("1.1355")
     )
-    offer(example, 20000, writing_cents=1000, announce_cents=0)
+    offer(example, 20000, writing_cents=1000, announce_cents=0, link_type="dofollow")
     offer(example, 17000, seller=linkhub, currency="USD", working=False)
 
     bad = Site.objects.create(domain="bad.com")

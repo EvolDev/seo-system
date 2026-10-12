@@ -40,7 +40,7 @@ from apps.sites.models import (
 from apps.sites.offers import CURRENCIES, money
 from apps.sites.rates import latest_rates
 from apps.sites.tasks import upload_check, upload_write
-from apps.sites.uploads import filters, placements, review, service, undo
+from apps.sites.uploads import anchors, filters, placements, review, service, undo
 from apps.sites.uploads.apply import Part
 from apps.sites.uploads.columns import Confidence
 from apps.workspace.products import working_product_id
@@ -66,6 +66,18 @@ class UploadForm(forms.Form):
         queryset=Product.objects.order_by("pk"),
         required=False,
         empty_label="— выберите —",
+    )
+    anchor_policy = forms.ChoiceField(
+        label="Обновление списка анкоров",
+        choices=anchors.POLICY_CHOICES,
+        initial=anchors.Policy.MERGE,
+        required=False,
+    )
+    anchor_mode = forms.ChoiceField(
+        label="Состав файла анкоров",
+        choices=anchors.MODE_CHOICES,
+        initial=anchors.Mode.AUTO,
+        required=False,
     )
     seller = forms.ModelChoiceField(
         label="Продавец",
@@ -119,6 +131,16 @@ class UploadForm(forms.Form):
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
         kind = data.get("kind")
+        data["anchor_mode"] = (
+            anchors.Mode(data.get("anchor_mode") or anchors.Mode.AUTO)
+            if kind == UploadKind.ANCHORS
+            else anchors.Mode.AUTO
+        )
+        data["anchor_policy"] = (
+            anchors.Policy(data.get("anchor_policy") or anchors.Policy.MERGE)
+            if kind == UploadKind.ANCHORS
+            else anchors.Policy.MERGE
+        )
         if kind in UPLOADS_FOR_PRODUCT and data.get("product") is None:
             raise forms.ValidationError("Выберите продукт: чьи это размещения или ссылки.")
         if kind not in UPLOADS_FOR_PRODUCT:
@@ -405,6 +427,8 @@ class UploadAdmin(RecordAdmin):
                 country=data.get("country") or None,
                 product=data.get("product"),
                 employee=employee,
+                anchor_mode=data["anchor_mode"],
+                anchor_policy=data["anchor_policy"],
                 author=request.user,
             )
             upload = created.upload
@@ -455,6 +479,13 @@ class UploadAdmin(RecordAdmin):
                 str(column["key"]): _chosen_field(request, str(column["key"]))
                 for column in upload.columns or []
             }
+            if upload.kind == UploadKind.ANCHORS:
+                mapping[anchors.MODE_KEY] = (
+                    request.POST.get("anchor_mode") or anchors.mode(upload.mapping).value
+                )
+                mapping[anchors.POLICY_KEY] = (
+                    request.POST.get("anchor_policy") or anchors.policy(upload.mapping).value
+                )
             errors = service.confirm_mapping(
                 upload, mapping, request.POST.get("currency") or upload.currency or "EUR"
             )
@@ -478,6 +509,15 @@ class UploadAdmin(RecordAdmin):
             "fields": service.field_choices(upload),
             "placements_kind": upload.kind == UploadKind.PLACEMENTS,
             "anchors_kind": upload.kind == UploadKind.ANCHORS,
+            "anchor_policies": anchors.POLICY_CHOICES,
+            "anchor_policy": request.POST.get("anchor_policy")
+            or anchors.policy(upload.mapping).value
+            if upload.kind == UploadKind.ANCHORS
+            else anchors.Policy.MERGE.value,
+            "anchor_modes": anchors.MODE_CHOICES,
+            "anchor_mode": request.POST.get("anchor_mode") or anchors.mode(upload.mapping).value
+            if upload.kind == UploadKind.ANCHORS
+            else anchors.Mode.AUTO.value,
             "confidence": {c.value: _confidence_class(c) for c in Confidence},
             "currencies": sorted({*CURRENCIES, upload.currency or "EUR"}),
             # Откуда система взяла валюту: «валюта продавца по умолчанию» значит,
@@ -588,6 +628,7 @@ class UploadAdmin(RecordAdmin):
             ),
             "steps": ["Файл", "Колонки", "Сводка до записи", "Записано"],
             "summary": upload.summary or {},
+            "anchor_sync": anchors.policy(upload.mapping) == anchors.Policy.SYNC,
             "counts": result.get("counts") or {},
             "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
             "done": done,

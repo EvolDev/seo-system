@@ -1,0 +1,22 @@
+{% load l10n %}
+<div class="seo-price-editor" data-price-editor>
+  <div data-price-display>
+    <span{% if big %} class="seo-card-big"{% endif %}>{{ price|default:"—" }}</span>
+    {% if can_edit_price %}<button type="button" class="seo-price-pencil" data-price-open aria-label="Изменить цену {{ seller_name }}" title="Изменить цену">✎</button>{% endif %}
+  </div>
+  {% if can_edit_price %}
+  <form method="post" action="{{ price_url }}" data-card-form data-price-form{% if price_offer_id != offer.pk|stringformat:"s" %} hidden{% endif %}>
+    {% csrf_token %}
+    <input type="hidden" name="offer" value="{{ offer.pk|unlocalize }}">
+    <input type="hidden" name="latest" value="{{ latest_id|unlocalize }}">
+    <div class="seo-price-fields">
+      <label>Сумма <input type="text" inputmode="decimal" name="amount" value="{% if price_offer_id == offer.pk|stringformat:"s" %}{{ price_form.amount.value|default_if_none:"" }}{% else %}{{ amount }}{% endif %}" required autocomplete="off"></label>
+      <label>Валюта <select name="currency">{% for value in currencies %}<option value="{{ value }}"{% if price_offer_id == offer.pk|stringformat:"s" %}{% if price_form.currency.value == value %} selected{% endif %}{% elif offer.currency == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="seo-price-actions">
+      <button type="submit" class="seo-btn seo-btn-small">Сохранить</button>
+      <button type="button" class="seo-btn seo-btn-small" data-price-cancel>Отмена</button>
+    </div>
+  </form>
+  {% endif %}
+</div>

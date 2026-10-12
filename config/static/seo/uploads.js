@@ -265,7 +265,7 @@
     known: ["Обновляю площадки в базе…", "Цены, метрики, описание — около 15–20 секунд на каталог."],
     new: ["Добавляю новые площадки…", "Несколько тысяч площадок — около 20–60 секунд."],
     recheck: ["Пересчитываю сводку…", "Около 10 секунд."],
-    all: ["Записываю в базу…", "Прайс — секунды. Потом откроется разбор."],
+    all: ["Записываю в базу…", "После записи откроется результат загрузки."],
     replace: ["Записываю в базу…", "Значения из файла заменят расходящиеся. Несколько секунд."],
   };
   // После этих кнопок — переход на итог или разбор, а не обновление блоков страницы.
@@ -798,15 +798,26 @@
   // Экран, на котором обработчики уже висят: второй вызов на нём ничего не делает.
   var initialized = null;
 
+  function initAnchorColumns(root) {
+    root.querySelectorAll("form[data-anchor-columns] [data-field-select]").forEach(function (field) {
+      field.addEventListener("change", function () {
+        var row = field.closest("tr");
+        var load = row && row.querySelector('input[type="checkbox"]');
+        if (load) load.checked = field.value !== "skip";
+      });
+    });
+  }
+
   function initPage() {
     var root = document.querySelector("main#content-start") || document;
     var marker = root.querySelector(
-      "[data-upload-form], [data-state-url], form[data-run-form], [data-filters], table[data-review]"
+      "[data-upload-form], [data-anchor-columns], [data-state-url], form[data-run-form], [data-filters], table[data-review]"
     );
     if (!marker || marker === initialized) return;
     initialized = marker;
     var form = root.querySelector("[data-upload-form]");
     if (form) initForm(form);
+    initAnchorColumns(root);
     var box = root.querySelector("[data-state-url]");
     if (box) initPolling(box);
     initRunForms(root);

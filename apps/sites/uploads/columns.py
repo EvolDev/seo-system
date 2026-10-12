@@ -176,7 +176,16 @@ _EXACT: dict[str, Field] = {
     ),
     **dict.fromkeys(("dr", "ahrefs dr", "domain rating"), Field.DR),
     **dict.fromkeys(
-        ("link type", "rel", "rel attribute", "тип ссылки", "dofollow/nofollow", "follow"),
+        (
+            "link type",
+            "link type article",
+            "rel",
+            "rel attribute",
+            "тип ссылки",
+            "тип ссылки статья",
+            "dofollow/nofollow",
+            "follow",
+        ),
         Field.LINK_TYPE,
     ),
 }
@@ -343,6 +352,10 @@ def _guess(column: Column, tokens: set[str], *, has_service: bool) -> Guess:
     # (пользователь 06.10.2026: прайс Zain MediaX с такими заголовками).
     if _looks_like(column, _domain_of):
         return Guess(Field.DOMAIN, Confidence.LIKELY, "В колонке адреса сайтов.")
+    if _looks_like(column, values.parse_link_type):
+        return Guess(
+            Field.LINK_TYPE, Confidence.LIKELY, "В колонке типы ссылок: dofollow, nofollow."
+        )
     if _looks_like(column, values.parse_service):
         return Guess(
             Field.SERVICE, Confidence.LIKELY, "В колонке услуги: публикация, вставка, Both."

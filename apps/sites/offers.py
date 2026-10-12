@@ -14,6 +14,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from django.db import transaction
@@ -22,6 +23,7 @@ from django.utils import timezone
 
 from apps.sites import latest
 from apps.sites.models import (
+    MetricSource,
     PlacementType,
     Product,
     Seller,
@@ -99,6 +101,100 @@ def set_working_price(offer: SitePrice, *, author: Any = None, source: str | Non
         # списке сразу, без полного пересчёта.
         latest.refresh([site.pk])
     return True
+
+
+def edit_price(
+    offer: SitePrice,
+    cents: int,
+    currency: str,
+    *,
+    expected_latest_id: int,
+    author: Any = None,
+) -> SitePrice:
+    """Новая ручная цена того же продавца; прежний снимок остаётся в истории."""
+    if not 0 <= cents <= 2_147_483_647 or currency not in CURRENCIES:
+        raise ValueError("Проверьте сумму и валюту.")
+    with transaction.atomic():
+        site = Site.all_objects.select_for_update().get(pk=offer.site_id)
+        original = SitePrice.objects.select_related("seller").get(pk=offer.pk)
+        newest = SitePrice.objects.filter(
+            site_id=site.pk,
+            seller_id=original.seller_id,
+            placement_type=original.placement_type,
+        ).latest("checked_at", "pk")
+        if newest.pk != expected_latest_id or (
+            original.pk != newest.pk and original.pk != site.price_id
+        ):
+            raise ValueError("Предложение уже изменилось. Обновите карточку и повторите правку.")
+        if currency != original.currency and any(
+            value not in (None, 0)
+            for value in (original.writing_cents, original.announce_cents, original.gray_cents)
+        ):
+            raise ValueError(
+                "У предложения есть другие суммы в этой валюте. "
+                "Для смены валюты добавьте новое предложение с полными условиями."
+            )
+        if cents == original.placement_cents and currency == original.currency:
+            return original
+        revised = SitePrice.objects.create(
+            site=site,
+            seller=original.seller,
+            placement_type=original.placement_type,
+            placement_cents=cents,
+            currency=currency,
+            writing_cents=original.writing_cents,
+            announce_cents=original.announce_cents,
+            gray_cents=original.gray_cents,
+            link_type=original.link_type,
+            link_type_manual=original.link_type_manual,
+            extra=original.extra,
+            source=MetricSource.MANUAL,
+            checked_at=max(timezone.now(), newest.checked_at + timedelta(microseconds=1)),
+        )
+        if site.price_id == original.pk:
+            set_working_price(revised, author=author)
+        else:
+            add_note(
+                site,
+                f"Цена предложения: {describe(original)} → {describe(revised)}",
+                author=author,
+            )
+        return revised
+
+
+def set_link_type(offer: SitePrice, value: str | None, *, author: Any = None) -> None:
+    """Тип конкретного предложения; ручное решение сохраняется в следующих прайсах."""
+    from apps.sites.models import LinkType
+
+    if value is not None and value not in LinkType.values:
+        raise ValueError("Неизвестный тип ссылки.")
+    with transaction.atomic():
+        locked = SitePrice.objects.select_for_update().get(pk=offer.pk)
+        before = locked.link_type
+        locked.link_type = value
+        locked.link_type_manual = True
+        locked.save(update_fields=["link_type", "link_type_manual"])
+        # Рабочая цена может быть старше последнего прайса (заявка уже в работе).
+        # Ручное уточнение условий продавца должно пережить и следующий прайс.
+        newest = (
+            SitePrice.objects.filter(
+                site_id=locked.site_id,
+                seller_id=locked.seller_id,
+                placement_type=locked.placement_type,
+            )
+            .order_by("-checked_at", "-pk")
+            .values_list("pk", flat=True)
+            .first()
+        )
+        if newest is not None and newest != locked.pk:
+            SitePrice.objects.filter(pk=newest).update(link_type=value, link_type_manual=True)
+        if before != value:
+            add_note(
+                locked.site_id,
+                f"Тип ссылки · {describe(locked)}: "
+                f"{before or 'неизвестно'} → {value or 'неизвестно'}",
+                author=author,
+            )
 
 
 def keep_current(offers: Iterable[SitePrice | SiteOffer]) -> int:

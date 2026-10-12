@@ -13,8 +13,9 @@
 
 Запись — сведение с тем, что есть: новые анкоры добавляются, у знакомых
 факты из файла заменяют прежние (пустая ячейка ничего не стирает), позиции
-ложатся снимками на дату колонки, доли — по строкам. Чего в файле нет, то в
-базе остаётся. Повторная загрузка того же файла ничего не меняет.
+ложатся снимками на дату колонки, доли — по строкам. Полный список отключает
+отсутствующие анкоры загружаемого вида; дополнение сохраняет их активными.
+Вернувшиеся включаются с прежним ID, в том числе при повторе того же файла.
 """
 
 import datetime as dt
@@ -61,6 +62,46 @@ OUT_OF_TOP = 101
 POSITIONS_COUNTRY = "US"
 PCT = Decimal("0.01")
 
+# Параметр разбора хранится рядом с разметкой; это не колонка файла.
+MODE_KEY = "__anchor_mode"
+POLICY_KEY = "__anchor_policy"
+
+
+class Policy(StrEnum):
+    MERGE = "merge"
+    SYNC = "sync"
+
+
+POLICY_CHOICES = [
+    (Policy.MERGE.value, "Дополнить список — отсутствующие остаются активными"),
+    (Policy.SYNC.value, "Полный список — отключить отсутствующие анкоры"),
+]
+
+
+def policy(mapping: Mapping[str, str] | None) -> Policy:
+    return Policy((mapping or {}).get(POLICY_KEY, Policy.MERGE))
+
+
+class Mode(StrEnum):
+    AUTO = "auto"
+    NAKED = "naked"
+
+
+MODE_CHOICES = [
+    (Mode.AUTO.value, "Определить по файлу"),
+    (Mode.NAKED.value, "Все строки — безанкорные ссылки"),
+]
+
+
+def mode(mapping: Mapping[str, str] | None) -> Mode:
+    return Mode((mapping or {}).get(MODE_KEY, Mode.AUTO))
+
+
+def column_mapping(mapping: Mapping[str, str]) -> dict[str, "AField"]:
+    return {
+        key: AField(value) for key, value in mapping.items() if key not in (MODE_KEY, POLICY_KEY)
+    }
+
 
 class AField(StrEnum):
     """Куда записать колонку файла анкоров. Значение хранится в разметке загрузки."""
@@ -71,6 +112,7 @@ class AField(StrEnum):
     GLOBAL_VOLUME = "global_volume"
     TOOL = "tool"
     PAGE_TYPE = "page_type"
+    SHARE = "share"
     POSITION = "position"
     SKIP = "skip"
 
@@ -86,6 +128,7 @@ FIELD_LABELS: dict[AField, str] = {
     AField.GLOBAL_VOLUME: "Глобальный объём (Global Volume)",
     AField.TOOL: "Раздел сайта (Tool)",
     AField.PAGE_TYPE: "Тип страницы (Type)",
+    AField.SHARE: "Доля внутри безанкорки, %",
     AField.POSITION: "Позиция на дату из заголовка («Pos 22.09.26»)",
     AField.SKIP: "Не загружать",
 }
@@ -108,6 +151,7 @@ _EXACT: dict[str, AField] = {
     ),
     **dict.fromkeys(("tool", "раздел", "раздел сайта", "категория"), AField.TOOL),
     **dict.fromkeys(("type", "тип", "тип страницы", "page type"), AField.PAGE_TYPE),
+    **dict.fromkeys(("%", "share", "share %", "доля", "доля, %", "доля %"), AField.SHARE),
 }
 # Placed и Waiting в таблице — формулы; система считает их сама.
 _COUNTED = frozenset(
@@ -260,10 +304,14 @@ class Parsed:
     countries: list[CountryRow] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
     rows: int = 0
+    naked_only: bool = False
 
 
-def parse_anchors(table: Table, mapping: Mapping[str, AField], parsed: Parsed) -> None:
+def parse_anchors(
+    table: Table, mapping: Mapping[str, AField], parsed: Parsed, *, as_naked: bool = False
+) -> None:
     """Строки листа анкоров по разметке. Дубль анкора — в замечания, берётся первая."""
+    parsed.naked_only = as_naked
     by_field: dict[AField, int] = {}
     positions: list[tuple[int, dt.date]] = []
     for column in table.columns:
@@ -277,6 +325,7 @@ def parse_anchors(table: Table, mapping: Mapping[str, AField], parsed: Parsed) -
         elif value != AField.SKIP:
             by_field[value] = column.index
     seen: set[str] = set()
+    naked: list[tuple[str, str, Decimal | None]] = []
     for row in table.rows:
         parsed.rows += 1
         keyword = " ".join(show(row.get(by_field[AField.KEYWORD])).split())
@@ -290,6 +339,11 @@ def parse_anchors(table: Table, mapping: Mapping[str, AField], parsed: Parsed) -
             parsed.issues.append(f"Строка {row.line}: «{keyword}» уже был выше — беру первый.")
             continue
         seen.add(keyword.casefold())
+        if as_naked:
+            share_at = by_field.get(AField.SHARE)
+            naked.append(
+                (keyword, url, _decimal(row.get(share_at)) if share_at is not None else None)
+            )
         parsed.anchors.append(
             AnchorRow(
                 line=row.line,
@@ -307,6 +361,11 @@ def parse_anchors(table: Table, mapping: Mapping[str, AField], parsed: Parsed) -
                     if (position := _position(row.get(index))) is not _MISSING
                 ),
             )
+        )
+    if as_naked:
+        fraction = _fractions(share for _, _, share in naked)
+        parsed.naked.extend(
+            NakedRow(text, url, _pct(share, fraction)) for text, url, share in naked
         )
 
 
@@ -358,10 +417,15 @@ def _parse_naked(rows: Sequence[Sequence[object]], headers: list[str], parsed: P
     url_at = _find(headers, "url")
     share_at = headers.index("%")
     raw: list[tuple[str, str, Decimal | None]] = []
+    seen = {row.text.casefold() for row in parsed.naked}
     for cells in rows:
         text = " ".join(show(_cell(cells, text_at)).split())
         url = show(_cell(cells, url_at)).strip()
         if text and url.startswith(("http://", "https://")):
+            if text.casefold() in seen:
+                # Явная разметка уже прочитала этот лист; дубль не создаёт запись.
+                continue
+            seen.add(text.casefold())
             raw.append((text, url, _decimal(_cell(cells, share_at))))
     fraction = _fractions(share for _, _, share in raw)
     parsed.naked.extend(NakedRow(text, url, _pct(share, fraction)) for text, url, share in raw)
@@ -429,6 +493,8 @@ class AnchorPlan:
     quiet: list[Change] = field(default_factory=list)
     same: int = 0
     missing: list[str] = field(default_factory=list)
+    deactivate: list[Keyword] = field(default_factory=list)
+    reactivated: set[int] = field(default_factory=set)
     positions_new: int = 0
     positions_changed: int = 0
     positions_same: int = 0
@@ -444,12 +510,18 @@ class AnchorPlan:
 
     def summary(self) -> dict[str, Any]:
         parsed = self.parsed
+        naked = {r.text.casefold(): naked_type(r.text, self.product).label for r in parsed.naked}
         dates = sorted({date for row in parsed.anchors for date, _ in row.positions})
         return {
             "rows": parsed.rows,
             "anchors": len(parsed.anchors),
             "new": [
-                {"keyword": r.keyword, "url": r.url, "page_type": r.page_type or ""}
+                {
+                    "keyword": r.keyword,
+                    "url": r.url,
+                    "page_type": r.page_type or "",
+                    "naked_type": naked.get(r.keyword.casefold(), ""),
+                }
                 for r in self.new[:SHOWN]
             ],
             "new_total": len(self.new),
@@ -460,6 +532,9 @@ class AnchorPlan:
             "same": self.same,
             "missing": self.missing[:SHOWN],
             "missing_total": len(self.missing),
+            "deactivated_total": len(self.deactivate),
+            "reactivated_total": len(self.reactivated),
+            "naked_only": parsed.naked_only,
             "dates": [f"{date:%d.%m.%Y}" for date in dates],
             "positions_new": self.positions_new,
             "positions_changed": self.positions_changed,
@@ -474,6 +549,7 @@ class AnchorPlan:
             "naked_new": len(self.naked_new),
             "naked_changed": len(self.naked_changed),
             "naked_same": self.naked_same,
+            "naked_total": len(parsed.naked),
             "types": [_type_json(r, None) for r in self.types_new]
             + [_type_json(r, s) for s, r in self.types_changed],
             "types_new": len(self.types_new),
@@ -496,7 +572,8 @@ class AnchorPlan:
     @property
     def nothing(self) -> bool:
         return not (
-            self.new
+            self.deactivate
+            or self.new
             or self.changed
             or self.positions_new
             or self.positions_changed
@@ -518,7 +595,13 @@ _FACTS = (
 )
 
 
-def build_plan(parsed: Parsed, product: Product) -> AnchorPlan:
+def build_plan(parsed: Parsed, product: Product, *, sync: bool = False) -> AnchorPlan:
+    if sync and (not parsed.anchors and not parsed.naked):
+        raise ValueError("Полный список пуст: отключение анкоров не выполнено.")
+    if sync and parsed.issues:
+        raise ValueError(
+            "В полном списке есть замечания. Исправьте файл или выберите дополнение списка."
+        )
     plan = AnchorPlan(product=product, parsed=parsed)
     existing = _by_text(product)
     in_file: set[str] = set()
@@ -543,6 +626,7 @@ def build_plan(parsed: Parsed, product: Product) -> AnchorPlan:
         if keyword.anchor_type is None:
             values["anchor_type"] = AnchorType.EXACT
         if not keyword.is_active:
+            plan.reactivated.add(keyword.pk)
             values["is_active"] = True
             shown.append(("Активен", "нет", "да"))
         if shown:
@@ -552,11 +636,18 @@ def build_plan(parsed: Parsed, product: Product) -> AnchorPlan:
             if values:
                 # Только тип «прямой» у ключа без типа — человеку это не новость.
                 plan.quiet.append(Change(keyword, values, []))
-    plan.missing = sorted(
-        k.keyword
-        for key, k in existing.items()
-        if key not in in_file and k.is_active and k.anchor_type not in NAKED_TYPES
-    )
+    in_file.update(row.text.casefold() for row in parsed.naked)
+    scope = [
+        k
+        for k in Keyword.objects.filter(product=product, is_active=True)
+        if k.keyword.casefold() not in in_file
+        and (
+            (k.anchor_type in NAKED_TYPES and bool(parsed.naked))
+            or (k.anchor_type not in NAKED_TYPES and not parsed.naked_only)
+        )
+    ]
+    plan.missing = sorted(k.keyword for k in scope)
+    plan.deactivate = scope if sync else []
     _plan_positions(plan, known_rows)
     _plan_naked(plan, existing)
     _plan_types(plan)
@@ -590,8 +681,14 @@ def _plan_naked(plan: AnchorPlan, existing: dict[str, Keyword]) -> None:
         keyword = existing.get(row.text.casefold())
         if keyword is None:
             plan.naked_new.append(row)
-        elif keyword.share != row.share or keyword.anchor_type not in NAKED_TYPES:
+        elif (
+            (row.share is not None and keyword.share != row.share)
+            or keyword.anchor_type not in NAKED_TYPES
+            or not keyword.is_active
+        ):
             plan.naked_changed.append((keyword, row))
+            if not keyword.is_active:
+                plan.reactivated.add(keyword.pk)
         else:
             plan.naked_same += 1
 
@@ -639,6 +736,8 @@ def write(plan: AnchorPlan) -> dict[str, int]:
         "types": 0,
         "countries": 0,
         "links": 0,
+        "deactivated": 0,
+        "reactivated": len(plan.reactivated),
     }
     with transaction.atomic():
         created: dict[str, Keyword] = {}
@@ -663,6 +762,9 @@ def write(plan: AnchorPlan) -> dict[str, int]:
         counts["naked"] = _write_naked(plan)
         counts["types"] = _write_types(plan)
         counts["countries"] = _write_countries(plan)
+        counts["deactivated"] = Keyword.objects.filter(
+            product=product, pk__in=[k.pk for k in plan.deactivate], is_active=True
+        ).update(is_active=False)
         counts["links"] = attach_links(product)
     return counts
 
@@ -688,20 +790,37 @@ def _write_positions(plan: AnchorPlan, created: dict[str, Keyword]) -> int:
 def _write_naked(plan: AnchorPlan) -> int:
     """Безанкорные анкоры: тип по тексту, тип страницы — как у ключа с тем же адресом."""
     page_types = _page_types_by_url(plan.product)
+    # CSV безанкорки и строки книги могут попасть и в основной лист анкоров.
+    # Их уже записала первая часть этой транзакции: используем свежий список.
+    existing = _by_text(plan.product)
     written = 0
     for row in plan.naked_new:
-        Keyword.objects.create(
-            product=plan.product,
-            keyword=row.text,
-            target_url=row.url,
-            anchor_type=naked_type(row.text, plan.product),
-            page_type=page_types.get(_url_key(row.url)),
-            share=row.share,
-        )
+        keyword = existing.get(row.text.casefold())
+        if keyword is None:
+            keyword = Keyword.objects.create(
+                product=plan.product,
+                keyword=row.text,
+                target_url=row.url,
+                anchor_type=naked_type(row.text, plan.product),
+                page_type=page_types.get(_url_key(row.url)),
+                share=row.share,
+            )
+            existing[row.text.casefold()] = keyword
+        else:
+            if row.share is not None:
+                keyword.share = row.share
+            keyword.anchor_type = naked_type(row.text, plan.product)
+            keyword.page_type = keyword.page_type or page_types.get(_url_key(row.url))
+            keyword.save(update_fields=["share", "anchor_type", "page_type"])
         written += 1
     for keyword, row in plan.naked_changed:
-        keyword.share = row.share
-        fields = ["share"]
+        fields = []
+        if not keyword.is_active:
+            keyword.is_active = True
+            fields.append("is_active")
+        if row.share is not None:
+            keyword.share = row.share
+            fields.append("share")
         if keyword.anchor_type not in NAKED_TYPES:
             keyword.anchor_type = naked_type(row.text, plan.product)
             fields.append("anchor_type")

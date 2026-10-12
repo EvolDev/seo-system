@@ -177,6 +177,182 @@ def test_second_load_of_same_file_changes_nothing(convertio: Product) -> None:
     assert summary["countries_changed"] == 0
 
 
+def test_naked_csv_is_written_once_and_classified(convertio: Product) -> None:
+    data = b"Anchor text,URL,%\nhttps://convertio.co/,https://convertio.co/,8.68\nConvertio,https://convertio.co/,56.86\nhere,https://convertio.co/,1.13\n"
+    upload = service.create_upload(
+        SimpleUploadedFile("naked.csv", data),
+        kind=UploadKind.ANCHORS,
+        seller=None,
+        product=convertio,
+        prices_date=dt.date(2026, 10, 8),
+    ).upload
+    service.start(upload, UploadStatus.CHECKING)
+    upload_check.delay(upload.pk)
+    _write(upload)
+    assert Keyword.objects.filter(product=convertio).count() == 3
+    assert Keyword.objects.get(keyword="https://convertio.co/").anchor_type == AnchorType.URL
+    assert Keyword.objects.get(keyword="Convertio").share == D("56.86")
+    assert Keyword.objects.get(keyword="here").anchor_type == AnchorType.GENERIC
+    assert service.anchors_plan(upload).nothing
+
+
+def test_keyword_on_both_workbook_sheets_is_not_duplicated(convertio: Product) -> None:
+    rows = [
+        ["CONVERTIO", "https://convertio.co/", 10, None, None, None, 7, None, "Main", "Главная"]
+    ]
+    upload = _write(_load(convertio, _book(rows)))
+    keyword = Keyword.objects.get(product=convertio, keyword="CONVERTIO")
+    assert (keyword.anchor_type, keyword.share, keyword.volume) == (
+        AnchorType.BRANDED,
+        D("56.86"),
+        10,
+    )
+    assert Keyword.objects.filter(product=convertio, keyword__iexact="convertio").count() == 1
+    assert service.anchors_plan(upload).nothing
+
+
+def _naked_csv(product: Product, data: bytes, *, mode: anchors.Mode = anchors.Mode.NAKED) -> Upload:
+    return service.create_upload(
+        SimpleUploadedFile("naked.csv", data),
+        kind=UploadKind.ANCHORS,
+        seller=None,
+        product=product,
+        prices_date=dt.date(2026, 10, 8),
+        anchor_mode=mode,
+    ).upload
+
+
+def test_explicit_naked_mode_without_percent_keeps_existing_share(convertio: Product) -> None:
+    existing = Keyword.objects.create(
+        product=convertio,
+        keyword="Convertio",
+        target_url="https://convertio.co/",
+        anchor_type=AnchorType.BRANDED,
+        share=D("56.86"),
+    )
+    upload = _naked_csv(
+        convertio,
+        b"Keyword,URL,Volume\nConvertio,https://convertio.co/,10\nhere,https://convertio.co/,20\n",
+    )
+    service.start(upload, UploadStatus.CHECKING)
+    upload_check.delay(upload.pk)
+    _write(upload)
+    existing.refresh_from_db()
+    assert existing.share == D("56.86")
+    assert Keyword.objects.get(keyword="here").share is None
+    assert Keyword.objects.get(keyword="here").anchor_type == AnchorType.GENERIC
+    assert service.anchors_plan(upload).nothing
+
+
+def test_naked_share_can_be_mapped_manually_and_mode_survives_prepare(convertio: Product) -> None:
+    upload = _naked_csv(
+        convertio,
+        b"Keyword,URL,Weight\nConvertio,https://convertio.co/,56.86\nhere,https://convertio.co/,1.13\n",
+    )
+    assert (
+        service.confirm_mapping(upload, {"keyword": "keyword", "url": "url", "weight": "share"}, "")
+        == []
+    )
+    assert anchors.mode(upload.mapping) == anchors.Mode.NAKED
+    service.prepare(upload)
+    assert anchors.mode(upload.mapping) == anchors.Mode.NAKED
+    assert (
+        service.confirm_mapping(upload, {"keyword": "keyword", "url": "url", "weight": "share"}, "")
+        == []
+    )
+    service.start(upload, UploadStatus.CHECKING)
+    upload_check.delay(upload.pk)
+    _write(upload)
+    assert Keyword.objects.get(keyword="Convertio").share == D("56.86")
+    assert Keyword.objects.get(keyword="here").share == D("1.13")
+
+
+def test_mode_is_part_of_same_file_detection(convertio: Product) -> None:
+    data = b"Keyword,URL\nConvertio,https://convertio.co/\n"
+    upload = _naked_csv(convertio, data, mode=anchors.Mode.AUTO)
+    service.start(upload, UploadStatus.CHECKING)
+    upload_check.delay(upload.pk)
+    _write(upload)
+    upload.mapping = {k: v for k, v in (upload.mapping or {}).items() if k != anchors.MODE_KEY}
+    upload.save(update_fields=["mapping"])
+    same = _naked_csv(convertio, data, mode=anchors.Mode.AUTO)
+    assert same.pk == upload.pk  # Старые загрузки без параметра считаются автоматическими.
+    different = _naked_csv(convertio, data)
+    assert different.pk != upload.pk and anchors.mode(different.mapping) == anchors.Mode.NAKED
+    service.start(different, UploadStatus.CHECKING)
+    upload_check.delay(different.pk)
+    _write(different)
+    assert Keyword.objects.get(keyword="Convertio").anchor_type == AnchorType.BRANDED
+    assert _naked_csv(convertio, data).pk == different.pk
+
+
+def test_naked_csv_case_duplicates_keep_first_share(convertio: Product) -> None:
+    upload = _naked_csv(
+        convertio,
+        b"Anchor text,URL,%\nConvertio,https://convertio.co/,56.86\nCONVERTIO,https://convertio.co/,20.00\n",
+        mode=anchors.Mode.AUTO,
+    )
+    plan = service.anchors_plan(upload)
+    assert len(plan.parsed.naked) == 1 and len(plan.parsed.issues) == 1
+    service.start(upload, UploadStatus.CHECKING)
+    upload_check.delay(upload.pk)
+    _write(upload)
+    assert Keyword.objects.get(keyword="Convertio").share == D("56.86")
+
+
+def test_columns_can_switch_existing_upload_to_naked(
+    admin_client: Client, convertio: Product
+) -> None:
+    upload = _naked_csv(
+        convertio, b"Keyword,URL\nConvertio,https://convertio.co/\n", mode=anchors.Mode.AUTO
+    )
+    response = admin_client.post(
+        reverse("admin:sites_upload_columns", args=[upload.pk]),
+        {
+            "field:keyword": "keyword",
+            "load:keyword": "1",
+            "field:url": "url",
+            "load:url": "1",
+            "anchor_mode": "naked",
+        },
+    )
+    assert response.status_code == 302
+    upload.refresh_from_db()
+    assert anchors.mode(upload.mapping) == anchors.Mode.NAKED
+    page = admin_client.get(
+        reverse("admin:sites_upload_summary", args=[upload.pk])
+    ).content.decode()
+    assert "Безанкорка: Бренд" in page
+    assert (upload.summary or {})["naked_total"] == 1
+    _write(upload)
+    assert Keyword.objects.get(keyword="Convertio").anchor_type == AnchorType.BRANDED
+
+
+def test_upload_form_persists_naked_choice(admin_client: Client, convertio: Product) -> None:
+    response = admin_client.post(
+        reverse("admin:sites_upload_add"),
+        {
+            "kind": "anchors",
+            "product": convertio.pk,
+            "prices_date": "2026-10-08",
+            "anchor_mode": "naked",
+            "file": SimpleUploadedFile("naked.csv", b"Keyword,URL\nhere,https://convertio.co/\n"),
+        },
+    )
+    assert response.status_code == 302
+    upload = Upload.objects.latest("pk")
+    assert anchors.mode(upload.mapping) == anchors.Mode.NAKED
+    assert service.anchors_plan(upload).summary()["new"][0]["naked_type"] == "Нейтральное слово"
+
+
+def test_invalid_mode_returns_mapping_error(convertio: Product) -> None:
+    upload = _naked_csv(convertio, b"Keyword,URL\nhere,https://convertio.co/\n")
+    errors = service.confirm_mapping(
+        upload, {"keyword": "keyword", "url": "url", anchors.MODE_KEY: "unknown"}, ""
+    )
+    assert errors and anchors.mode(upload.mapping) == anchors.Mode.NAKED
+
+
 def test_merge_keeps_what_file_lacks(convertio: Product) -> None:
     own = Keyword.objects.create(
         product=convertio, keyword="heic to jpg", target_url="https://convertio.co/heic-jpg/"

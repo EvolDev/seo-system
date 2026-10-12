@@ -350,6 +350,7 @@ class PlacementAdmin(RecordAdmin):
         "announce_price_cell",
         "writing_price_cell",
         "paid_cell",
+        "link_type_cell",
         "indexed_cell",
         "indexed_at_cell",
         "skip_checks",
@@ -365,6 +366,7 @@ class PlacementAdmin(RecordAdmin):
         "status",
         InvoiceFilter,
         "placement_type",
+        "link_type",
         "is_indexed",
         "skip_checks",
     )
@@ -402,6 +404,7 @@ class PlacementAdmin(RecordAdmin):
                     "collaborator_order_id",
                     "ordered_at",
                     ("price_paid_cents", "currency"),
+                    "link_type",
                     "ad_label_requested",
                 )
             },
@@ -457,6 +460,8 @@ class PlacementAdmin(RecordAdmin):
         if site is not None and site.price is not None:
             initial.setdefault("seller", site.price.seller_id)
             initial.setdefault("placement_type", site.price.placement_type)
+            if str(initial.get("seller")) == str(site.price.seller_id):
+                initial.setdefault("link_type", site.price.link_type)
         return initial
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Placement]:
@@ -950,6 +955,10 @@ class PlacementAdmin(RecordAdmin):
     def writing_price_cell(self, obj: Placement) -> str:
         price = obj.site.price
         return money(price.writing_cents, price.currency) if price is not None else ""
+
+    @admin.display(description="тип ссылки", ordering="link_type", empty_value="")
+    def link_type_cell(self, obj: Placement) -> str:
+        return obj.link_type or ""
 
     @admin.display(description="заплачено", ordering="price_paid_cents")
     def paid_cell(self, obj: Placement) -> SafeString | str:

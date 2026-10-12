@@ -12,7 +12,7 @@ from django.utils import timezone
 from apps.workspace.models import UserSettings
 
 # Разделы карточки в порядке на экране; ключи — те же, что data-section в разметке.
-SECTIONS = ("price", "notes", "gray", "data")
+SECTIONS = ("price", "notes", "gray", "ahrefs", "data")
 
 
 def closed_sections(user: AbstractBaseUser | AnonymousUser) -> frozenset[str]:

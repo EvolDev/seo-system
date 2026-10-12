@@ -1,7 +1,10 @@
 """Карточка площадки (E9-13, ADR-058): раскладка, лента заметок, свёрнутые разделы."""
 
 import datetime as dt
+import re
+from html import unescape
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.contrib.auth.models import User
@@ -248,3 +251,41 @@ def test_page_has_same_layout(admin_client: Client, site: Site) -> None:
     panel = _card(admin_client, site)
     assert '<h2 class="seo-panel-title seo-card-title">' in panel
     assert "data-panel-close" in panel and "Открыть полностью" in panel
+
+
+@pytest.mark.parametrize("partial", [True, False])
+def test_ahrefs_report_links_for_current_site(
+    admin_client: Client, admin_user: User, site: Site, partial: bool
+) -> None:
+    card.set_closed(admin_user, ("ahrefs",), closed=True)
+    page = _card(admin_client, site, partial=partial)
+    section = _section(page, "ahrefs")
+    assert "seo-closed" in section
+    assert 'data-jump="ahrefs"' in page
+    assert page.index('id="card-gray"') < page.index('id="card-ahrefs"')
+    assert page.index('id="card-ahrefs"') < page.index('id="card-data"')
+    links = re.findall(r'<a [^>]*href="([^"]+)"[^>]*target="_blank"[^>]*>', section)
+    assert len(links) == 2
+    assert section.count('rel="noopener noreferrer"') == 2
+    for link, report, interval in zip(
+        links, ("overview", "top-pages"), ("year2", "year5"), strict=True
+    ):
+        parsed = urlsplit(unescape(link))
+        assert (parsed.scheme, parsed.netloc, parsed.path) == (
+            "https",
+            "app.ahrefs.com",
+            f"/site-explorer/{report}",
+        )
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        assert query["target"] == [site.domain]
+        assert query["mode"] == ["subdomains"]
+        assert query["country"] == ["all"]
+        assert query["chartInterval"] == [interval]
+        if report == "top-pages":
+            assert query["sort"] == ["TrafficInitial"]
+            assert query["sortDirection"] == ["desc"]
+            assert query["compareDate"] == ["prevMonth"]
+        else:
+            assert query["generalChartPerformanceSources"] == [
+                "domainRating||organicTraffic||paidTraffic||refDomains"
+            ]

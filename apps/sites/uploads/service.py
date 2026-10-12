@@ -23,6 +23,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import connection, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.content.domain_settings import offer_recheck, upload_price_cap
@@ -82,6 +83,8 @@ def create_upload(
     country: str | None = None,
     product: Product | None = None,
     employee: User | None = None,
+    anchor_mode: anchors.Mode = anchors.Mode.AUTO,
+    anchor_policy: anchors.Policy = anchors.Policy.MERGE,
     author: Any = None,
 ) -> Created:
     """Сохраняет файл и читает его колонки. Тот же файл с той же датой — прежняя загрузка.
@@ -108,10 +111,34 @@ def create_upload(
         prices_date=prices_date,
         file_sha256=sha,
         status=UploadStatus.DONE,
-    ).first()
-    if done is not None:
+    )
+    if kind == UploadKind.ANCHORS:
+        # Один файл, размеченный по-разному, — разные загрузки.
+        if anchor_mode == anchors.Mode.AUTO:
+            done = done.filter(
+                Q(mapping__contains={anchors.MODE_KEY: anchor_mode.value})
+                | ~Q(mapping__has_key=anchors.MODE_KEY)
+            )
+        else:
+            done = done.filter(mapping__contains={anchors.MODE_KEY: anchor_mode.value})
+        if anchor_policy == anchors.Policy.MERGE:
+            done = done.filter(
+                Q(mapping__contains={anchors.POLICY_KEY: anchor_policy.value})
+                | ~Q(mapping__has_key=anchors.POLICY_KEY)
+            )
+        else:
+            done = done.filter(mapping__contains={anchors.POLICY_KEY: anchor_policy.value})
+    previous = done.first()
+    if previous is not None and kind == UploadKind.ANCHORS:
+        # Тот же файл может снова включить анкор, выключенный после прошлой загрузки.
+        try:
+            if not anchors_plan(previous).nothing:
+                previous = None
+        except (FileError, ValueError):
+            previous = None
+    if previous is not None:
         target.unlink()
-        return Created(done, duplicate=True)
+        return Created(previous, duplicate=True)
     upload = Upload.objects.create(
         kind=kind,
         seller=seller,
@@ -123,6 +150,9 @@ def create_upload(
         file_path=str(relative),
         file_sha256=sha,
         author=author,
+        mapping={anchors.MODE_KEY: anchor_mode.value, anchors.POLICY_KEY: anchor_policy.value}
+        if kind == UploadKind.ANCHORS
+        else None,
     )
     prepare(upload)
     return Created(upload, duplicate=False)
@@ -193,7 +223,12 @@ def prepare(upload: Upload, *, header_row: int | None = None) -> None:
             | {"ask": c.key in questions}
             for c in table.columns
         ]
-        upload.mapping = {key: guess.field.value for key, guess in marks.items()}
+        selected_mode = anchors.mode(upload.mapping)
+        selected_policy = anchors.policy(upload.mapping)
+        upload.mapping = {key: guess.field.value for key, guess in marks.items()} | {
+            anchors.MODE_KEY: selected_mode.value,
+            anchors.POLICY_KEY: selected_policy.value,
+        }
         upload.currency = None
     elif upload.kind == UploadKind.PLACEMENTS:
         # Память — по прошлым загрузкам размещений, не у продавца (ADR-051).
@@ -296,7 +331,9 @@ def mapping_errors(upload: Upload, mapping: Mapping[str, str]) -> list[str]:
             placement_fields = {key: PField(value) for key, value in mapping.items()}
             return placement_columns.validate_mapping(placement_fields, columns)
         if upload.kind == UploadKind.ANCHORS:
-            anchor_fields = {key: anchors.AField(value) for key, value in _skip(mapping).items()}
+            anchors.mode(mapping)
+            anchors.policy(mapping)
+            anchor_fields = anchors.column_mapping(_skip(mapping))
             return anchors.validate_mapping(anchor_fields, columns)
         fields = {key: Field(value) for key, value in mapping.items()}
     except ValueError:
@@ -315,7 +352,14 @@ def confirm_mapping(upload: Upload, mapping: Mapping[str, str], currency: str) -
         # Денег в файле анкоров нет — валюта не нужна.
         if errors:
             return errors
-        upload.mapping = _skip(mapping)
+        upload.mapping = _skip(mapping) | {
+            anchors.MODE_KEY: anchors.mode(
+                mapping if anchors.MODE_KEY in mapping else upload.mapping
+            ).value,
+            anchors.POLICY_KEY: anchors.policy(
+                mapping if anchors.POLICY_KEY in mapping else upload.mapping
+            ).value,
+        }
         upload.columns = [
             column
             | {"field": upload.mapping.get(column["key"], anchors.AField.SKIP.value), "ask": False}
@@ -729,11 +773,22 @@ def _skip(mapping: Mapping[str, str]) -> dict[str, str]:
 def anchors_plan(upload: Upload) -> anchors.AnchorPlan:
     """Файл анкоров → план по свежему состоянию базы: сводка и запись строят его одинаково."""
     table = _table(upload, header_row=upload.header_row)
-    mapping = {key: anchors.AField(value) for key, value in (upload.mapping or {}).items()}
+    mapping = anchors.column_mapping(upload.mapping or {})
     parsed = anchors.Parsed()
-    anchors.parse_anchors(table, mapping, parsed)
+    anchors.parse_anchors(
+        table,
+        mapping,
+        parsed,
+        as_naked=anchors.mode(upload.mapping) == anchors.Mode.NAKED
+        or anchors.AField.SHARE in mapping.values(),
+    )
     anchors.read_shares(file_path(upload), parsed)
-    return anchors.build_plan(parsed, upload.get_product())
+    try:
+        return anchors.build_plan(
+            parsed, upload.get_product(), sync=anchors.policy(upload.mapping) == anchors.Policy.SYNC
+        )
+    except ValueError as error:
+        raise FileError(str(error)) from error
 
 
 def _check_anchors(upload: Upload) -> None:

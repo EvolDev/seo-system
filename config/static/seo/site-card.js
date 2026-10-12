@@ -124,6 +124,21 @@
     document.addEventListener("click", function (event) {
       var target = event.target;
       if (!target.closest || !cardOf(target)) return;
+      var priceButton = target.closest("[data-price-open], [data-price-cancel]");
+      if (priceButton) {
+        var editor = priceButton.closest("[data-price-editor]");
+        var priceForm = editor.querySelector("[data-price-form]");
+        priceForm.hidden = priceButton.hasAttribute("data-price-cancel");
+        if (!priceForm.hidden) {
+          var amount = priceForm.querySelector("[name=amount]");
+          amount.focus();
+          amount.select();
+        } else {
+          priceForm.reset();
+          editor.querySelector("[data-price-open]").focus();
+        }
+        return;
+      }
       var toggleButton = target.closest(".seo-card-toggle");
       if (toggleButton) {
         toggle(toggleButton.closest(SECTION));
@@ -148,6 +163,14 @@
           syncAll(cardOf(section));
         }
       }
+    });
+
+    document.addEventListener("change", function (event) {
+      var field = event.target;
+      if (!field.matches || !field.matches("[data-link-type]") || !cardOf(field)) return;
+      var form = field.closest("form");
+      if (form.requestSubmit) form.requestSubmit();
+      else form.submit();
     });
 
     document.addEventListener("keydown", function (event) {

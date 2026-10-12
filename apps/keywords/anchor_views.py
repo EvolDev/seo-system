@@ -11,11 +11,12 @@ from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.db.models.functions import Lower
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.content.domain_settings import anchor_recommend
 from apps.keywords.anchors import Anchor, TypeStat, overview, pct_text, recommend
@@ -49,6 +50,10 @@ def page_context(request: HttpRequest, product_id: int | None) -> dict[str, Any]
     if product is None:
         return {"anchors_page": None}
     data = overview(product.pk)
+    inactive = Keyword.objects.filter(product=product, is_active=False).count()
+    inactive_query = request.GET.copy()
+    inactive_query["activity"] = "inactive"
+    inactive_query.pop("p", None)
     naked = [a for a in data.anchors if a.is_naked]
     naked_links = sum(a.links for a in naked)
     keys = [a for a in data.anchors if not a.is_naked]
@@ -61,6 +66,8 @@ def page_context(request: HttpRequest, product_id: int | None) -> dict[str, Any]
     return {
         "anchors_page": {
             "product": product,
+            "inactive_count": inactive,
+            "inactive_url": request.path + "?" + inactive_query.urlencode(),
             "data": data,
             "keys": len(keys),
             "naked_count": len(naked),
@@ -367,3 +374,23 @@ def summary_view(request: HttpRequest, product_id: int) -> TemplateResponse:
 
 def _digits(value: str | None) -> int:
     return int(value) if value and value.isdigit() else 0
+
+
+def activity_view(request: HttpRequest, keyword_id: int) -> HttpResponse:
+    """Только активность ключа: исторические ссылки не меняются."""
+    if not request.user.has_perm("keywords.change_keyword"):
+        return HttpResponse(status=403)
+    value = request.POST.get("active")
+    if value not in ("0", "1"):
+        return HttpResponse("Выберите состояние анкора.", status=400)
+    keyword = get_object_or_404(Keyword, pk=keyword_id)
+    Keyword.objects.filter(pk=keyword.pk).update(is_active=value == "1")
+    fallback = (
+        reverse("admin:keywords_keywordcoverage_changelist") + f"?product={keyword.product_id}"
+    )
+    target = request.GET.get("next") or fallback
+    if not url_has_allowed_host_and_scheme(
+        target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        target = fallback
+    return HttpResponseRedirect(target)

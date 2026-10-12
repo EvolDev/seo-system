@@ -230,6 +230,7 @@ class KeywordCoverage(models.Model):
     global_volume = models.IntegerField("глобальный объём", null=True)
     page_type = models.TextField("тип страницы", null=True)
     anchor_type = models.TextField("тип анкора", null=True)
+    is_active = models.BooleanField("активен", default=True)
     share = models.DecimalField("доля, %", max_digits=5, decimal_places=2, null=True)
 
     class Meta:

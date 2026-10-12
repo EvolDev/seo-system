@@ -119,9 +119,9 @@ class TestKeywordCoverage:
         row = self._coverage(keyword)
         assert (row["links_placed"], row["links_waiting"]) == (0, 0)
 
-    def test_inactive_keyword_is_hidden(self, keyword: Keyword) -> None:
+    def test_inactive_keyword_keeps_coverage_for_history(self, keyword: Keyword) -> None:
         Keyword.objects.filter(pk=keyword.pk).update(is_active=False)
-        assert _rows("SELECT * FROM v_keyword_coverage WHERE id = %s", keyword.pk) == []
+        assert self._coverage(keyword)["is_active"] is False
 
     def test_last_position_is_latest_in_us(self, keyword: Keyword) -> None:
         KeywordPosition.objects.create(keyword=keyword, position=12, checked_at=date(2026, 8, 1))

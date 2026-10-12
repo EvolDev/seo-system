@@ -44,6 +44,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
   <div class="seo-card-decision">
     <span class="seo-card-product">{{ main.row.product.name }}</span>
     <span class="seo-card-status seo-tone-{{ main.tone }}">{{ main.row.get_status_display }}</span>
+    {% include "admin/sites/site/card_placement_articles.html" with status=main %}
     {% if main.row.comment %}<span class="seo-card-reason">{{ main.row.comment }}</span>{% endif %}
     {% if can_change %}<a class="seo-btn seo-btn-small" href="{{ main.change_url }}" data-panel="{{ main.decision_url }}" title="Решение по площадке у {{ main.row.product.name }}">Сменить статус</a>{% endif %}
     {% include "admin/sites/site/card_status_extra.html" with status=main %}
@@ -52,8 +53,10 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
   {% if statuses|length > 1 %}
   <div class="seo-card-others">
     {% for status in statuses|slice:"1:" %}
-    <span class="seo-card-other">{{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>{% if status.row.comment %} — {{ status.row.comment }}{% endif %}{% if can_change %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
-      {% include "admin/sites/site/card_status_extra.html" %}</span>
+    <div class="seo-card-other">{{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>
+      {% include "admin/sites/site/card_placement_articles.html" %}
+      {% if status.row.comment %} — {{ status.row.comment }}{% endif %}{% if can_change %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
+      {% include "admin/sites/site/card_status_extra.html" %}</div>
     {% endfor %}
   </div>
   {% endif %}
@@ -65,8 +68,9 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
     <a href="#card-price" data-jump="price">Цена и предложения{% if offer_rows %}<span class="seo-card-count">{{ offer_rows|length }}</span>{% endif %}</a>
     <a href="#card-notes" data-jump="notes">Заметки{% if notes %}<span class="seo-card-count">{{ notes|length }}</span>{% endif %}</a>
     <a href="#card-gray" data-jump="gray">Серость</a>
+    <a href="#card-ahrefs" data-jump="ahrefs">Ahrefs</a>
     <a href="#card-data" data-jump="data">Данные из файлов{% if extras %}<span class="seo-card-count">{{ extras|length }}</span>{% endif %}</a>
-    <button type="button" class="seo-card-all" data-card-all>{% if closed|length == 4 %}Развернуть все{% else %}Свернуть все{% endif %}</button>
+    <button type="button" class="seo-card-all" data-card-all>{% if closed|length == card_section_count %}Развернуть все{% else %}Свернуть все{% endif %}</button>
   </nav>
 </header>
 
@@ -77,15 +81,17 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
       {% if can_change %}<a class="seo-btn seo-btn-small" href="{{ add_offer_url }}">＋ Добавить предложение</a>{% endif %}
     </div>
     <div class="seo-card-sec-body" id="card-price-body">
+      {% if price_form.errors %}<div class="seo-price-error" role="alert">{{ price_form.non_field_errors }}{% for field in price_form %}{% if field.errors %}<div>{{ field.label }}: {{ field.errors }}</div>{% endif %}{% endfor %}</div>{% endif %}
       {% if working %}
       <div class="seo-card-working">
-        <span class="seo-card-big">{{ working_price|default:"—" }}</span>
+        {% include "admin/sites/site/price_editor.html" with offer=working price=working_price amount=working_amount latest_id=working_latest_id seller_name=working.seller.name big=True %}
         <span class="seo-chip seo-down">рабочая</span>
         <span class="seo-sub">{{ working.get_placement_type_display }} · {{ working.seller }} · цена от {{ working.checked_at|date:"d.m.Y" }}</span>
       </div>
       <div class="seo-card-kv">
         <span>Написание: <b>{% if working_writing %}{{ working_writing }}{% else %}не предлагает — пишем сами{% endif %}</b></span>
         <span>Анонс: <b>{{ working_announce }}</b></span>
+        <div class="seo-card-link-type">Тип ссылки: {% include "admin/sites/site/link_type_select.html" with offer=working %}</div>
       </div>
       {% else %}
       <p class="seo-sub">Рабочей цены нет — выберите предложение ниже.</p>
@@ -93,17 +99,18 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
       {% if offer_rows %}
       <div class="seo-table-wrap">
         <table class="seo-card-table">
-          <thead><tr><th>Продавец</th><th>Услуга</th><th class="seo-right">Цена</th><th>Разница</th><th>Написание</th><th>Анонс</th>{% if has_gray_price %}<th>Серая</th>{% endif %}<th>Дата</th><th></th></tr></thead>
+          <thead><tr><th>Продавец</th><th>Услуга</th><th class="seo-right">Цена</th><th>Разница</th><th>Написание</th><th>Анонс</th>{% if has_gray_price %}<th>Серая</th>{% endif %}<th>Тип ссылки</th><th>Дата</th><th></th></tr></thead>
           <tbody>
           {% for row in offer_rows %}
             <tr class="{% if row.is_working %}seo-working{% endif %}">
               <td>{{ row.seller }}{% if row.pending and not row.is_working %} <span class="seo-chip seo-info">новое</span>{% endif %}</td>
               <td>{{ row.offer.get_placement_type_display }}</td>
-              <td class="seo-right">{{ row.price }}</td>
+              <td class="seo-right">{% include "admin/sites/site/price_editor.html" with offer=row.offer price=row.price amount=row.amount latest_id=row.offer.pk seller_name=row.offer.seller_name big=False %}</td>
               <td>{% if row.is_working %}<span class="seo-chip seo-down">рабочая</span>{% elif row.other_service %}<span class="seo-flat">другая услуга</span>{% elif row.delta %}{{ row.delta }}{% endif %}</td>
               <td>{{ row.writing|default:"—" }}</td>
               <td>{{ row.announce }}</td>
               {% if has_gray_price %}<td>{{ row.gray }}</td>{% endif %}
+              <td>{% include "admin/sites/site/link_type_select.html" with offer=row.offer %}</td>
               <td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td>
               <td class="seo-right">
                 {% if can_change and not row.is_working %}
@@ -133,7 +140,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
         <div class="seo-table-wrap">
           <table class="seo-card-table"><tbody>
           {% for row in history %}
-            <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{{ row.price }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
+            <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{{ row.price }}</td><td>{{ row.offer.link_type|default_if_none:"" }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
           {% endfor %}
           </tbody></table>
         </div>
@@ -180,6 +187,17 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
   </section>
 
   {% include "admin/sites/site/card_gray.html" %}
+
+  <section class="seo-card-sec{% if 'ahrefs' in closed %} seo-closed{% endif %}" id="card-ahrefs" data-section="ahrefs">
+    <div class="seo-card-sec-h">
+      <h3><button type="button" class="seo-card-toggle" aria-expanded="{% if 'ahrefs' in closed %}false{% else %}true{% endif %}" aria-controls="card-ahrefs-body"><span class="seo-card-chev" aria-hidden="true"></span><span class="seo-card-sec-name">Ahrefs</span><span class="seo-card-sec-summary">Overview · Top pages</span></button></h3>
+      <a class="seo-btn seo-btn-small" href="{{ ahrefs.overview }}" target="_blank" rel="noopener noreferrer" title="Обзор {{ site.domain }} в Ahrefs, новая вкладка">Overview ↗</a>
+      <a class="seo-btn seo-btn-small" href="{{ ahrefs.top_pages }}" target="_blank" rel="noopener noreferrer" title="Топ-страницы {{ site.domain }} в Ahrefs, новая вкладка">Top pages ↗</a>
+    </div>
+    <div class="seo-card-sec-body" id="card-ahrefs-body">
+      <p class="seo-card-hint">Отчёты по всем странам, включая поддомены.</p>
+    </div>
+  </section>
 
   <section class="seo-card-sec{% if 'data' in closed %} seo-closed{% endif %}" id="card-data" data-section="data">
     <div class="seo-card-sec-h">

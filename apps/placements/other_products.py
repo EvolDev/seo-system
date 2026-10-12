@@ -12,6 +12,9 @@
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime
+from urllib.parse import urlsplit
 
 from django.db.models import F
 from django.urls import reverse
@@ -23,6 +26,37 @@ from apps.placements.models import Placement
 # Площадка → её размещения: продукт, его название, самое свежее размещение.
 Row = tuple[int, str, int]
 BySite = dict[int, list[Row]]
+
+
+@dataclass(frozen=True)
+class Article:
+    """Адрес размещения и дата для истории статей в карточке площадки."""
+
+    url: str
+    published_at: datetime | None
+
+
+def articles_by_product(site_id: int) -> dict[int, list[Article]]:
+    """Известные адреса статей, свежие первыми; один запрос на всю карточку."""
+    rows = (
+        Placement.objects.filter(site_id=site_id, article_url__isnull=False)
+        .exclude(article_url="")
+        .order_by("product_id", F("published_at").desc(nulls_last=True), "-pk")
+        .values_list("product_id", "article_url", "published_at")
+    )
+    found: dict[int, list[Article]] = {}
+    for product_id, url, published_at in rows:
+        if url is None:
+            continue
+        url = url.strip()
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            continue
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+            continue
+        found.setdefault(product_id, []).append(Article(url, published_at))
+    return found
 
 
 def by_site(site_ids: Iterable[int]) -> BySite:

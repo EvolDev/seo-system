@@ -97,6 +97,14 @@ body.admin-interface .seo-card-title { margin: 0; font-size: 1.25rem; }
 .seo-card-badge.seo-card-badge-lost { background: var(--darkened-bg, #f0f0f0); color: var(--body-quiet-color, #666); }
 .seo-card-others { display: flex; flex-wrap: wrap; gap: 4px 18px; padding-bottom: 10px; color: var(--body-medium-color, #444); font-size: 0.8125rem; }
 .seo-card-other .seo-status-history { margin-left: 4px; }
+.seo-card-other { flex-basis: 100%; }
+.seo-card-article-link { white-space: nowrap; }
+.seo-card-articles { display: inline-block; margin-left: 6px; vertical-align: baseline; }
+.seo-card-articles > summary { cursor: pointer; color: var(--seo-accent-text, var(--link-fg)); }
+.seo-card-articles[open] { display: block; margin: 6px 0; }
+.seo-card-decision .seo-card-articles[open] { flex-basis: 100%; }
+.seo-card-articles ul { margin: 6px 0 0; padding: 0; list-style: none; }
+.seo-card-articles li { margin: 4px 0; padding: 0; overflow-wrap: anywhere; }
 /* История в закреплённой шапке — не выше пары строк, дальше прокрутка. */
 .seo-card-head ul.seo-status-list { max-height: 7.5em; overflow-y: auto; }
 
@@ -257,6 +265,8 @@ body.admin-interface .seo-card-sec .seo-btn.seo-btn-small { min-height: 28px; pa
 .seo-card .seo-card-table form { margin: 0; }
 .seo-card .seo-card-table .seo-right { text-align: right; }
 .seo-card .seo-inline-form { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.seo-card .seo-link-type-form { margin: 0; }
+.seo-card .seo-card-link-type { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Заметки: поле сверху, лента — новые сверху; у каждой — кто, к какому продукту, когда. */
 .seo-note-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -323,3 +333,16 @@ body.admin-interface .seo-card-sec .seo-btn.seo-btn-small { min-height: 28px; pa
   .seo-panel-body .seo-card { width: auto; }
   .seo-card-all { margin-left: 0; }
 }
+
+/* Цена редактируется рядом с предложением, новый снимок сохраняет историю. */
+.seo-price-editor { display: inline-flex; flex-direction: column; gap: 6px; text-align: left; }
+.seo-price-editor [data-price-display] { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.seo-price-pencil { color: var(--link-fg); background: transparent; border: 0; cursor: pointer; font-size: 18px; padding: 4px 6px; }
+.seo-price-pencil:hover { background: var(--darkened-bg); border-radius: 4px; }
+.seo-price-editor [hidden] { display: none; }
+.seo-price-fields, .seo-price-actions { display: flex; gap: 8px; align-items: center; }
+.seo-price-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.seo-price-fields input { width: 100px; }
+.seo-price-editor form { padding: 8px; border: 1px solid var(--hairline-color); border-radius: 6px; }
+.seo-price-error { max-width: 280px; color: var(--error-fg); white-space: normal; }
+.seo-price-error ul { margin: 4px 0; padding-left: 14px; }

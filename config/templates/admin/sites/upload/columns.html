@@ -11,8 +11,20 @@
 
 {% block content %}
 {% include "admin/sites/upload/_steps.html" %}
-<form method="post" class="seo-upload-form">
+<form method="post" class="seo-upload-form"{% if anchors_kind %} data-anchor-columns{% endif %}>
   {% csrf_token %}
+  {% if anchors_kind %}
+    <div class="form-row">
+      <label for="id_anchor_mode">Состав файла анкоров</label>
+      <select name="anchor_mode" id="id_anchor_mode">{% for value, label in anchor_modes %}<option value="{{ value }}"{% if value == anchor_mode %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <div class="help">Безанкорные ссылки получат тип «Бренд», «Голый адрес» или «Нейтральное слово». Если в файле есть доля, укажите её колонку как «Доля внутри безанкорки, %».</div>
+    </div>
+    <div class="form-row">
+      <label for="id_anchor_policy">Обновление списка анкоров</label>
+      <select name="anchor_policy" id="id_anchor_policy">{% for value, label in anchor_policies %}<option value="{{ value }}"{% if value == anchor_policy %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <div class="help">Полный список сравнивается с активными анкорами загружаемого вида. Файл безанкорки не отключает обычные ключи; книга с обоими списками сравнивает оба.</div>
+    </div>
+  {% endif %}
   {% if errors %}<div class="errornote">{% for error in errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
   <div class="seo-note">
     {% if anchors_kind %}

@@ -9,15 +9,17 @@
     <div class="seo-anchors-actions">
       {% if page.can_add %}<button type="button" class="seo-btn seo-btn-primary" data-anchor-new data-product="{{ page.product.pk|unlocalize }}">＋ Новый анкор</button>{% endif %}
       <a class="seo-btn" href="{{ page.upload_url }}">Загрузить файл анкоров</a>
+      <a class="seo-btn" href="{{ page.inactive_url }}">Неактивные ({{ page.inactive_count }})</a>
     </div>
   </div>
 
+  <p class="seo-sub">Статистика и рекомендации используют активные анкоры. У неактивных сохраняются старые размещения и позиции.</p>
   <dl class="seo-anchors-tiles">
     <div><dt>Ключей</dt><dd>{{ page.keys }}</dd></div>
     <div><dt>Безанкорных</dt><dd>{{ page.naked_count }}</dd></div>
     <div><dt>Размещено</dt><dd class="seo-anchor-placed">{{ page.data.placed }}</dd></div>
     <div><dt>Ждут</dt><dd class="seo-anchor-waiting">{{ page.data.waiting }}</dd></div>
-    <div title="Ссылки, у которых анкор не из списка: старые «Read more», адрес вместо ключа"><dt>Без анкора из списка</dt><dd>{{ page.data.loose_placed|add:page.data.loose_waiting }}</dd></div>
+    <div title="Ссылки без привязанного анкора: старые «Read more», адрес вместо ключа"><dt>Без анкора из списка</dt><dd>{{ page.data.loose_placed|add:page.data.loose_waiting }}</dd></div>
   </dl>
 
   <details class="seo-anchors-block" open>

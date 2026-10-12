@@ -87,7 +87,7 @@ def base(offer: OfferFactory) -> dict[str, Any]:
         total_keywords=15707,
     )
     SiteCountryMetric.objects.create(site=egg, country="us", organic_traffic=60990)
-    offer(egg, 54457, writing_cents=4084, announce_cents=0)
+    offer(egg, 54457, writing_cents=4084, announce_cents=0, link_type="dofollow")
     SiteNote.objects.create(site=egg, body="На доработке пока что")
     pod, late, wait = (
         Site.objects.create(domain=domain) for domain in ("podchaser.com", "late.com", "wait.com")

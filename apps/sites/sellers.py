@@ -180,6 +180,8 @@ def _key(price: SitePrice) -> tuple[Any, ...]:
         price.checked_at,
         price.placement_cents,
         price.currency,
+        price.link_type,
+        price.link_type_manual,
     )
 
 

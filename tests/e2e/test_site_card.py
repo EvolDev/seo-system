@@ -9,6 +9,7 @@
 import datetime as dt
 import re
 from collections.abc import Iterator
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.conf import settings
@@ -132,7 +133,7 @@ def test_collapse_remembered_on_all_cards(
     # «Свернуть все» и обратно.
     with page.expect_response(lambda response: "card-sections" in response.url):
         page.locator(f"{PANEL} [data-card-all]").click()
-    expect(page.locator(f"{PANEL} .seo-card-sec.seo-closed")).to_have_count(4)
+    expect(page.locator(f"{PANEL} .seo-card-sec.seo-closed")).to_have_count(len(card.SECTIONS))
     expect(page.locator(f"{PANEL} [data-card-all]")).to_have_text("Развернуть все")
     with page.expect_response(lambda response: "card-sections" in response.url):
         page.locator(f"{PANEL} [data-card-all]").click()
@@ -203,3 +204,34 @@ def test_note_with_ctrl_enter(
         "Позвонить продавцу",
         "Convertio",
     )
+
+
+@pytest.mark.parametrize("partial", [True, False])
+def test_ahrefs_reports_open_in_new_tabs(
+    admin_page: Page, live_server: LiveServer, sites: list[Site], partial: bool
+) -> None:
+    page = admin_page
+    page.context.route(
+        "https://app.ahrefs.com/**",
+        lambda route: route.fulfill(content_type="text/html", body="Ahrefs test report"),
+    )
+    if partial:
+        page.goto(f"{live_server.url}{SITES}")
+        _open(page, sites[0].domain)
+    else:
+        page.goto(f"{live_server.url}/admin/sites/site/{sites[0].pk}/card/")
+    original_url = page.url
+    page.locator('[data-jump="ahrefs"]').click()
+    section = page.locator('[data-section="ahrefs"]')
+    expect(section).to_be_visible()
+    for label, report in (("Overview ↗", "overview"), ("Top pages ↗", "top-pages")):
+        with page.expect_popup() as opened:
+            section.get_by_role("link", name=label, exact=True).click()
+        popup = opened.value
+        popup.wait_for_load_state()
+        parsed = urlsplit(popup.url)
+        assert parsed.path == f"/site-explorer/{report}"
+        assert parse_qs(parsed.query)["target"] == [sites[0].domain]
+        assert page.url == original_url
+        expect(section).to_be_visible()
+        popup.close()

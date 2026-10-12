@@ -1,0 +1,11 @@
+{% load l10n %}
+{% if can_change_type %}
+<form method="post" action="{{ link_type_url }}" data-card-form class="seo-inline-form seo-link-type-form">{% csrf_token %}
+  <input type="hidden" name="offer" value="{{ offer.pk|unlocalize }}">
+  <select name="link_type" data-link-type aria-label="Тип ссылки {{ offer.seller_name|default:offer.seller }}">
+    <option value=""{% if not offer.link_type %} selected{% endif %}></option>
+    {% for value, label in link_types %}<option value="{{ value }}"{% if offer.link_type == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <noscript><button type="submit">Сохранить</button></noscript>
+</form>
+{% else %}{{ offer.link_type|default_if_none:"" }}{% endif %}

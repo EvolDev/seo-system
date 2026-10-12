@@ -118,14 +118,13 @@ def overview(product_id: int) -> Overview:
             SELECT id, keyword, target_url, page_type, anchor_type, share,
                    links_placed, links_waiting, last_position, volume, global_volume, tool
             FROM v_keyword_coverage
-            WHERE product_id = %s
+            WHERE product_id = %s AND is_active
             ORDER BY id
             """,
             [product_id],
         )
         anchors = tuple(Anchor(*row) for row in cursor.fetchall())
-        # Ссылки без анкора из списка — и с выключенным анкором: в представление
-        # он не попадает.
+        # Непривязанные ссылки учитываем отдельно; выключенные анкоры исключены.
         cursor.execute(
             """
             SELECT COUNT(*) FILTER (WHERE p.status = 'placed'),
@@ -133,7 +132,7 @@ def overview(product_id: int) -> Overview:
             FROM placement_links pl
             JOIN placements p ON p.id = pl.placement_id
             LEFT JOIN keywords k ON k.id = pl.keyword_id
-            WHERE p.product_id = %s AND (pl.keyword_id IS NULL OR NOT k.is_active)
+            WHERE p.product_id = %s AND pl.keyword_id IS NULL
             """,
             [product_id],
         )

@@ -60,6 +60,11 @@ class PlacementForm(DayFieldsForm):
         super().__init__(*args, **kwargs)
         _currency_choices(self, blank=True)
 
+    def clean_link_type(self) -> str | None:
+        # Пустой выбор тоже решение человека: автоматическая подстановка его не отменяет.
+        self.instance.link_type_manual = True
+        return self.cleaned_data.get("link_type") or None
+
     def clean_currency(self) -> str | None:
         value: str = self.cleaned_data.get("currency") or ""
         return value or None

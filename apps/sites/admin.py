@@ -14,6 +14,7 @@ import math
 from collections.abc import Iterable, Iterator
 from collections.abc import Set as AbstractSet
 from contextlib import suppress
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django import forms
@@ -45,7 +46,7 @@ from apps.content.domain_settings import gray_terms, gray_zones
 from apps.content.models import DomainSetting
 from apps.placements import invoices, other_products
 from apps.placements.models import Invoice, InvoiceStatus, Placement
-from apps.sites import ahrefs_domains, countries, gray_scan, offers, rating, sellers
+from apps.sites import ahrefs_domains, ahrefs_links, countries, gray_scan, offers, rating, sellers
 from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
@@ -70,6 +71,7 @@ from apps.sites.export import REGION_AT, REGION_KEYWORDS, REGION_TRAFFIC
 from apps.sites.models import (
     ExchangeRate,
     GrayScan,
+    LinkType,
     PlacementType,
     Product,
     ProductRefDomain,
@@ -200,18 +202,41 @@ def card_url(site_id: int) -> str:
     return reverse("admin:sites_site_card", args=[site_id])
 
 
+class WorkingLinkTypeFilter(admin.SimpleListFilter):
+    title = "тип ссылки"
+    parameter_name = "link_type"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [("empty", "не указан"), *LinkType.choices]
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        field = "link_type" if queryset.model is ProductSiteLatest else "price__link_type"
+        if self.value() == "empty":
+            return queryset.filter(Q(**{f"{field}__isnull": True}) | Q(**{field: ""}))
+        if self.value() in LinkType.values:
+            return queryset.filter(**{field: self.value()})
+        return queryset
+
+
 @admin.register(Site)
 class SiteAdmin(RecordAdmin):
     """Каталог площадок — факты о площадке. Цены и заметки — в её карточке."""
 
     panel = True
-    list_display = ("domain", "working_price", "language", "link_type", "marks_as_ad", "is_deleted")
-    list_filter = (DeletedFilter, "language", "link_type", "marks_as_ad")
+    list_display = (
+        "domain",
+        "working_price",
+        "language",
+        "working_link_type",
+        "marks_as_ad",
+        "is_deleted",
+    )
+    list_filter = (DeletedFilter, "language", WorkingLinkTypeFilter, "marks_as_ad")
     search_fields = ("domain",)
     list_select_related = ("price__seller",)
     # Рабочую цену меняют кнопками карточки и действиями «Площадок», не полем
     # формы: каждая смена — заметка в истории (ADR-043).
-    exclude = ("price",)
+    exclude = ("price", "link_type")
     readonly_fields = ("card_link", "working_price", "created_at", "updated_at")
     inlines = (ProductSiteInline,)
 
@@ -252,6 +277,10 @@ class SiteAdmin(RecordAdmin):
             return "—"
         return f"{offers.describe(price)} · {_day(price.checked_at)}"
 
+    @admin.display(description="тип ссылки", ordering="price__link_type", empty_value="")
+    def working_link_type(self, obj: Site) -> str:
+        return obj.price.link_type or "" if obj.price is not None else ""
+
     @admin.display(description="карточка")
     def card_link(self, obj: Site) -> SafeString | str:
         if obj.pk is None:
@@ -266,6 +295,16 @@ class SiteAdmin(RecordAdmin):
 
     def get_urls(self) -> list[URLPattern]:
         own = [
+            path(
+                "<int:object_id>/card/price/",
+                self.admin_site.admin_view(require_POST(self.card_price_view)),
+                name="sites_site_card_price",
+            ),
+            path(
+                "<int:object_id>/card/link-type/",
+                self.admin_site.admin_view(require_POST(self.card_link_type_view)),
+                name="sites_site_card_link_type",
+            ),
             path(
                 "<int:object_id>/card/",
                 self.admin_site.admin_view(require_GET(self.card_view)),
@@ -325,7 +364,11 @@ class SiteAdmin(RecordAdmin):
         )
 
     def card_view(
-        self, request: HttpRequest, object_id: int, gray_form: "GrayReadingForm | None" = None
+        self,
+        request: HttpRequest,
+        object_id: int,
+        gray_form: "GrayReadingForm | None" = None,
+        price_form: "OfferPriceForm | None" = None,
     ) -> HttpResponse:
         """Карточка: панели (заголовок X-Seo-Partial) — только содержимое, иначе страница.
 
@@ -340,13 +383,21 @@ class SiteAdmin(RecordAdmin):
             **self.admin_site.each_context(request),
             **_card_context(site, working_product_id(request), request.user),
             "gray": gray,
+            "price_form": price_form,
+            "price_offer_id": price_form.data.get("offer") if price_form is not None else None,
+            "can_edit_price": self.has_change_permission(request, site)
+            and request.user.has_perm("sites.add_siteprice")
+            and request.user.has_perm("sites.change_siteprice"),
             # Свёрнутые разделы — у пользователя, на все карточки (ADR-058):
             # сервер сразу отдаёт их свёрнутыми, без мигания при открытии.
             "closed": card_sections.closed_sections(request.user),
+            "card_section_count": len(card_sections.SECTIONS),
             "title": site.domain,
             "subtitle": "Карточка площадки",
             "opts": self.model._meta,
             "can_change": self.has_change_permission(request, site),
+            "can_change_type": self.has_change_permission(request, site)
+            and request.user.has_perm("sites.change_siteprice"),
             "panel": partial,
             "panel_title": site.domain,
             # Название — ссылка на сайт в новой вкладке, рядом — значки «открыть
@@ -367,6 +418,43 @@ class SiteAdmin(RecordAdmin):
         if self.has_change_permission(request, site):
             offer = get_object_or_404(SitePrice, pk=request.POST.get("offer"), site=site)
             offers.set_working_price(offer, author=request.user)
+        return self._back_to_card(request, object_id)
+
+    def card_price_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        site = get_object_or_404(Site.all_objects, pk=object_id)
+        if not self.has_change_permission(request, site) or not all(
+            request.user.has_perm(permission)
+            for permission in ("sites.add_siteprice", "sites.change_siteprice")
+        ):
+            return HttpResponse(status=403)
+        form = OfferPriceForm(request.POST)
+        if form.is_valid():
+            offer = get_object_or_404(SitePrice, pk=form.cleaned_data["offer"], site=site)
+            try:
+                offers.edit_price(
+                    offer,
+                    int(form.cleaned_data["amount"] * 100),
+                    form.cleaned_data["currency"],
+                    expected_latest_id=form.cleaned_data["latest"],
+                    author=request.user,
+                )
+            except ValueError as error:
+                form.add_error(None, str(error))
+            else:
+                return self._back_to_card(request, object_id)
+        return self.card_view(request, object_id, price_form=form)
+
+    def card_link_type_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        site = get_object_or_404(Site.all_objects, pk=object_id)
+        if not self.has_change_permission(request, site) or not request.user.has_perm(
+            "sites.change_siteprice"
+        ):
+            return HttpResponse(status=403)
+        value = request.POST.get("link_type") or None
+        if value is not None and value not in LinkType.values:
+            return JsonResponse({"error": "Неизвестный тип ссылки."}, status=400)
+        offer = get_object_or_404(SitePrice, pk=_posted_id(request, "offer"), site=site)
+        offers.set_link_type(offer, value, author=request.user)
         return self._back_to_card(request, object_id)
 
     def card_keep_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
@@ -437,6 +525,7 @@ def _card_context(
                 "offer": offer,
                 "seller": seller_cell(offer.seller_id, offer.seller_name, seller_marks),
                 "price": price_html(amount),
+                "amount": price_amount(offer.placement_cents),
                 "is_working": working is not None and offer.pk == working.pk,
                 "delta": delta_html(delta(amount, working_amount))
                 if same_service and working_amount is not None
@@ -457,6 +546,7 @@ def _card_context(
         .order_by("-checked_at", "-pk")
     )
     status_history = site_history(site.pk)
+    articles = other_products.articles_by_product(site.pk)
     # Ссылается ли площадка на продукт — по его выгрузке Ahrefs (ADR-051).
     refs = {ref.product_id: ref for ref in ProductRefDomain.objects.filter(domain=site.domain)}
     notes = note_rows(site.notes.select_related("author", "product").order_by("-created_at", "-pk"))
@@ -468,6 +558,7 @@ def _card_context(
         working_eur = offers.money(working.placement_cents, working.currency)
     return {
         "site": site,
+        "ahrefs": ahrefs_links.report_links(site.domain),
         "latest": latest,
         "statuses": [
             {
@@ -477,6 +568,7 @@ def _card_context(
                 "decision_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
                 # Строка «Площадок» — та же строка product_sites (pk общий).
                 "history": status_history.get(row.pk, []),
+                "articles": articles.get(row.product_id, []),
                 "ref": refs.get(row.product_id),
             }
             for row in rows
@@ -501,6 +593,19 @@ def _card_context(
         else "",
         "working": working,
         "working_price": price_html(working_amount) if working_amount else None,
+        "working_amount": price_amount(working.placement_cents) if working else "",
+        "working_latest_id": next(
+            (
+                o.pk
+                for o in current
+                if working is not None
+                and o.seller_id == working.seller_id
+                and o.placement_type == working.placement_type
+            ),
+            working.pk if working else None,
+        ),
+        "currencies": offers.CURRENCIES,
+        "price_url": reverse("admin:sites_site_card_price", args=[site.pk]),
         "working_writing": writing_html(working.writing_cents, working.currency) if working else "",
         "working_announce": announce_text(working.announce_cents, working.currency)
         if working
@@ -524,12 +629,35 @@ def _card_context(
         "products": Product.objects.order_by("pk"),
         # Новая заметка — к рабочему продукту пользователя.
         "note_product": working_product,
+        "link_types": LinkType.choices,
+        "link_type_url": reverse("admin:sites_site_card_link_type", args=[site.pk]),
         "fix_url": reverse("admin:sites_site_card_fix", args=[site.pk]),
         "keep_url": reverse("admin:sites_site_card_keep", args=[site.pk]),
         "note_url": reverse("admin:sites_site_card_note", args=[site.pk]),
         "add_offer_url": reverse("admin:sites_siteprice_add") + f"?site={site.pk}",
         "change_url": reverse("admin:sites_site_change", args=[site.pk]),
     }
+
+
+def price_amount(cents: int | None) -> str:
+    if cents is None:
+        return ""
+    units, rest = divmod(cents, 100)
+    return f"{units}.{rest:02d}"
+
+
+class OfferPriceForm(forms.Form):
+    offer = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    latest = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    amount = forms.DecimalField(
+        label="Сумма",
+        localize=True,
+        min_value=0,
+        max_value=Decimal("21474836.47"),
+        decimal_places=2,
+        error_messages={"required": "Укажите цену.", "invalid": "Введите число."},
+    )
+    currency = forms.ChoiceField(choices=[(value, value) for value in offers.CURRENCIES])
 
 
 class GrayReadingForm(forms.Form):
@@ -1170,12 +1298,14 @@ class SitePriceAdmin(SiteSnapshotAdmin):
         "seller",
         "placement_type",
         "price",
+        "link_type",
         "checked_at",
         "reviewed_at",
         "from_file",
     )
     list_filter = (
         PriceSellerFilter,
+        "link_type",
         "placement_type",
         "source",
         PriceFileFilter,
@@ -1199,6 +1329,8 @@ class SitePriceAdmin(SiteSnapshotAdmin):
         return str((obj.extra or {}).get("Цена из размещения", ""))
 
     def save_model(self, request: HttpRequest, obj: SitePrice, form: Any, change: bool) -> None:
+        if "link_type" in form.changed_data:
+            obj.link_type_manual = True
         if not change:
             # Новое предложение ждёт решения; без рабочей цены — само станет ею.
             obj.reviewed_at = None
@@ -1853,6 +1985,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         "placements_published",
         "other_products_cell",
         "notes_cell",
+        "link_type_cell",
     )
     list_display_links = None
     list_filter = (
@@ -1863,6 +1996,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         "status",
         OffersFilter,
         SellerFilter,
+        WorkingLinkTypeFilter,
         RegionFilter,
         # Диапазон — поля «С» и «До» (django-admin-rangefilter, ADR-038).
         ("dr", NumericRangeFilter),
@@ -2185,6 +2319,10 @@ class ProductSiteLatestAdmin(RecordAdmin):
             return
         result = offers.fix_seller(_site_ids(queryset), seller, author=request.user)
         self._report(request, result, f"нет предложения {seller} или оно уже рабочее")
+
+    @admin.display(description="тип ссылки", ordering="link_type", empty_value="")
+    def link_type_cell(self, obj: ProductSiteLatest) -> str:
+        return obj.link_type or ""
 
     @admin.action(description="Взять в размещение", permissions=["take_placement"])
     def take_placement_action(

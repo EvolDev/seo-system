@@ -15,13 +15,14 @@ from typing import Any, ClassVar
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from apps.keywords.models import AnchorType
 from apps.sites import statuses
 
 # Формат размещения — колонка «Тип ссылки» Excel; общий с ценами площадки (ADR-043).
-from apps.sites.models import PlacementType, StatusSource, WorkStatus
+from apps.sites.models import LinkType, PlacementType, SitePrice, StatusSource, WorkStatus
 from config.changes import stamped
 from config.db import PgCurrentDate, PgEnumField, PgNow
 from config.run_id import current_run_id
@@ -76,6 +77,8 @@ class Placement(models.Model):
         related_name="placements",
         db_index=False,
     )
+    link_type = models.TextField("тип ссылки", choices=LinkType.choices, null=True, blank=True)
+    link_type_manual = models.BooleanField(default=False, db_default=False, editable=False)
     article_url = models.TextField("адрес статьи", null=True, blank=True)
     status = PgEnumField(
         "статус",
@@ -170,6 +173,23 @@ class Placement(models.Model):
         правка комментария или проверка индексации статус площадки не трогают,
         и статус, поставленный человеком руками, остаётся.
         """
+        if (
+            self._state.adding
+            and self.link_type is None
+            and not self.link_type_manual
+            and self.seller_id is not None
+            and self.placement_type is not None
+        ):
+            self.link_type = (
+                SitePrice.objects.filter(
+                    site_id=self.site_id,
+                    site__price_id=F("pk"),
+                    seller_id=self.seller_id,
+                    placement_type=self.placement_type,
+                )
+                .values_list("link_type", flat=True)
+                .first()
+            )
         update_fields = kwargs.get("update_fields")
         watched = update_fields is None or not _SITE_STATUS_FIELDS.isdisjoint(update_fields)
         # `watched` включает «status», поэтому лишнего запроса при правке

@@ -1,6 +1,7 @@
 """Админка блока 3: анкоры продукта, ключи и их позиции.
 
-Удаление отключено: ключ выключается снятием «активен», позиция — снапшот.
+Ключ выключается флажком «активен», кнопкой в строке или массовым действием;
+исторические ссылки и позиции сохраняются. Позиция — снапшот.
 
 «Анкоры» (E3-05, ADR-059) — справочник по продукту: всё, что было на листе
 «Распределение анкоров», плюс доли «цель / факт» по типам страниц, безанкорка
@@ -10,11 +11,13 @@
 """
 
 import datetime as dt
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from decimal import Decimal
 from typing import Any, ClassVar
+from urllib.parse import quote
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.admin.views.main import ChangeList
 from django.db.models import F, OuterRef, QuerySet, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.urls import URLPattern, path, reverse
@@ -23,7 +26,7 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_POST
 
-from apps.keywords import anchor_views
+from apps.keywords import anchor_export, anchor_views
 from apps.keywords.models import (
     NAKED_TYPES,
     AnchorType,
@@ -106,6 +109,27 @@ class KindFilter(admin.SimpleListFilter):
         return queryset
 
 
+class ActivityFilter(admin.SimpleListFilter):
+    title = "активность"
+    parameter_name = "activity"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [("active", "Активные"), ("inactive", "Неактивные"), ("all", "Все")]
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        for value, label in self.lookup_choices:
+            yield {
+                "selected": (self.value() or "active") == value,
+                "query_string": changelist.get_query_string({self.parameter_name: value}),
+                "display": label,
+            }
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        if self.value() == "all":
+            return queryset
+        return queryset.filter(is_active=self.value() != "inactive")
+
+
 class CoverageFilter(admin.SimpleListFilter):
     """Сколько ссылок: без ссылок, есть ждущие, есть размещённые."""
 
@@ -169,7 +193,15 @@ class KeywordCoverageAdmin(RecordAdmin):
     """Анкоры продукта: лист «Распределение анкоров» и доли над ним (E3-05)."""
 
     list_display_links = None
-    list_filter = (ProductFilter, KindFilter, ToolFilter, PageTypeFilter, CoverageFilter)
+    list_filter = (
+        ProductFilter,
+        ActivityFilter,
+        KindFilter,
+        ToolFilter,
+        PageTypeFilter,
+        CoverageFilter,
+    )
+    actions = ("deactivate_selected", "activate_selected")
     search_fields = ("keyword", "target_url")
     ordering = ("id",)
     list_per_page = 200
@@ -177,7 +209,7 @@ class KeywordCoverageAdmin(RecordAdmin):
 
     class Media:
         css: ClassVar[dict[str, tuple[Css, ...]]] = {"all": (Css("seo/anchors.css"),)}
-        js = (Js("seo/anchors.js"),)
+        js = (Js("seo/anchors.js"), Js("seo/anchor-export.js"))
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -192,6 +224,25 @@ class KeywordCoverageAdmin(RecordAdmin):
     def delete_roots(self, objs: Iterable[Any]) -> dict[Any, list[int]]:
         return {Keyword: [row.pk for row in objs]}
 
+    def has_activate_permission(self, request: HttpRequest) -> bool:
+        return bool(request.user.has_perm("keywords.change_keyword"))
+
+    @admin.action(description="Сделать выбранные анкоры неактивными", permissions=["activate"])
+    def deactivate_selected(
+        self, request: HttpRequest, queryset: QuerySet[KeywordCoverage]
+    ) -> None:
+        changed = Keyword.objects.filter(pk__in=queryset.values("pk"), is_active=True).update(
+            is_active=False
+        )
+        self.message_user(request, f"Отключено анкоров: {changed}.", messages.SUCCESS)
+
+    @admin.action(description="Сделать выбранные анкоры активными", permissions=["activate"])
+    def activate_selected(self, request: HttpRequest, queryset: QuerySet[KeywordCoverage]) -> None:
+        changed = Keyword.objects.filter(pk__in=queryset.values("pk"), is_active=False).update(
+            is_active=True
+        )
+        self.message_user(request, f"Включено анкоров: {changed}.", messages.SUCCESS)
+
     def get_queryset(self, request: HttpRequest) -> QuerySet[KeywordCoverage]:
         queryset = super().get_queryset(request)
         for index, date in enumerate(position_dates(request)):
@@ -204,6 +255,7 @@ class KeywordCoverageAdmin(RecordAdmin):
     def get_list_display(self, request: HttpRequest) -> list[Any]:
         columns: list[Any] = [
             "anchor_cell",
+            _activity_column(request),
             "url_cell",
             "volume_cell",
             "global_cell",
@@ -263,15 +315,48 @@ class KeywordCoverageAdmin(RecordAdmin):
     ) -> HttpResponse:
         product = anchors_product(request)
         page = anchor_views.page_context(request, product)
-        context = {**(extra_context or {}), **page}
+        query = request.GET.urlencode()
+        suffix = f"?{query}" if query else ""
+        context = {
+            **(extra_context or {}),
+            **page,
+            "anchor_copy_url": reverse("admin:keywords_keywordcoverage_copy") + suffix,
+            "anchor_export_url": reverse("admin:keywords_keywordcoverage_export") + suffix,
+        }
         if page["anchors_page"] is not None:
             # Заголовок экрана — с продуктом: «Анкоры Convertio».
             context["title"] = f"Анкоры {page['anchors_page']['product'].name}"
         return super().changelist_view(request, context)
 
+    def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
+        match = request.resolver_match
+        if match and match.url_name in {
+            "keywords_keywordcoverage_copy",
+            "keywords_keywordcoverage_export",
+        }:
+            return anchor_export.AnchorTransferChangeList
+        return super().get_changelist(request, **kwargs)
+
+    def copy_view(self, request: HttpRequest) -> HttpResponse:
+        return anchor_export.copy_view(self, request)
+
+    def excel_view(self, request: HttpRequest) -> HttpResponse:
+        return anchor_export.excel_view(self, request)
+
     def get_urls(self) -> list[URLPattern]:
         view = self.admin_site.admin_view
         own = [
+            path("copy/", view(require_POST(self.copy_view)), name="keywords_keywordcoverage_copy"),
+            path(
+                "export/",
+                view(require_GET(self.excel_view)),
+                name="keywords_keywordcoverage_export",
+            ),
+            path(
+                "activity/<int:keyword_id>/",
+                view(require_POST(anchor_views.activity_view)),
+                name="keywords_anchor_activity",
+            ),
             path(
                 "new/",
                 view(require_POST(anchor_views.quick_add_view)),
@@ -335,3 +420,27 @@ def _pct(value: Decimal | None) -> str:
     if value is None:
         return ""
     return f"{value.normalize():f}".replace(".", ",") + "%"
+
+
+def _activity_column(request: HttpRequest) -> Any:
+    editable = request.user.has_perm("keywords.change_keyword")
+
+    def cell(obj: KeywordCoverage) -> SafeString:
+        label = "Активен" if obj.is_active else "Неактивен"
+        if not editable:
+            return format_html('<span class="seo-sub">{}</span>', label)
+        url = reverse("admin:keywords_anchor_activity", args=[obj.pk])
+        return format_html(
+            '<span class="seo-sub">{}</span> <button type="submit" name="active" value="{}" '
+            'formaction="{}?next={}" formmethod="post" class="seo-btn seo-btn-small" '
+            "data-no-panel>{}</button>",
+            label,
+            "0" if obj.is_active else "1",
+            url,
+            quote(request.get_full_path(), safe=""),
+            "Отключить" if obj.is_active else "Включить",
+        )
+
+    cell.short_description = "Активность"  # type: ignore[attr-defined]
+    cell.__name__ = "activity_cell"
+    return cell

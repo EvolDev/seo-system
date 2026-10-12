@@ -35,6 +35,7 @@ class Record:
     announce_cents: int | None = None
     metrics: dict[str, int | None] = field(default_factory=dict)
     link_type: str | None = None
+    link_types: dict[PlacementType, str | None] = field(default_factory=dict)
     note: str | None = None
     extra: dict[str, str] = field(default_factory=dict)  # заголовок → значение
     card: dict[str, object] | None = None  # факты карточки — только из каталога
@@ -89,7 +90,7 @@ def parse_price_list(table: Table, mapping: Mapping[str, Field], currency: str) 
 
 
 def merge_duplicates(records: Sequence[Record]) -> tuple[list[Record], list[Duplicate]]:
-    """Одна запись на домен. Цена услуги — меньшая; остальное — из первой строки."""
+    """Цена и тип ссылки услуги — из выбранной строки; остальное — из первой."""
     groups: dict[str, list[Record]] = {}
     for record in records:
         groups.setdefault(record.domain, []).append(record)
@@ -101,10 +102,13 @@ def merge_duplicates(records: Sequence[Record]) -> tuple[list[Record], list[Dupl
             merged.append(first)
             continue
         offers: dict[PlacementType, int] = {}
+        link_types: dict[PlacementType, str | None] = {}
         for record in group:
             for service, cents in record.offers.items():
-                offers[service] = min(cents, offers.get(service, cents))
-        merged.append(replace(first, offers=offers))
+                if service not in offers or cents < offers[service]:
+                    offers[service] = cents
+                    link_types[service] = record.link_types.get(service, record.link_type)
+        merged.append(replace(first, offers=offers, link_types=link_types))
         duplicates.append(
             Duplicate(
                 domain=domain,

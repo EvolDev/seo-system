@@ -66,6 +66,13 @@ class MetricSource(models.TextChoices):
     AHREFS_BATCH = "ahrefs_batch", "Ahrefs Batch Analysis"
 
 
+class LinkType(models.TextChoices):
+    """Заявленный продавцом тип ссылки, отдельно от формата размещения."""
+
+    DOFOLLOW = "dofollow", "dofollow"
+    NOFOLLOW = "nofollow", "nofollow"
+
+
 class PlacementType(models.TextChoices):
     """Услуга: формат размещения у предложения продавца и у размещения.
 
@@ -616,6 +623,8 @@ class SitePrice(models.Model):
         default=PlacementType.GUEST_POST,
         db_default=PlacementType.GUEST_POST,
     )
+    link_type = models.TextField("тип ссылки", choices=LinkType.choices, null=True, blank=True)
+    link_type_manual = models.BooleanField(default=False, db_default=False, editable=False)
     placement_cents = models.IntegerField("цена услуги, центы", null=True, blank=True)
     announce_cents = models.IntegerField("анонс, центы", null=True, blank=True)
     writing_cents = models.IntegerField("написание, центы", null=True, blank=True)
@@ -1467,6 +1476,7 @@ class SiteOffer(models.Model):
     placement_type = PgEnumField(
         "услуга", enum_type="placement_type", choices=PlacementType.choices
     )
+    link_type = models.TextField("тип ссылки", choices=LinkType.choices, null=True)
     placement_cents = models.IntegerField("цена услуги, центы", null=True)
     currency = models.CharField("валюта", max_length=3)
     placement_eur_cents = models.IntegerField("цена услуги, евроценты", null=True)

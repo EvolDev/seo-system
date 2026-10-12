@@ -34,6 +34,16 @@
       <label for="{{ form.product.id_for_label }}">{{ form.product.label }}</label> {{ form.product }}
       <div class="help" data-labels='{"ahrefs_refdomains": "Продукт, по домену которого сделана выгрузка: эти площадки спрячутся из его «Площадок».", "anchors": "Чьи это анкоры: сведу с анкорами этого продукта."}'>Чьи это размещения.</div>
     </div>
+    <div class="form-row" data-kinds="anchors">
+      {{ form.anchor_mode.errors }}
+      <label for="{{ form.anchor_mode.id_for_label }}">{{ form.anchor_mode.label }}</label> {{ form.anchor_mode }}
+      <div class="help">Для отдельного списка брендов, адресов и слов вроде «here» выберите «Все строки — безанкорные ссылки». В режиме «Определить по файлу» лист «Anchor text / URL / %» распознаётся автоматически. Тип каждой безанкорной строки — бренд, голый адрес или нейтральное слово — определяется по тексту.</div>
+    </div>
+    <div class="form-row" data-kinds="anchors">
+      {{ form.anchor_policy.errors }}
+      <label for="{{ form.anchor_policy.id_for_label }}">{{ form.anchor_policy.label }}</label> {{ form.anchor_policy }}
+      <div class="help">«Полный список» отключит отсутствующие анкоры этого продукта: обычный файл — ключи, файл безанкорки — безанкорные ссылки. Старые размещения сохранят свои анкоры. Найденные в файле неактивные анкоры снова включатся.</div>
+    </div>
     <div class="form-row" data-kinds="ahrefs_batch">
       {{ form.country.errors }}
       <label for="id_country">{{ form.country.label }}</label>

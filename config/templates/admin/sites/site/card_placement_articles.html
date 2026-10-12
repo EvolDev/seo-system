@@ -1,0 +1,13 @@
+{% if status.articles %}
+  <a class="seo-card-article-link" href="{{ status.articles.0.url }}" target="_blank" rel="noopener noreferrer" title="{{ status.articles.0.url }}">Открыть статью ↗</a>
+  {% if status.articles|length > 1 %}
+  <details class="seo-card-articles">
+    <summary>Ещё статьи ({{ status.articles|length|add:"-1" }})</summary>
+    <ul>
+      {% for article in status.articles|slice:"1:" %}
+      <li>{% if article.published_at %}<span class="seo-sub">{{ article.published_at|date:"d.m.Y" }}</span> · {% endif %}<a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" title="{{ article.url }}">{{ article.url|truncatechars:85 }} ↗</a></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+{% endif %}

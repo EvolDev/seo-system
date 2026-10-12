@@ -295,5 +295,6 @@ def _record(
             "total_keywords": values.parse_number(cell(KEYWORDS)),
         },
         extra={header: show(row.get(i)) for header, i in extra if not is_blank(row.get(i))},
+        link_type=values.parse_link_type(cell(LINK_TYPE)),
         card=card,
     )

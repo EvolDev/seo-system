@@ -1,5 +1,7 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.25 от 09.10.2026 — активность анкоров в отчётном списке (ADR-067)
+-- Версия 1.24 от 08.10.2026 — тип ссылки у предложения продавца и размещения (ADR-066)
 -- Версия 1.23 от 07.10.2026 — оценка продавца звёздочкой, 1–5 (E1-24)
 -- Версия 1.22 от 07.10.2026 — заранее посчитанная «площадка на сегодня» (ADR-065)
 -- Версия 1.21 от 07.10.2026 — оценка площадки звёздочкой, 1–5 (ADR-064)
@@ -128,7 +130,7 @@ CREATE TABLE sites (
     declared_topics     text[],             -- «Особые тематики»: что площадка готова принимать
     site_type           text,
     links_allowed       smallint,
-    link_type           text,               -- заявленный тип ссылки: dofollow / nofollow
+    link_type           text,               -- старое значение каталога, рабочий тип берётся из цены
     marks_as_ad         boolean,            -- «Пометка о рекламе статья» = Да
     content_selector    text,               -- ручной CSS-селектор тела статьи для краулера
     price_id            bigint,             -- рабочая цена: предложение из site_prices (ADR-043)
@@ -192,6 +194,8 @@ CREATE TABLE site_prices (
     site_id          bigint NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
     seller_id        bigint NOT NULL REFERENCES sellers(id),
     placement_type   placement_type NOT NULL DEFAULT 'guest_post',
+    link_type        text,
+    link_type_manual boolean NOT NULL DEFAULT false,
     placement_cents  integer,                           -- цена услуги
     announce_cents   integer,
     writing_cents    integer,
@@ -410,6 +414,8 @@ CREATE TABLE placements (
     id                     bigserial PRIMARY KEY,
     site_id                bigint NOT NULL REFERENCES sites(id),
     product_id             bigint NOT NULL REFERENCES products(id),
+    link_type              text,
+    link_type_manual       boolean NOT NULL DEFAULT false,
     article_url            text,
     status                 work_status NOT NULL DEFAULT 'in_work',
     collaborator_order_id  text,
@@ -1072,11 +1078,11 @@ SELECT
     k.global_volume,
     k.page_type,
     k.anchor_type::text AS anchor_type,
-    k.share
+    k.share,
+    k.is_active
 FROM keywords k
 LEFT JOIN placement_links pl ON pl.keyword_id = k.id
 LEFT JOIN placements p ON p.id = pl.placement_id
-WHERE k.is_active
 GROUP BY k.id;
 
 -- Срок берётся из ПОСЛЕДНЕЙ проверки. Минимум по всей истории давал вечные
@@ -1159,7 +1165,7 @@ SELECT o.id, o.site_id, o.seller_id, sl.name AS seller, o.placement_type,
        o.placement_cents, o.currency,
        round(o.placement_cents / eur_rate(o.currency))::integer AS placement_eur_cents,
        o.announce_cents, o.writing_cents, o.gray_cents, o.extra,
-       o.reviewed_at, o.checked_at
+       o.reviewed_at, o.checked_at, o.link_type
 FROM (SELECT DISTINCT ON (x.site_id, x.seller_id, x.placement_type) *
       FROM site_prices x
       ORDER BY x.site_id, x.seller_id, x.placement_type, x.checked_at DESC, x.id DESC) o
@@ -1226,7 +1232,7 @@ CREATE INDEX idx_site_latest_dr ON site_latest(dr DESC NULLS LAST, site_id);
 -- той же причине. Нет оценок — rating_avg пусто, rating_count 0.
 CREATE VIEW v_site_latest AS
 SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
-       s.links_allowed, s.link_type, s.marks_as_ad,
+       s.links_allowed, pr.link_type, s.marks_as_ad,
        l.dr, l.organic_traffic, l.total_keywords,
        l.top_geo, l.top_geo_traffic, l.top_geo_at, l.metrics_at,
        l.metrics_trusted, ms.name AS metrics_seller,

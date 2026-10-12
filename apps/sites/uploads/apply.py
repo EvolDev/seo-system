@@ -3,8 +3,7 @@
 По видам данных (ADR-033, ADR-043, ADR-044):
 - площадки — одна на домен: новых нет — создаются со статусом «Новая» под
   все продукты. Факты карточки Collaborator перезаписываются непустыми
-  значениями каталога; из прайса продавца — только тип ссылки, и только
-  если он пуст;
+  значениями каталога; тип ссылки хранится только у предложения продавца;
 - предложения — снимок на дату цен: та же дата обновляется на месте,
   кроме рабочей цены — та остаётся, другая цена встаёт рядом новой строкой;
 - рабочая цена — по решению плана; старые неразобранные цены того же
@@ -48,7 +47,6 @@ CARD_FIELDS = (
     "declared_topics",
     "site_type",
     "links_allowed",
-    "link_type",
     "marks_as_ad",
 )
 PRICE_FIELDS = (
@@ -58,6 +56,8 @@ PRICE_FIELDS = (
     "writing_cents",
     "announce_cents",
     "extra",
+    "link_type",
+    "link_type_manual",
 )
 METRIC_FIELDS = ("dr", "organic_traffic", "total_keywords")
 BATCH = 1000
@@ -79,7 +79,7 @@ class Part(StrEnum):
         return {
             "prices": "цены",
             "metrics": "метрики: DR, трафик, ключи",
-            "card": "описание: тематики, языки, тип сайта, dofollow, реклама",
+            "card": "описание: тематики, языки, тип сайта, реклама",
         }[self.value]
 
     @property
@@ -153,7 +153,7 @@ class Writer:
             elif record.card is not None:
                 fields = {k: v for k, v in record.card.items() if k in CARD_FIELDS}
             else:
-                fields = {"source": self.seller.name, "link_type": record.link_type}
+                fields = {"source": self.seller.name}
             new.append(Site(domain=record.domain, **fields))
         # Удалённая раньше площадка не создаётся заново (домен уникален и среди
         # удалённых), а возвращается: пометка снимается, описание обновляется.
@@ -180,7 +180,7 @@ class Writer:
         self.counts["sites_created"] = len(created)
 
     def _update_sites(self) -> None:
-        """Факты карточки из каталога — перезаписываются; тип ссылки из прайса — заполняется."""
+        """Факты карточки из каталога; тип ссылки записывается отдельно у предложения."""
         records = {
             item.record.domain: item.record
             for item in self.plan.items
@@ -197,9 +197,9 @@ class Writer:
                 record = records[site.domain]
                 updates: dict[str, object]
                 if record.card is not None:
-                    updates = {k: v for k, v in record.card.items() if v is not None}
-                elif not site.link_type:
-                    updates = {"link_type": record.link_type}
+                    updates = {
+                        k: v for k, v in record.card.items() if v is not None and k in CARD_FIELDS
+                    }
                 else:
                     updates = {}
                 diff = [k for k, v in updates.items() if getattr(site, k) != v]
@@ -233,12 +233,29 @@ class Writer:
             ).order_by("pk")
             for row in rows:
                 today[(row.site_id, row.placement_type)] = row
+        # Последняя ручная правка относится только к этому продавцу и услуге.
+        previous_types = {
+            (site_id, service): (link_type, manual)
+            for site_id, service, link_type, manual in SitePrice.objects.filter(
+                site_id__in=ids, seller=self.seller
+            )
+            .order_by("site_id", "placement_type", "-checked_at", "-pk")
+            .distinct("site_id", "placement_type")
+            .values_list("site_id", "placement_type", "link_type", "link_type_manual")
+        }
+        overrides = {key: value for key, (value, manual) in previous_types.items() if manual}
         result: list[SitePrice] = []
         new: list[SitePrice] = []
         updated: list[SitePrice] = []
         for item in self.plan.items:
             site_id = self.site_ids[item.record.domain]
             values = self._price_values(item)
+            key = (site_id, item.service)
+            if values["link_type"] is None and key in previous_types:
+                values["link_type"] = previous_types[key][0]
+            if key in overrides:
+                values["link_type"] = overrides[key]
+                values["link_type_manual"] = True
             reviewed = None if item.decision.needs_decision else self.now
             existing = today.get((site_id, item.service))
             working_id = item.site.working.id if item.site and item.site.working else None
@@ -279,6 +296,8 @@ class Writer:
             "currency": self.plan.currency,
             **record.price_fields(),
             "extra": record.extra or None,
+            "link_type": record.link_types.get(item.service, record.link_type),
+            "link_type_manual": False,
         }
 
     def _move_working(self, prices: Sequence[SitePrice]) -> None:
