@@ -76,6 +76,9 @@ class SiteState:
     rejected: list[str] = field(default_factory=list)  # «Convertio: Отбрасываю — Nofollow»
     frozen: bool = False
     prev: dict[str, OfferState] = field(default_factory=dict)  # этого продавца, до даты цен
+    # Услуги, которые этот продавец снял с продажи позже даты файла (ADR-068):
+    # старый файл площадку обратно в продажу не возвращает.
+    withdrawn: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,9 @@ def classify(
     """Куда попадёт предложение и нужно ли решение человека. Правило — в начале модуля."""
     first_service = service == PlacementType.GUEST_POST or not record_has_gp
     working = site.working if site is not None else None
+    if working is None and site is not None and service in site.withdrawn:
+        # Снято с продажи позже этой цены — это история, а не новое предложение.
+        return Decision(ReviewGroup.SAME, needs_decision=False, becomes_working=False)
     if working is None:
         rejected = site is not None and bool(site.rejected)
         group = ReviewGroup.REJECTED if rejected else ReviewGroup.NEW
@@ -356,6 +362,11 @@ def load_state(
         )
         for offer in previous:
             by_id[offer.site_id].prev[offer.placement_type] = _state(offer, rates)
+        later = SitePrice.objects.filter(
+            site_id__in=chunk, seller_id=seller_id, withdrawn=True, checked_at__gt=before
+        ).values_list("site_id", "placement_type")
+        for site_id, service in later:
+            by_id[site_id].withdrawn.add(service)
     return BaseState(sites, deleted, blocked)
 
 

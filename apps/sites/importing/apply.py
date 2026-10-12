@@ -257,6 +257,20 @@ class Importer:
                 placement_type=PlacementType.GUEST_POST,
             )
         }
+        # Снятые с продажи (ADR-068): последний снимок Collaborator — снятие. Вернуть
+        # площадку в продажу может только его каталог, а не цена из таблицы.
+        withdrawn = {
+            site_id
+            for site_id, is_withdrawn in SitePrice.objects.filter(
+                site_id__in=site_ids,
+                seller=self.collaborator,
+                placement_type=PlacementType.GUEST_POST,
+            )
+            .order_by("site_id", "-checked_at", "-pk")
+            .distinct("site_id")
+            .values_list("site_id", "withdrawn")
+            if is_withdrawn
+        }
         known_notes: set[tuple[int, int | None, str]] = set(
             SiteNote.objects.filter(site_id__in=site_ids, source=TABLE_SOURCE).values_list(
                 "site_id", "product_id", "body"
@@ -296,14 +310,18 @@ class Importer:
                 new_snapshots,
                 country=US,
             )
-            self._price(
-                site,
-                prices.get(site.pk),
-                current_offers.get(site.pk),
-                data.prices.as_fields(),
-                new_snapshots,
-                priced,
-            )
+            if site.pk in withdrawn:
+                self.report.count("site_prices", Outcome.SKIPPED)
+                self.report.issue(Section.WITHDRAWN, data.domain)
+            else:
+                self._price(
+                    site,
+                    prices.get(site.pk),
+                    current_offers.get(site.pk),
+                    data.prices.as_fields(),
+                    new_snapshots,
+                    priced,
+                )
             self._note(site, data, known_notes, new_notes)
             fact = self._import_placement(
                 site, data, placements[(site.pk, self.convertio.pk)], keywords

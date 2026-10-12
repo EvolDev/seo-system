@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.26 от 12.10.2026 — снятие с продажи: площадки нет в полном каталоге продавца (ADR-068)
 -- Версия 1.25 от 09.10.2026 — активность анкоров в отчётном списке (ADR-067)
 -- Версия 1.24 от 08.10.2026 — тип ссылки у предложения продавца и размещения (ADR-066)
 -- Версия 1.23 от 07.10.2026 — оценка продавца звёздочкой, 1–5 (E1-24)
@@ -203,11 +204,15 @@ CREATE TABLE site_prices (
     currency         char(3) NOT NULL DEFAULT 'EUR',
     extra            jsonb,                             -- «прочие данные» строки файла: заголовок → значение
     source           metric_source NOT NULL DEFAULT 'manual',
+    withdrawn        boolean NOT NULL DEFAULT false,    -- снято с продажи: продавца нет в его полном каталоге (ADR-068)
     reviewed_at      timestamptz,
     checked_at       timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_prices_site ON site_prices(site_id, seller_id, placement_type, checked_at DESC);
 CREATE INDEX idx_prices_pending ON site_prices(site_id) WHERE reviewed_at IS NULL;
+-- Снимков «снято с продажи» мало: по ним «Площадки» отбрасывают снятые цены (ADR-068).
+CREATE INDEX idx_prices_withdrawn ON site_prices(site_id, seller_id, placement_type, checked_at)
+    WHERE withdrawn;
 ALTER TABLE sites ADD FOREIGN KEY (price_id) REFERENCES site_prices(id);
 
 CREATE TABLE gray_scans (
@@ -1160,6 +1165,7 @@ GROUP BY 1;
 -- Текущие предложения площадки: последнее предложение каждого продавца за каждую
 -- услугу; цена услуги — ещё и в евро по последнему курсу ЕЦБ, только для сравнения
 -- и показа (ADR-043). Отсюда пометки в v_site_latest и список предложений на экранах.
+-- Последний снимок продавца — «снято с продажи» (ADR-068): его предложения нет.
 CREATE VIEW v_site_offers AS
 SELECT o.id, o.site_id, o.seller_id, sl.name AS seller, o.placement_type,
        o.placement_cents, o.currency,
@@ -1169,7 +1175,8 @@ SELECT o.id, o.site_id, o.seller_id, sl.name AS seller, o.placement_type,
 FROM (SELECT DISTINCT ON (x.site_id, x.seller_id, x.placement_type) *
       FROM site_prices x
       ORDER BY x.site_id, x.seller_id, x.placement_type, x.checked_at DESC, x.id DESC) o
-JOIN sellers sl ON sl.id = o.seller_id;
+JOIN sellers sl ON sl.id = o.seller_id
+WHERE NOT o.withdrawn;
 
 -- Заранее посчитанная «площадка на сегодня» (E1-11, ADR-065). Здесь лежат только
 -- дорогие части v_site_latest: последний доверенный замер, топ-регион и пометки
@@ -1204,6 +1211,7 @@ CREATE TABLE site_latest (
     cheaper_currency    char(3),
     cheaper_eur_cents   integer,
     cheaper_pending     boolean,
+    withdrawn_at        timestamptz,        -- не продаётся: ни рабочей цены, ни текущих предложений (ADR-068)
     computed_at         timestamptz NOT NULL DEFAULT now()
 );
 -- Сортировка списка идёт по DR убыванием: индекс отдаёт порядок без сортировки.
@@ -1251,7 +1259,8 @@ SELECT s.id, s.domain, s.language, s.topics, s.declared_topics,
                WHERE x.site_id = s.id AND x.reviewed_at IS NULL) AS offers_pending,
        g.ratio AS gray_ratio,
        coalesce(ln.notes, 0) AS notes_count, ln.body AS last_note, ln.created_at AS last_note_at,
-       rt.rating_avg, coalesce(rt.rating_count, 0) AS rating_count
+       rt.rating_avg, coalesce(rt.rating_count, 0) AS rating_count,
+       l.withdrawn_at
 FROM sites s
 LEFT JOIN site_latest l ON l.site_id = s.id
 LEFT JOIN sellers ms ON ms.id = l.metrics_seller_id
@@ -1278,7 +1287,8 @@ WHERE NOT s.is_deleted;
 -- от рабочей цены, в евро (ADR-043).
 -- Порог написания — writing_eur из настройки PRICE_REFERENCE: локальное значение
 -- продукта перекрывает общее. ≤ порога — пишет площадка, > порога или пусто —
--- пишем мы. У вставки ссылки писать нечего — we_write пусто. expected_spend —
+-- пишем мы. У вставки ссылки писать нечего, без рабочей цены решать не по чему —
+-- we_write пусто (ADR-068). expected_spend —
 -- сколько заплатим площадке на самом деле. Настройки или цены нет — пусто:
 -- порог не угадываем.
 CREATE VIEW v_product_site_latest AS
@@ -1291,7 +1301,7 @@ SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.comment, ps.imported_unde
        l.price_id, l.price_seller_id, l.price_seller, l.price_type,
        l.placement_cents, l.announce_cents, l.writing_cents, l.price_currency, l.prices_at,
        l.placement_eur_cents, l.writing_eur_cents, l.reference_total_cents,
-       CASE WHEN l.price_type = 'link_insertion' THEN NULL
+       CASE WHEN l.price_id IS NULL OR l.price_type = 'link_insertion' THEN NULL
             ELSE l.writing_eur_cents IS NULL OR l.writing_eur_cents > w.writing_cents END AS we_write,
        l.reference_total_cents
          + CASE WHEN w.writing_cents IS NULL THEN NULL
@@ -1305,7 +1315,8 @@ SELECT ps.id, ps.product_id, ps.site_id, ps.status, ps.comment, ps.imported_unde
        l.rating_avg, l.rating_count,
        a.verdict AS last_verdict, a.score AS last_score, a.created_at AS audited_at,
        pp.published AS placements_published,
-       op.names AS other_products
+       op.names AS other_products,
+       l.withdrawn_at
 FROM product_sites ps
 JOIN v_site_latest l ON l.id = ps.site_id
 LEFT JOIN LATERAL (SELECT (x.value->>'writing_eur')::integer * 100 AS writing_cents

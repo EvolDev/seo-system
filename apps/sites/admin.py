@@ -82,6 +82,7 @@ from apps.sites.models import (
     SiteAudit,
     SiteCountryLatest,
     SiteCountryMetric,
+    SiteLatest,
     SiteList,
     SiteListItem,
     SiteMetric,
@@ -539,12 +540,23 @@ def _card_context(
                 "gray": offers.money(offer.gray_cents, offer.currency) or "—",
             }
         )
-    history = (
+    history = list(
         SitePrice.objects.filter(site=site)
         .exclude(pk__in=current_ids)
         .select_related("seller")
         .order_by("-checked_at", "-pk")
     )
+    # Кто снял площадку с продажи (ADR-068): у продавца и услуги нет текущего
+    # предложения — значит, их последний снимок в истории — снятие.
+    current_keys = {(offer.seller_id, offer.placement_type) for offer in current}
+    withdrawn_by: list[str] = []
+    for snapshot in history:
+        key = (snapshot.seller_id, snapshot.placement_type)
+        name = snapshot.seller.name
+        if key not in current_keys and snapshot.withdrawn and name not in withdrawn_by:
+            withdrawn_by.append(name)
+        current_keys.add(key)
+    withdrawn_at = latest.withdrawn_at if latest is not None else None
     status_history = site_history(site.pk)
     articles = other_products.articles_by_product(site.pk)
     # Ссылается ли площадка на продукт — по его выгрузке Ahrefs (ADR-051).
@@ -584,8 +596,14 @@ def _card_context(
         if working is not None and working.currency != "EUR"
         else "",
         "price_summary": card_price_summary(
-            working_eur, working.seller.name if working else "", len(offer_rows), pending
+            working_eur,
+            working.seller.name if working else "",
+            len(offer_rows),
+            pending,
+            withdrawn=_day(withdrawn_at),
         ),
+        "withdrawn_by": withdrawn_by,
+        "withdrawn_at": withdrawn_at,
         "has_gray_price": any(offer.gray_cents is not None for offer in current),
         "pending_count": pending,
         "metrics_mark": seller_mark(latest.metrics_seller)
@@ -1308,6 +1326,7 @@ class SitePriceAdmin(SiteSnapshotAdmin):
         "link_type",
         "placement_type",
         "source",
+        "withdrawn",
         PriceFileFilter,
         ("checked_at", admin.DateFieldListFilter),
     )
@@ -1321,6 +1340,8 @@ class SitePriceAdmin(SiteSnapshotAdmin):
 
     @admin.display(description="цена услуги", ordering="placement_cents")
     def price(self, obj: SitePrice) -> str:
+        if obj.withdrawn:
+            return "снята с продажи"  # снимок снятия цены не несёт (ADR-068)
         return offers.money(obj.placement_cents, obj.currency)
 
     @admin.display(description="из файла")
@@ -1633,6 +1654,46 @@ def _ref_rows(*, linking: bool) -> Subquery:
     return Subquery(ProductSite.objects.filter(Exists(refs)).values("pk"))
 
 
+class SaleFilter(admin.SimpleListFilter):
+    """«Снятые с продажи» (ADR-068): ни рабочей цены, ни текущих предложений.
+
+    Без выбора такие скрыты — купить их не у кого (решение пользователя
+    12.10.2026). История площадки остаётся: «Только они» и «Показать все».
+    """
+
+    title = "снятые с продажи"
+    parameter_name = "sale"
+    HIDE, ONLY, ALL = "hide", "only", "all"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [(self.HIDE, "Скрыть"), (self.ONLY, "Только они"), (self.ALL, "Показать все")]
+
+    def value(self) -> str | None:
+        value = super().value()
+        if not value:
+            value = self.HIDE
+            # Запоминаем, чтобы пункт по умолчанию был выбран и в колонке фильтров.
+            self.used_parameters[self.parameter_name] = value
+        return str(value)
+
+    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> Any:
+        value = self.value()
+        if value == self.ALL:
+            return queryset
+        # Подзапросом по копии, как у «Ссылаются на нас»: снятых мало, список их
+        # считается один раз, а не условием на каждую строку представления.
+        gone = SiteLatest.objects.filter(withdrawn_at__isnull=False).values("site_id")
+        if value == self.ONLY:
+            return queryset.filter(site_id__in=gone)
+        return queryset.exclude(site_id__in=gone)
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        # Первый пункт Django — «Все»; у нас без выбора — «Скрыть», «Показать все» — свой.
+        choices = super().choices(changelist)
+        next(choices)
+        yield from choices
+
+
 class OffersFilter(admin.SimpleListFilter):
     """Разбор цен (ADR-043): что пришло нового, где дешевле, у кого нет цены."""
 
@@ -1658,7 +1719,10 @@ class OffersFilter(admin.SimpleListFilter):
 
 
 class SellerFilter(MultiChoiceFilter):
-    """Площадки, которые предлагает продавец: есть хоть одна его цена.
+    """Площадки, которые предлагает продавец: есть его текущее предложение.
+
+    Снятое с продажи (ADR-068) предложением не считается: продавца, который
+    площадку больше не продаёт, здесь у неё нет.
 
     Отметить можно нескольких сразу (галочки). У имени — сколько площадок
     продавца в списке при остальных выбранных фильтрах: «Athena Smith (12)».
@@ -1710,8 +1774,20 @@ class SellerFilter(MultiChoiceFilter):
                 self.request, rows, changelist.query
             )
         rows = rows.order_by()
+        # Цена продавца считается, если после неё он не снимал площадку с продажи
+        # (ADR-068): так в одном запросе по таблице получаются ровно текущие
+        # предложения. Подсчёт по представлению текущих предложений стоил втрое
+        # дороже на каждый показ списка.
+        withdrawn_later = SitePrice.objects.filter(
+            site_id=OuterRef("site_id"),
+            seller_id=OuterRef("seller_id"),
+            placement_type=OuterRef("placement_type"),
+            withdrawn=True,
+            checked_at__gt=OuterRef("checked_at"),
+        )
         found = (
-            SitePrice.objects.filter(site_id__in=rows.values("site_id"))
+            SitePrice.objects.filter(site_id__in=rows.values("site_id"), withdrawn=False)
+            .exclude(Exists(withdrawn_later))
             .values("seller_id")
             .annotate(sites=Count("site_id", distinct=True))
             .values_list("seller_id", "sites")
@@ -1721,7 +1797,7 @@ class SellerFilter(MultiChoiceFilter):
     def narrow(self, queryset: Any, values: list[str]) -> Any:
         if not all(value.isdigit() for value in values):
             return queryset.none()
-        offered = SitePrice.objects.filter(
+        offered = SiteOffer.objects.filter(
             site_id=OuterRef("site_id"), seller_id__in=[int(value) for value in values]
         )
         return queryset.filter(Exists(offered))
@@ -1993,6 +2069,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         SiteListFilter,
         WorkedFilter,
         RefsFilter,
+        SaleFilter,
         "status",
         OffersFilter,
         SellerFilter,
@@ -2207,6 +2284,12 @@ class ProductSiteLatestAdmin(RecordAdmin):
 
     @admin.display(description="цена", ordering="placement_eur_cents")
     def price_cell(self, obj: ProductSiteLatest) -> SafeString:
+        if obj.price_id is None and obj.withdrawn_at is not None:
+            return format_html(
+                '<span class="seo-flat">{}</span><div class="seo-sub">с {}</div>',
+                "не продаётся",
+                _day(obj.withdrawn_at),
+            )
         if obj.price_id is None:
             return format_html('<span class="seo-flat">{}</span>', "нет цены")
         amount = Amount(obj.placement_cents, obj.price_currency or "EUR", obj.placement_eur_cents)

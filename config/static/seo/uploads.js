@@ -265,6 +265,7 @@
     known: ["Обновляю площадки в базе…", "Цены, метрики, описание — около 15–20 секунд на каталог."],
     new: ["Добавляю новые площадки…", "Несколько тысяч площадок — около 20–60 секунд."],
     recheck: ["Пересчитываю сводку…", "Около 10 секунд."],
+    withdraw: ["Снимаю с продажи…", "Несколько секунд."],
     all: ["Записываю в базу…", "После записи откроется результат загрузки."],
     replace: ["Записываю в базу…", "Значения из файла заменят расходящиеся. Несколько секунд."],
   };
@@ -298,8 +299,11 @@
           if (FINAL.indexOf(kind) >= 0) { finished = true; go(form.getAttribute("data-done-url") || state.next); return; }
           await refreshCatalog();
           finished = true;
-          var done = { known: "Площадки в базе обновлены", new: "Новые площадки добавлены", recheck: "Сводка пересчитана" }[kind];
-          if (kind === "recheck") toast(done);
+          var done = {
+            known: "Площадки в базе обновлены", new: "Новые площадки добавлены",
+            recheck: "Сводка пересчитана", withdraw: "Сняты с продажи",
+          }[kind];
+          if (kind === "recheck" || kind === "withdraw") toast(done);
           else toast(done, "Открыть разбор", function () { go(window.location.pathname.replace("summary/", "review/")); });
         } catch (error) {
           toast("Не получилось: " + error.message, null, null, "error");

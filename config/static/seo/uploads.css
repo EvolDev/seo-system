@@ -99,12 +99,14 @@
 }
 .seo-bulk[hidden] { display: none; }
 
-/* Каталог: две кнопки записи, фильтры с облачками, счётчик. */
-.seo-panel {
+/* Каталог: разделы с кнопками записи, фильтры с облачками, счётчик. Раздел —
+   не .seo-panel: так с E9-11 зовётся панель записи справа (position: fixed), и
+   разделы всплывали слоями поверх страницы. */
+.seo-upload-panel {
   padding: 14px 16px; margin: 0 0 16px; border-radius: 10px;
   border: 1px solid var(--hairline-color, #e5e5e5); background: var(--body-bg, #fff);
 }
-.seo-panel h2 { margin: 0 0 4px; font-size: 1.0625rem; }
+.seo-upload-panel h2 { margin: 0 0 4px; font-size: 1.0625rem; }
 .seo-run-form { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 10px; }
 .seo-parts { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 .seo-parts label { display: inline-flex; gap: 4px; align-items: center; }
@@ -172,3 +174,7 @@
 @media (prefers-reduced-motion: reduce) {
   .seo-refreshing::after { animation: none; }
 }
+
+/* Каталог: «Нет в этом файле» (ADR-068) — предупреждение о выгрузке с фильтром и список. */
+.seo-absent-warning { max-width: 900px; margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--seo-up-bg, #fbe9e8); color: var(--seo-up, #c4302b); }
+.seo-absent-list { columns: 2 320px; margin: 6px 0; padding-left: 18px; }

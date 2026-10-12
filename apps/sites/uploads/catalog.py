@@ -211,6 +211,23 @@ def parse_catalog(table: Table, unknown: Unknown) -> Parsed:
     return Parsed(merged, errors, duplicates)
 
 
+def domains(table: Table) -> set[str]:
+    """Все площадки выгрузки, и строки без цены: раз площадка в каталоге — она там есть.
+
+    По этому множеству ищут, кого в каталоге больше нет (ADR-068): строка с
+    ошибкой разбора не должна снимать площадку с продажи.
+    """
+    index = {column.header: column.index for column in table.columns}
+    found: set[str] = set()
+    for row in table.rows:
+        try:
+            domain, _ = values.parse_domain(row.get(index[DOMAIN]))
+        except ValueError:
+            continue
+        found.add(domain)
+    return found
+
+
 def split_topics(value: object, dictionary: dict[str, str], unknown: dict[str, int]) -> list[str]:
     """«Business and Finance, Society, Politics, and Laws» → две тематики, по-русски.
 

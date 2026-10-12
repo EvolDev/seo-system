@@ -10,6 +10,12 @@
 стоял в представлении. Дешёвое (серость, заметки, оценки, «есть
 неразобранные») представление по-прежнему считает вживую.
 
+«Снята с продажи» (ADR-068) — нет рабочей цены и ни одного текущего
+предложения, а снимки «снято с продажи» есть: дата последнего из них.
+
+Миграции этот модуль не зовут: колонки копии растут вместе со схемой, а
+миграция на чистой базе идёт раньше них (0025 держит свой снимок правил).
+
 Пересчёт адресный: правка площадки пересчитывает её одну, загрузка —
 свои площадки пачкой, смена курсов валют — всё (в евро пересчитываются
 пометки «дешевле»).
@@ -41,6 +47,7 @@ COLUMNS = (
     "cheaper_currency",
     "cheaper_eur_cents",
     "cheaper_pending",
+    "withdrawn_at",
 )
 
 #: Сами правила подсчёта — тот же SQL, что стоял в представлении.
@@ -51,7 +58,13 @@ SELECT s.id, m.dr, m.organic_traffic, m.total_keywords, m.checked_at, m.trusted,
        m.seller_id, tg.top_geo, tg.top_geo_traffic, tg.checked_at,
        np.id, np.placement_cents, np.currency, np.reviewed_at IS NULL,
        ch.id, ch.seller_id, ch.placement_cents, ch.currency,
-       ch.placement_eur_cents, ch.reviewed_at IS NULL, now()
+       ch.placement_eur_cents, ch.reviewed_at IS NULL,
+       CASE WHEN s.price_id IS NULL
+             AND NOT EXISTS (SELECT 1 FROM v_site_offers o WHERE o.site_id = s.id)
+            THEN (SELECT max(x.checked_at) FROM site_prices x
+                  WHERE x.site_id = s.id AND x.withdrawn)
+       END,
+       now()
 FROM sites s
 LEFT JOIN LATERAL (SELECT x.dr, x.organic_traffic, x.total_keywords, x.checked_at,
                           x.seller_id, x.seller_id IS NULL OR xs.metrics_trusted AS trusted

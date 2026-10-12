@@ -4,6 +4,7 @@
 """
 
 import datetime as dt
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -83,24 +84,27 @@ def test_price_list_upload_to_review(
     )
     with soft_load(page):
         page.locator("button[type=submit]", has_text="Дальше").click()
-    expect(page).to_have_url(f"{live_server.url}/admin/sites/upload/1/columns/")
+    # Номер загрузки — из адреса: последовательности между тестами не сбрасываются,
+    # и загрузки предыдущих тестов его сдвигают.
+    expect(page).to_have_url(re.compile(r"/admin/sites/upload/\d+/columns/$"))
     expect(page.locator("#content")).to_contain_text("GP Price")
+    base = page.url.removesuffix("columns/")
 
     # Шаг 2: колонки — обычная форма, её отправляет общая подгрузка.
     with soft_load(page):
         page.locator("button[type=submit]", has_text="Дальше: сводка").click()
-    expect(page).to_have_url(f"{live_server.url}/admin/sites/upload/1/summary/")
+    expect(page).to_have_url(f"{base}summary/")
 
     # Шаг 3: запись — запрос с ожиданием задачи, по готовности — разбор.
     with soft_load(page):
         page.locator("button[type=submit]", has_text="Записать в базу").click()
-    expect(page).to_have_url(f"{live_server.url}/admin/sites/upload/1/review/")
+    expect(page).to_have_url(f"{base}review/")
     expect(page.locator("#content")).to_contain_text("known.com")
 
     # «Назад» — снова сводка, без перезагрузки.
     with soft_load(page):
         page.evaluate("history.back()")
-    expect(page).to_have_url(f"{live_server.url}/admin/sites/upload/1/summary/")
+    expect(page).to_have_url(f"{base}summary/")
     assert same_document(page)
 
 

@@ -4,7 +4,9 @@
 «Записать в базу». «Обновить в базе» — площадки, которые уже есть;
 «Добавить новые» — только новые для базы, по фильтрам. Галочки — что
 писать: цены, метрики, карточку. Каждое нажатие — строка истории ниже.
-Фильтры, облачка и живой счётчик — seo/uploads.js.
+«Нет в этом файле» (ADR-068) — площадки с ценой Collaborator, которых в файле
+нет: «Снять с продажи» только с галочкой «полный каталог» и не с файла, похожего
+на выгрузку с фильтром. Фильтры, облачка и живой счётчик — seo/uploads.js.
 {% endcomment %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
@@ -18,7 +20,7 @@
   {% if runs %}<a href="{% url 'admin:sites_upload_review' upload.pk %}">Открыть разбор</a>.{% endif %}
 </p>
 
-<section class="seo-panel" data-panel="known">
+<section class="seo-upload-panel" data-panel="known">
   <h2 data-swap="known-title">Уже в базе — {{ known_total }}</h2>
   <p class="seo-sub">Обновить цены, метрики и карточку у площадок, которые есть в базе. Фильтры сюда не действуют.</p>
   <div class="seo-stats" data-swap="known-stats">
@@ -41,7 +43,7 @@
   <p class="seo-hint">Снимите «метрики», если не хотите, чтобы DR и трафик Collaborator перекрыли ваш замер Ahrefs.</p>
 </section>
 
-<section class="seo-panel" data-panel="new">
+<section class="seo-upload-panel" data-panel="new">
   <h2>Новые для базы — <span data-new-total>{{ new_total }}</span></h2>
   <p class="seo-sub">Добавятся только те, что подходят фильтрам. Остальные не записываются и не отклоняются — в следующей выгрузке могут подойти. Пустой фильтр — все значения.</p>
   {{ fields_data|json_script:"seo-filter-data" }}
@@ -81,7 +83,38 @@
   <div class="seo-inline-loader" data-loader hidden></div>
 </section>
 
-<section class="seo-panel" data-swap="runs"{% if not runs %} hidden{% endif %}>
+<section class="seo-upload-panel" data-panel="withdraw">
+  <h2 data-swap="absent-title">Нет в этом файле{% if absent %} — {{ absent.total }}{% endif %}</h2>
+  <p class="seo-sub">Площадки, у которых в базе есть текущая цена Collaborator, а в файле их нет. Если файл — полный каталог, Collaborator их больше не продаёт: «Снять с продажи» уберёт его цену из предложений, фильтров и сравнений, прежние цены останутся в истории. Вернётся площадка в следующем каталоге — цена встанет сама.</p>
+  <div data-swap="absent-body">
+    {% if absent is None %}
+      <p class="seo-hint">Сводку считали до появления этой проверки — нажмите «Пересчитать сводку» внизу.</p>
+    {% else %}
+      {% if absent.looks_partial %}<p class="seo-absent-warning">Снимется больше площадок, чем есть в файле, — похоже, каталог выгружен с фильтром. С такого файла снимать с продажи нельзя.</p>{% endif %}
+      <div class="seo-stats">
+        <div class="seo-stat"><b>{{ absent.working }}</b><span>рабочая цена Collaborator — снимется, в истории будет заметка</span></div>
+        <div class="seo-stat seo-good"><b>{{ absent.others }}</b><span>есть другие продавцы — останутся в продаже</span></div>
+        <div class="seo-stat seo-bad"><b>{{ absent.stop }}</b><span>больше никто не продаёт — «Площадки» их скроют</span></div>
+        <div class="seo-stat seo-warn"><b>{{ absent.frozen }}</b><span>заявка в работе — не трогаем</span></div>
+      </div>
+      {% if absent.list %}
+      <details class="seo-details">
+        <summary>Список{% if absent.list_total > absent.list|length %} — первые {{ absent.list|length }} из {{ absent.list_total }}{% endif %}</summary>
+        <ul class="seo-absent-list">{% for row in absent.list %}<li>{{ row.domain }} <span class="seo-sub">— {{ row.note }}</span></li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+    {% endif %}
+  </div>
+  <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="seo-run-form" data-run-form="withdraw">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="withdraw">
+    <label class="seo-parts"><input type="checkbox" name="full" value="1" required> Файл — полный каталог Collaborator, без фильтров</label>
+    <button type="submit" class="default seo-run-btn" data-swap="absent-btn"{% if not absent or not absent.total or absent.looks_partial %} disabled{% endif %}>Снять с продажи</button>
+  </form>
+  <div class="seo-inline-loader" data-loader hidden></div>
+</section>
+
+<section class="seo-upload-panel" data-swap="runs"{% if not runs %} hidden{% endif %}>
   <h2>Что уже записано из этого файла</h2>
   <div class="seo-table-wrap">
     <table class="seo-upload-table">

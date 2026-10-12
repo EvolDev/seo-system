@@ -688,6 +688,26 @@ class UploadAdmin(RecordAdmin):
             )
         if action == service.Action.REPLACE and upload.kind != UploadKind.PLACEMENTS:
             return _answer(request, upload, error="Сейчас запустить нельзя — обновите страницу.")
+        if action == service.Action.WITHDRAW:
+            if not catalog_kind:
+                return _answer(
+                    request, upload, error="Сейчас запустить нельзя — обновите страницу."
+                )
+            # Выгрузку с фильтром от полного каталога не отличить: снимаем, только
+            # если человек подтвердил, что файл — вся база Collaborator (ADR-068).
+            if request.POST.get("full") != "1":
+                return _answer(
+                    request,
+                    upload,
+                    error="Отметьте, что файл — полный каталог Collaborator, без фильтров.",
+                )
+            if ((upload.summary or {}).get("absent") or {}).get("looks_partial"):
+                return _answer(
+                    request,
+                    upload,
+                    error="Снимется больше площадок, чем есть в файле — похоже на выгрузку "
+                    "с фильтром. С такого файла снимать с продажи нельзя.",
+                )
         parts = [p for p in request.POST.getlist("parts") if p in Part.__members__.values()]
         if not catalog_kind:
             parts = [p.value for p in Part]
@@ -875,11 +895,14 @@ def _catalog_context(upload: Upload) -> dict[str, Any]:
     runs = []
     for run in reversed((upload.result or {}).get("runs", [])):
         action = service.Action(run.get("action", "all"))
+        counts = run.get("counts") or {}
         runs.append(
             {
                 "label": action.label,
                 "at": dt.datetime.fromisoformat(run["at"]) if run.get("at") else None,
-                "parts": ", ".join(Part(p).short for p in run.get("parts", [])),
+                "parts": _withdraw_text(counts)
+                if action == service.Action.WITHDRAW
+                else ", ".join(Part(p).short for p in run.get("parts", [])),
                 "filter_text": run.get("filter_text") or "",
                 "sites": run.get("sites", 0),
                 "created": (run.get("counts") or {}).get("sites_created", 0),
@@ -889,6 +912,9 @@ def _catalog_context(upload: Upload) -> dict[str, Any]:
     return {
         "new_total": count.total,
         "known_total": (upload.summary or {}).get("known", 0),
+        # Кого в файле нет (ADR-068). Сводка, посчитанная до этой доработки, блока
+        # не знает — тогда цифры появятся после «Пересчитать сводку».
+        "absent": (upload.summary or {}).get("absent"),
         "fields": fields,
         "fields_data": [
             {k: f[k] for k in ("key", "kind", "unit", "chips", "choices")} for f in fields
@@ -896,6 +922,18 @@ def _catalog_context(upload: Upload) -> dict[str, Any]:
         "parts": [(p.value, p.label) for p in Part],
         "runs": runs,
     }
+
+
+def _withdraw_text(counts: dict[str, Any]) -> str:
+    """Строка истории каталога о снятии с продажи: что именно сделала кнопка."""
+    if counts.get("refused_partial"):
+        return "не снято: похоже на выгрузку с фильтром"
+    text = f"снято с продажи: {counts.get('sites_withdrawn', 0)}"
+    if counts.get("working_cleared"):
+        text += f", рабочая цена снята: {counts['working_cleared']}"
+    if counts.get("skipped_frozen"):
+        text += f", не тронуты (заявка в работе): {counts['skipped_frozen']}"
+    return text
 
 
 def _last_choice(request: HttpRequest) -> dict[str, Any]:

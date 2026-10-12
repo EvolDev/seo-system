@@ -37,6 +37,7 @@ from apps.sites.uploads import (
     placement_columns,
     placements,
     refdomains,
+    withdraw,
 )
 from apps.sites.uploads.apply import ALL_PARTS, Part, Writer
 from apps.sites.uploads.columns import (
@@ -448,9 +449,7 @@ def check(upload_id: int) -> None:
         _fail(upload, str(error))
         return
     plan = plan_for(upload, parsed)
-    upload.summary = _with_refs(
-        plan.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown), parsed
-    )
+    upload.summary = _summary(upload, plan, table, parsed, unknown)
     # Пересчёт сводки у загрузки, из которой уже записывали, разбор не закрывает.
     written = bool((upload.result or {}).get("runs"))
     upload.status = UploadStatus.DONE if written else UploadStatus.CHECKED
@@ -472,6 +471,7 @@ class Action(StrEnum):
     ALL = "all"
     KNOWN = "known"  # «Обновить в базе» — площадки, которые уже есть
     NEW = "new"  # «Добавить новые» — только новые для базы, по фильтру
+    WITHDRAW = "withdraw"  # каталог: снять с продажи тех, кого в файле нет (ADR-068)
     REPLACE = "replace"  # размещения: значения файла вместо расходящихся в базе
 
     @property
@@ -480,6 +480,7 @@ class Action(StrEnum):
             "all": "Записать в базу",
             "known": "Обновить в базе",
             "new": "Добавить новые",
+            "withdraw": "Снять с продажи",
             "replace": "Записать, заменив расходящиеся",
         }[self.value]
 
@@ -579,36 +580,43 @@ def _write(
     how = Action(action)
     chosen = frozenset(Part(part) for part in parts) if parts is not None else ALL_PARTS
     rule = filters.parse_spec(spec)
-    if how == Action.KNOWN:
-        plan = plan.select(lambda item: item.site is not None)
-    elif how == Action.NEW:
-        rows = dict(filters.rows_from_table(table))
-        plan = plan.select(
-            lambda item: (
-                item.site is None
-                and filters.matches(rows.get(item.record.domain, filters.EMPTY_ROW), rule)
+    if how == Action.WITHDRAW:
+        # Снятие с продажи (ADR-068): не строки файла, а те, кого в нём нет.
+        # Полной базой продавца бывает только каталог.
+        if upload.kind != UploadKind.COLLABORATOR_CATALOG:
+            raise ValueError("снять с продажи можно только по каталогу Collaborator")
+        written = withdraw.run(upload, catalog.domains(table))
+        chosen = frozenset()
+        sites = written["counts"]["sites_withdrawn"]
+    else:
+        if how == Action.KNOWN:
+            plan = plan.select(lambda item: item.site is not None)
+        elif how == Action.NEW:
+            rows = dict(filters.rows_from_table(table))
+            plan = plan.select(
+                lambda item: (
+                    item.site is None
+                    and filters.matches(rows.get(item.record.domain, filters.EMPTY_ROW), rule)
+                )
             )
-        )
-    written = Writer(upload, plan, chosen).run()
+        written = Writer(upload, plan, chosen).run()
+        sites = len({item.record.domain for item in plan.items})
     run = {
         "action": how.value,
         "parts": sorted(part.value for part in chosen),
         "filters": rule if how == Action.NEW else {},
         "filter_text": filters.describe(rule) if how == Action.NEW else "",
         "at": timezone.now().isoformat(),
-        "sites": len({item.record.domain for item in plan.items}),
+        "sites": sites,
         **written,
     }
     runs = [*(upload.result or {}).get("runs", []), run]
     if how == Action.ALL:
         upload.result = {**summary, **written, "runs": runs}
     else:
-        # Сводка — по состоянию после записи: добавленные стали «уже в базе».
-        fresh = plan_for(upload, parsed)
-        upload.summary = _with_refs(
-            fresh.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown),
-            parsed,
-        )
+        # Сводка — по состоянию после записи: добавленные стали «уже в базе»,
+        # снятые с продажи из блока «нет в этом файле» ушли.
+        upload.summary = _summary(upload, plan_for(upload, parsed), table, parsed, unknown)
         upload.result = {"runs": runs}
     upload.status = UploadStatus.DONE
     upload.error = None
@@ -715,6 +723,19 @@ def _write_placements(upload: Upload, *, replace: bool) -> None:
 def _with_refs(summary: dict[str, Any], parsed: Parsed) -> dict[str, Any]:
     """Сводка прайса и каталога + сколько площадок файла уже ссылаются на продукты (ADR-051)."""
     return {**summary, "ref_domains": refdomains.linking([r.domain for r in parsed.records])}
+
+
+def _summary(
+    upload: Upload, plan: Plan, table: Table, parsed: Parsed, unknown: list[str]
+) -> dict[str, Any]:
+    """Сводка до записи. У каталога — ещё и кого в файле нет (ADR-068)."""
+    summary = _with_refs(
+        plan.summary(rows=len(table.rows), blank_rows=table.blank_rows, unknown=unknown), parsed
+    )
+    if upload.kind == UploadKind.COLLABORATOR_CATALOG:
+        domains = catalog.domains(table)
+        summary["absent"] = withdraw.for_upload(upload, domains).summary(file_sites=len(domains))
+    return summary
 
 
 def refdomains_plan(upload: Upload) -> tuple[Table, refdomains.Plan]:

@@ -32,6 +32,7 @@ class Section(StrEnum):
     LINK_COUNTS = "Links Placed / Links Waiting: расчёт по базе не сходится с таблицей"
     COPY_MISMATCH = "Сверка с вкладкой «Размещения»"
     INVOICES = "Вкладка «Счета»: что не записано или расходится с базой"
+    WITHDRAWN = "Сняты с продажи по каталогу Collaborator — цена из таблицы не записана"
 
 
 class Outcome(StrEnum):

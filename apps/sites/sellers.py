@@ -182,6 +182,7 @@ def _key(price: SitePrice) -> tuple[Any, ...]:
         price.currency,
         price.link_type,
         price.link_type_manual,
+        price.withdrawn,
     )
 
 

@@ -639,6 +639,11 @@ class SitePrice(models.Model):
         default=MetricSource.MANUAL,
         db_default=MetricSource.MANUAL,
     )
+    # Снимок «снято с продажи» (ADR-068): продавца нет в его полном каталоге на
+    # эту дату. Цены у такого снимка нет, текущим предложением он не считается.
+    withdrawn = models.BooleanField(
+        "снято с продажи", default=False, db_default=False, editable=False
+    )
     reviewed_at = models.DateTimeField("разобрано", null=True, blank=True)
     checked_at = models.DateTimeField("дата цены", db_default=PgNow())
 
@@ -654,6 +659,13 @@ class SitePrice(models.Model):
                 fields=["site"],
                 name="idx_prices_pending",
                 condition=models.Q(reviewed_at__isnull=True),
+            ),
+            # Снимков «снято с продажи» мало (ADR-068): по этому индексу фильтр
+            # «продавец» в «Площадках» отбрасывает снятые цены одним запросом.
+            models.Index(
+                fields=["site", "seller", "placement_type", "checked_at"],
+                name="idx_prices_withdrawn",
+                condition=models.Q(withdrawn=True),
             ),
         ]
 
@@ -1348,6 +1360,7 @@ class SiteLatest(models.Model):
     cheaper_currency = models.CharField("валюта дешёвого", max_length=3, null=True)
     cheaper_eur_cents = models.IntegerField("дешевле, евроценты", null=True)
     cheaper_pending = models.BooleanField("дешёвое не разобрано", null=True)
+    withdrawn_at = models.DateTimeField("снята с продажи", null=True)
     computed_at = models.DateTimeField("пересчитано", db_default=PgNow())
 
     class Meta:
@@ -1445,6 +1458,9 @@ class ProductSiteLatest(models.Model):
     other_products = ArrayField(
         models.TextField(), verbose_name="другие продукты на площадке", null=True
     )
+    # Не продаётся (ADR-068): ни рабочей цены, ни текущих предложений — продавцы
+    # её сняли. «Площадки» по умолчанию такие прячут.
+    withdrawn_at = models.DateTimeField("снята с продажи", null=True)
 
     class Meta:
         managed = False

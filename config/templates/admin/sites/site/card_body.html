@@ -36,7 +36,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
     <div class="seo-card-fact"><dt>Топ-регион</dt><dd>{% if latest.top_geo %}{{ geo_flag }}{{ latest.top_geo|upper }}{% if geo_traffic_text %} {{ geo_traffic_text }}{% endif %}{% else %}—{% endif %}</dd></div>
     <div class="seo-card-fact"><dt>Язык</dt><dd>{{ latest.language|default:site.language|default:"—" }}</dd></div>
     <div class="seo-card-fact"><dt>Серость</dt><dd>{% if gray.latest %}<span class="seo-card-zone seo-gray-{{ gray.latest.zone|default:'none' }}"{% if gray.latest.zone %} title="{{ gray.latest.zone_title }}"{% endif %}>{{ gray.latest.percent }}</span><small>{{ gray.latest.day }}</small>{% else %}—<small>замеров нет</small>{% endif %}</dd></div>
-    <div class="seo-card-fact"><dt>Рабочая цена</dt><dd>{% if working %}{{ working_eur }}<small>{% if working_original %}{{ working_original }} · {% endif %}{{ working.get_placement_type_display }}</small>{% else %}—<small>не выбрана</small>{% endif %}</dd></div>
+    <div class="seo-card-fact"><dt>Рабочая цена</dt><dd>{% if working %}{{ working_eur }}<small>{% if working_original %}{{ working_original }} · {% endif %}{{ working.get_placement_type_display }}</small>{% elif withdrawn_at %}—<small>не продаётся с {{ withdrawn_at|date:"d.m.Y" }}</small>{% else %}—<small>не выбрана</small>{% endif %}</dd></div>
   </dl>
 
   {% if statuses %}
@@ -94,7 +94,11 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
         <div class="seo-card-link-type">Тип ссылки: {% include "admin/sites/site/link_type_select.html" with offer=working %}</div>
       </div>
       {% else %}
+      {% if withdrawn_by and not offer_rows %}
+      <p class="seo-sub">Не продаётся: у {{ withdrawn_by|join:", " }} снята с продажи{% if withdrawn_at %} {{ withdrawn_at|date:"d.m.Y" }}{% endif %}. Прежние цены — в истории цен ниже.</p>
+      {% else %}
       <p class="seo-sub">Рабочей цены нет — выберите предложение ниже.</p>
+      {% endif %}
       {% endif %}
       {% if offer_rows %}
       <div class="seo-table-wrap">
@@ -131,7 +135,8 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
         <span class="seo-sub">снять пометки «новое», рабочую цену не менять</span>
       </form>
       {% endif %}
-      {% else %}
+      {% if withdrawn_by %}<p class="seo-sub">Сняли с продажи: {{ withdrawn_by|join:", " }} — в истории цен.</p>{% endif %}
+      {% elif not withdrawn_by %}
       <p class="seo-sub">Предложений нет.</p>
       {% endif %}
       <details class="seo-card-more">
@@ -140,7 +145,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
         <div class="seo-table-wrap">
           <table class="seo-card-table"><tbody>
           {% for row in history %}
-            <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{{ row.price }}</td><td>{{ row.offer.link_type|default_if_none:"" }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
+            <tr><td>{{ row.offer.seller }}</td><td>{{ row.offer.get_placement_type_display }}</td><td>{% if row.offer.withdrawn %}<span class="seo-flat">снята с продажи</span>{% else %}{{ row.price }}{% endif %}</td><td>{{ row.offer.link_type|default_if_none:"" }}</td><td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td></tr>
           {% endfor %}
           </tbody></table>
         </div>

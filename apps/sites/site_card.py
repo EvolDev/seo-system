@@ -113,9 +113,19 @@ def notes_summary(rows: list[NoteRow]) -> str:
     return f"последняя — {rows[0].who}, {rows[0].when}"
 
 
-def price_summary(working: str, seller: str, offers: int, pending: int) -> str:
-    """Сводка свёрнутой «Цены»: «€490 · LinkHub Media · предложений: 2, новых: 1»."""
-    parts = [f"{working} · {seller}" if working else "рабочей цены нет"]
+def price_summary(
+    working: str, seller: str, offers: int, pending: int, *, withdrawn: str = ""
+) -> str:
+    """Сводка свёрнутой «Цены»: «€490 · LinkHub Media · предложений: 2, новых: 1».
+
+    Не продаётся (ADR-068) — «не продаётся с 20.10.2026» вместо «рабочей цены нет».
+    """
+    if working:
+        parts = [f"{working} · {seller}"]
+    elif withdrawn and not offers:
+        parts = [f"не продаётся с {withdrawn}"]
+    else:
+        parts = ["рабочей цены нет"]
     if offers:
         count = f"предложений: {offers}"
         if pending:

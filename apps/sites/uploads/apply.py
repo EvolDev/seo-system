@@ -58,6 +58,7 @@ PRICE_FIELDS = (
     "extra",
     "link_type",
     "link_type_manual",
+    "withdrawn",
 )
 METRIC_FIELDS = ("dr", "organic_traffic", "total_keywords")
 BATCH = 1000
@@ -298,6 +299,9 @@ class Writer:
             "extra": record.extra or None,
             "link_type": record.link_types.get(item.service, record.link_type),
             "link_type_manual": False,
+            # Снимок той же даты мог быть снятием с продажи (ADR-068): цена из
+            # файла возвращает площадку в продажу.
+            "withdrawn": False,
         }
 
     def _move_working(self, prices: Sequence[SitePrice]) -> None:
