@@ -1919,6 +1919,28 @@ class RegionFilter(admin.SimpleListFilter):
             }
 
 
+class EuroPriceRangeFilter(NumericRangeFilter):  # type: ignore[misc]
+    """«Цена, €» от — до: рабочая цена размещения в евро (просьба пользователя 12.10.2026).
+
+    Человек вводит евро, в базе — евроценты (деньги без float, ADR-040):
+    границы переводим в центы здесь. Площадка без рабочей цены под диапазон
+    не подходит.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.title = "цена, €"
+
+    def _make_query_filter(self, request: HttpRequest, validated_data: dict[str, Any]) -> Any:
+        found: dict[str, int] = {}
+        for key, lookup in ((self.lookup_kwarg_gte, "gte"), (self.lookup_kwarg_lte, "lte")):
+            value = validated_data.get(key)
+            if value is not None:
+                cents = (Decimal(str(value)) * 100).to_integral_value()
+                found[f"{self.field_path}__{lookup}"] = int(cents)
+        return found
+
+
 def _region_range(field_path: str, title: str) -> type:
     """«от — до» по колонке региона. Поля такого в модели нет — даём фильтру поле-заглушку."""
 
@@ -2078,6 +2100,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         # Диапазон — поля «С» и «До» (django-admin-rangefilter, ADR-038).
         ("dr", NumericRangeFilter),
         ("organic_traffic", NumericRangeFilter),
+        ("placement_eur_cents", EuroPriceRangeFilter),
         LanguageFilter,
         WritingFilter,
         PublishedFilter,

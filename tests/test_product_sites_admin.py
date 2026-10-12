@@ -420,3 +420,18 @@ def test_query_count(
     assert response.status_code == 200
     assert len(response.context["cl"].result_list) == 50
     assert "трафик US" in response.content.decode()
+
+
+def test_price_range_in_euros(
+    admin_client: Client, convertio: Product, offer: OfferFactory
+) -> None:
+    """«Цена, €» от — до: вводят евро, сравниваются евроценты рабочей цены."""
+    for domain, cents in (("cheap.com", 5000), ("middle.com", 15050), ("dear.com", 30000)):
+        offer(_site(domain), cents)
+    _site("noprice.com")
+    gte, lte = "placement_eur_cents__range__gte", "placement_eur_cents__range__lte"
+    assert _domains(admin_client, list="all", **{gte: "100", lte: "200"}) == {"middle.com"}
+    assert _domains(admin_client, list="all", **{gte: "150.5"}) == {"middle.com", "dear.com"}
+    assert _domains(admin_client, list="all", **{lte: "50"}) == {"cheap.com"}
+    page = admin_client.get(URL, {"list": "all"}).content.decode()
+    assert "цена, €" in page
