@@ -13,8 +13,10 @@
   вперёд. Значение в базе другое — в сводку; галочка «Заменить расходящиеся
   значения» берёт значение из файла (статус назад — никогда). Пустой статус в
   файле — «Опубликовано»: файл — список сделанного;
-- ссылки — по номеру в статье; ключ — по точному совпадению анкора, как у
-  импорта таблицы;
+- ссылки — по номеру в статье; ключ — анкор целиком или ключ внутри фразы
+  (`apps.keywords.matching`, ADR-069), вид ссылки — прямой, разбавленный или
+  безанкор; ключа нет или их несколько на разные страницы — ссылка пишется
+  без ключа и попадает в сводку;
 - продавцы — по имени без учёта регистра, новых заводим; сотрудники —
   пользователи без права входа (ADR-041), заводятся при загрузке;
 - отметки индексации — проверки человеком в журнале на дату из заголовка или
@@ -52,7 +54,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from apps.content.domain_settings import UploadPriceCap, indexation_schedule, offer_recheck
-from apps.keywords.models import Keyword
+from apps.keywords import matching
 from apps.observability.models import Check, CheckStatus, Performer
 from apps.placements import indexation, invoices
 from apps.placements.matching import match_placement, match_without_url, moves_forward
@@ -167,6 +169,7 @@ class PlanRow:
     status_moves: bool = False
     links_new: list[LinkData] = field(default_factory=list)
     links_changed: list[tuple[PlacementLink, LinkData]] = field(default_factory=list)
+    unbound: list[dict[str, Any]] = field(default_factory=list)  # ссылки, которым не нашёлся ключ
     marks: list[tuple[dt.datetime, IndexMark]] = field(default_factory=list)  # новые отметки
     note_new: bool = False
     offer: str | None = None  # NEW_OFFER, CHANGED_OFFER, SAME_OFFER; None — предложения нет
@@ -264,6 +267,7 @@ class PlacementPlan:
             **_capped("conflicts", conflicts),
             **_capped("ambiguous", [_line(row) for row in self.rows if row.ambiguous]),
             **_capped("other_article", [_line(row) for row in work if row.other_article]),
+            **_capped("unbound", [item for row in work for item in row.unbound]),
             **_capped("price_cap", self.capped),
             **_capped(
                 "errors", [{"line": e.line, "message": e.message} for e in self.parsed.errors]
@@ -324,6 +328,7 @@ class _Planner:
         self.offers = _offers_by_key(site_ids)
         self.latest = _latest_offers(site_ids)
         self.recheck_pct = offer_recheck().min_change_pct
+        self.anchor_pool = matching.candidates(self.plan.product.pk)
         # Рабочая цена, отказы и заявки площадок — как их видит разбор прайса.
         self.states: dict[str, SiteState] = load_state(
             domains, seller_id=0, before=start_of_day(upload.prices_date), rates=rates
@@ -552,6 +557,7 @@ class _Planner:
                 if link.index not in planned:
                     row.links_new.append(link)
                     planned.add(link.index)
+                    self._bind(row, link)
                 continue
             same = (current.anchor, current.target_url.rstrip("/")) == (
                 link.anchor,
@@ -566,6 +572,18 @@ class _Planner:
                     f"«{link.anchor}» → {link.target_url}",
                     replaceable=False,
                 )
+
+    def _bind(self, row: PlanRow, link: LinkData) -> None:
+        found = matching.find(link.anchor, self.anchor_pool, url=link.target_url)
+        if found.keyword is None:
+            row.unbound.append(
+                {
+                    "line": row.record.line,
+                    "domain": row.record.domain,
+                    "anchor": link.anchor,
+                    "why": matching.why_unbound(found),
+                }
+            )
 
     def _marks(self, row: PlanRow) -> None:
         target = row.target
@@ -664,7 +682,7 @@ class Writer:
         self._sites()
         sellers = self._sellers()
         employees = self._employees()
-        keywords = {k.keyword: k for k in Keyword.objects.filter(product=self.plan.product)}
+        keywords = matching.candidates(self.plan.product.pk)
         offers = _offers_by_key(list(self.site_ids.values()))
         for row in self.plan.rows:
             if row.ambiguous:
@@ -772,12 +790,16 @@ class Writer:
             self.counts["placements_unchanged"] += 1
         return placement
 
-    def _links(self, row: PlanRow, placement: Placement, keywords: dict[str, Keyword]) -> None:
+    def _links(
+        self, row: PlanRow, placement: Placement, keywords: list[matching.Candidate]
+    ) -> None:
         for link in row.links_new:
+            found, kind = matching.bind(link.anchor, keywords, url=link.target_url)
             PlacementLink.objects.create(
                 placement=placement,
-                keyword=keywords.get(link.anchor),
+                keyword_id=found.keyword.id if found.keyword else None,
                 anchor=link.anchor,
+                anchor_type=kind,
                 target_url=link.target_url,
                 link_index=link.index,
             )
@@ -785,10 +807,12 @@ class Writer:
         if not self.replace:
             return
         for current, link in row.links_changed:
+            found, kind = matching.bind(link.anchor, keywords, url=link.target_url)
             current.anchor = link.anchor
             current.target_url = link.target_url
-            current.keyword = keywords.get(link.anchor)
-            current.save(update_fields=["anchor", "target_url", "keyword"])
+            current.keyword_id = found.keyword.id if found.keyword else None
+            current.anchor_type = kind
+            current.save(update_fields=["anchor", "target_url", "keyword", "anchor_type"])
             self.counts["links_updated"] += 1
 
     def _checks(self, row: PlanRow, placement: Placement) -> None:

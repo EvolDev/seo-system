@@ -27,6 +27,7 @@ from django.db import models
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from apps.keywords import matching
 from apps.keywords.models import AnchorType, Keyword, KeywordPosition
 from apps.placements import invoices
 from apps.placements.matching import LADDER, match_placement
@@ -128,6 +129,8 @@ class Importer:
         self.as_of = as_of
         self.checked_at = start_of_day(as_of)
         self.report = report
+        self._pool: list[matching.Candidate] | None = None
+        self._by_id: dict[int, Keyword] = {}
         self.site_list, created = SiteList.objects.get_or_create(
             name=list_name, defaults={"source": source}
         )
@@ -727,12 +730,16 @@ class Importer:
         keywords: dict[str, Keyword],
         where: str,
     ) -> None:
-        keyword = keywords.get(link.anchor)
+        # Ключ — анкор целиком или ключ внутри фразы (ADR-069).
+        found, kind = matching.bind(link.anchor, self._anchor_pool(keywords), url=link.target_url)
+        keyword = self._by_id.get(found.keyword.id) if found.keyword else None
         if keyword is None:
             self.report.issue(
-                Section.ANCHOR_NO_KEYWORD, f"{where}: «{link.anchor}» → {link.target_url}"
+                Section.ANCHOR_NO_KEYWORD,
+                f"{where}: «{link.anchor}» → {link.target_url}"
+                + (f" — {matching.why_unbound(found)}" if found.ambiguous else ""),
             )
-        elif keyword.target_url.rstrip("/") != link.target_url.rstrip("/"):
+        elif not matching.same_url(keyword.target_url, link.target_url):
             self.report.issue(
                 Section.ANCHOR_OTHER_URL,
                 f"{where}: «{link.anchor}» ведёт на {link.target_url}, "
@@ -745,16 +752,20 @@ class Importer:
                 anchor=link.anchor,
                 target_url=link.target_url,
                 link_index=link.index,
-                anchor_type=keyword.anchor_type if keyword is not None else None,
+                anchor_type=kind,
             )
             self.report.count("placement_links", Outcome.CREATED)
             return
         changed: list[str] = []
         # Ключ дописываем, только если анкор тот же: иначе ключ нашёлся по
-        # анкору из таблицы, а в базе у ссылки анкор другой.
+        # анкору из таблицы, а в базе у ссылки анкор другой. Записанный вид
+        # ссылки не перетираем.
         if existing.keyword_id is None and keyword is not None and existing.anchor == link.anchor:
             existing.keyword = keyword
             changed.append("keyword")
+            if existing.anchor_type is None:
+                existing.anchor_type = kind
+                changed.append("anchor_type")
         for field in ("anchor", "target_url"):
             if getattr(existing, field) != getattr(link, field):
                 self.report.issue(
@@ -763,6 +774,17 @@ class Importer:
                     f"{getattr(existing, field)!r}, в таблице {getattr(link, field)!r}",
                 )
         self._save(existing, changed, "placement_links")
+
+    def _anchor_pool(self, keywords: dict[str, Keyword]) -> list[matching.Candidate]:
+        """Активные ключи Convertio для поиска во фразе — один раз на импорт."""
+        if self._pool is None:
+            self._by_id = {k.pk: k for k in keywords.values()}
+            self._pool = [
+                matching.Candidate(k.pk, k.keyword, k.target_url, k.anchor_type)
+                for k in sorted(keywords.values(), key=lambda k: k.pk)
+                if k.is_active
+            ]
+        return self._pool
 
     # --- Размещения Clideo (маппинг §1.6) ---
 

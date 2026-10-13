@@ -136,6 +136,15 @@
         </ul>
       </div>
     {% endif %}
+    {% if summary.unbound %}
+      <div class="seo-box">
+        <h3>Ссылка без анкора из списка — запишется без ключа</h3>
+        <ul>
+          {% for row in summary.unbound %}<li>Строка {{ row.line }}, {{ row.domain }}: «{{ row.anchor }}» — {{ row.why }}</li>{% endfor %}
+          {% if summary.unbound_total > summary.unbound|length %}<li class="seo-flat">всего {{ summary.unbound_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
     {% if summary.ambiguous %}
       <div class="seo-box">
         <h3>Неясно, какое размещение дополнить — не тронуто</h3>

@@ -8,9 +8,10 @@
 Счёт (E1-14, ADR-055): статус кнопками, «Оплачен» ставит сегодняшний день в
 пустую дату оплаты; доли строк — `apps.placements.invoices.shares`.
 
-Ссылка размещения (E3-05, ADR-059): анкор — одно поле с поиском по анкорам
-продукта (seo/anchors.js), «куда ведёт» подставляется из анкора и правится;
-текст и тип анкора берутся из него, номер ссылки ставится сам.
+Ссылка размещения (E3-05, ADR-059, ADR-069): анкор — одно поле с поиском по
+анкорам продукта (seo/anchors.js), «куда ведёт» подставляется из анкора и
+правится; текст на сайте — свой (разбавленный анкор) или текст анкора, вид
+ссылки — по тексту или выбором человека; номер ссылки ставится сам.
 """
 
 from typing import Any, ClassVar
@@ -18,8 +19,10 @@ from typing import Any, ClassVar
 from django import forms
 from django.db.models import Max, Q
 from django.forms.models import BaseInlineFormSet
+from django.urls import reverse
 from django.utils import timezone
 
+from apps.keywords import matching
 from apps.keywords.models import NAKED_TYPES, AnchorType, Keyword
 from apps.placements import invoices
 from apps.placements.models import (
@@ -232,12 +235,35 @@ class AnchorSelect(forms.Select):
 
 
 class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
+    """Ссылка размещения: ключ, текст на сайте, вид ссылки и куда ведёт (ADR-069).
+
+    Текст пустой — берётся текст анкора, ссылка прямая. Свой текст с ключом
+    внутри («Convertio's mp4 to mp3 converter») — разбавленная; ключ не выбран —
+    подставляется найденный во фразе (`apps.keywords.matching`). Вид «по
+    тексту» определяет система; ключа во фразе нет — вид выбирает человек.
+    Текст и адрес сохранённой ссылки форма сама не меняет.
+    """
+
     keyword = forms.ModelChoiceField(
         label="Анкор",
         queryset=Keyword.objects.none(),
         required=False,
         widget=AnchorSelect,
         empty_label="— выберите анкор —",
+    )
+    text = forms.CharField(
+        label="Текст на сайте",
+        required=False,
+        max_length=500,
+        widget=forms.TextInput(attrs={"data-anchor-text": "", "autocomplete": "off"}),
+        help_text="Пусто — текст анкора. С брендом или словами вокруг ключа — разбавленная ссылка.",
+    )
+    kind = forms.ChoiceField(
+        label="Вид ссылки",
+        required=False,
+        choices=[("", "По тексту"), *AnchorType.choices],
+        widget=forms.Select(attrs={"data-anchor-kind": ""}),
+        help_text="«По тексту» — определит система. Ключа во фразе нет — выберите сами.",
     )
     target_url = forms.CharField(
         label="Куда ведёт",
@@ -251,8 +277,9 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
         model = PlacementLink
         fields = ("keyword", "target_url")
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, product_id: int | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.product_id = product_id
         field = self.fields["keyword"]
         assert isinstance(field, forms.ModelChoiceField)
         current = self.instance.keyword_id
@@ -263,10 +290,24 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
             .only("pk", "keyword", "product_id", "target_url", "page_type", "anchor_type")
             .order_by("product_id", "keyword")
         )
-        if self.instance.pk is not None and current is None and self.instance.anchor:
+        field.widget.attrs["data-match-url"] = reverse("admin:keywords_anchor_match")
+        link = self.instance
+        if link.pk is not None and link.anchor:
+            self.fields["text"].initial = link.anchor
+            # Записанный вид показываем, только если он не тот, что дал бы текст:
+            # иначе «по тексту», и правка текста пересчитает вид.
+            keyword = link.keyword if current else None
+            auto = (
+                matching.kind(link.anchor, keyword.keyword, keyword.anchor_type)
+                if keyword is not None
+                else None
+            )
+            if link.anchor_type and link.anchor_type != auto:
+                self.fields["kind"].initial = link.anchor_type
+        if link.pk is not None and current is None and link.anchor:
             widget = field.widget
             assert isinstance(widget, AnchorSelect)
-            widget.legacy = self.instance.anchor
+            widget.legacy = link.anchor
             field.empty_label = ""
 
     def clean(self) -> dict[str, Any] | None:
@@ -275,14 +316,49 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
             return None
         keyword: Keyword | None = data.get("keyword")
         url = (data.get("target_url") or "").strip()
+        text = " ".join((data.get("text") or "").split())
+        chosen = data.get("kind") or None
+        product_id = self._product_id()
+        if keyword is not None and product_id and keyword.product_id != product_id:
+            self.add_error("keyword", "Анкор другого продукта — выберите анкор этого размещения.")
+            return data
+        # Ключ по фразе — только когда фразу ввели: сохранённую ссылку без ключа
+        # обычное сохранение молча не привязывает.
+        typed = self.instance.pk is None or "text" in self.changed_data
+        if keyword is None and text and product_id and typed:
+            found = matching.find(text, matching.candidates(product_id), url=url or None)
+            if found.ambiguous:
+                names = ", ".join(f"«{c.keyword}»" for c in found.candidates[:4])
+                self.add_error(
+                    "keyword", f"Во фразе ключи на разные страницы: {names} — выберите анкор."
+                )
+                return data
+            if found.keyword is not None:
+                keyword = Keyword.objects.get(pk=found.keyword.id)
+                data["keyword"] = keyword
+                self.instance.keyword = keyword
         if keyword is not None:
-            self.instance.anchor = keyword.keyword
-            self.instance.anchor_type = keyword.anchor_type or AnchorType.EXACT
+            text = text or keyword.keyword
+            kind = chosen or matching.kind(text, keyword.keyword, keyword.anchor_type)
+            if kind is None:
+                self.add_error(
+                    "kind", f"Ключа «{keyword.keyword}» во фразе нет — выберите вид ссылки."
+                )
+            self.instance.anchor = text
+            self.instance.anchor_type = kind
             if not url:
                 url = keyword.target_url
-        elif not (self.instance.pk is not None and self.instance.anchor):
+        elif text and (self.instance.pk is None or typed):
+            # Фраза без ключа из списка: ссылка сохраняется как есть, в долях —
+            # отдельной строкой «без анкора из списка».
+            self.instance.anchor = text
+            self.instance.anchor_type = chosen
+        elif self.instance.pk is not None and self.instance.anchor:
+            if chosen:
+                self.instance.anchor_type = chosen
+        else:
             if url:
-                self.add_error("keyword", "Выберите анкор.")
+                self.add_error("keyword", "Выберите анкор или впишите текст ссылки.")
             return data
         if url and not url.startswith(("http://", "https://")):
             self.add_error("target_url", "Адрес страницы целиком: https://…")
@@ -291,9 +367,23 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
         data["target_url"] = url
         return data
 
+    def _product_id(self) -> int | None:
+        """Продукт размещения: его передаёт набор ссылок, у нового размещения — из формы."""
+        if self.product_id is not None:
+            return self.product_id
+        try:
+            placement: Placement = self.instance.placement
+        except Placement.DoesNotExist:
+            return None
+        return placement.product_id
+
 
 class PlacementLinkFormSet(BaseInlineFormSet):  # type: ignore[type-arg]
     """Ссылки статьи: номер новой ссылки — следующий за последним у размещения."""
+
+    def get_form_kwargs(self, index: int | None) -> dict[str, Any]:
+        # Продукт размещения — для поиска ключа во фразе и проверки анкора.
+        return {**super().get_form_kwargs(index), "product_id": self.instance.product_id}
 
     def save_new(self, form: forms.ModelForm, commit: bool = True) -> Any:  # type: ignore[type-arg]
         link = form.save(commit=False)

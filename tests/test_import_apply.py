@@ -784,3 +784,20 @@ class TestRunAndCommand:
                 "--date=2026-09-27",
                 f"--list={SEPTEMBER}",
             )
+
+
+def test_diluted_anchor_bound_to_key(
+    make_workbook: MakeWorkbook, products: tuple[Product, Product], run: Callable[..., Report]
+) -> None:
+    """Ключ внутри фразы анкора (ADR-069): ссылка — к ключу, вид — разбавленный."""
+    path = make_workbook(
+        base=[("a.com", {**PUBLISHED, "Анкор1": "Convertio's mp4 to mp3 tool"})],
+        keywords=KEYWORDS,
+    )
+    report = run(path)
+    link = PlacementLink.objects.select_related("keyword").get(
+        placement__site__domain="a.com", link_index=1
+    )
+    assert link.keyword is not None and link.keyword.keyword == "mp4 to mp3"
+    assert (link.anchor, link.anchor_type) == ("Convertio's mp4 to mp3 tool", "diluted")
+    assert all("mp4 to mp3 tool" not in issue for issue in report.issues[Section.ANCHOR_NO_KEYWORD])

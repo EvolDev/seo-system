@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import Any
 
 from django.db import transaction
-from django.db.models.functions import Lower
 from django.utils import timezone
 
+from apps.keywords import matching
 from apps.keywords.models import (
     NAKED_TYPES,
     AnchorType,
@@ -865,26 +865,27 @@ def _write_countries(plan: AnchorPlan) -> int:
 
 
 def attach_links(product: Product) -> int:
-    """Ссылки без анкора из списка — к анкору с тем же текстом (без регистра).
+    """Ссылки без анкора из списка — к анкору по тексту (ADR-069).
 
     Старые «Convertio», «click here» из таблицы получают анкор, когда в список
-    пришла безанкорка: так они считаются в долях.
+    пришла безанкорка; «Convertio's mp4 to mp3 converter» — когда пришёл ключ.
+    Поиск — `apps.keywords.matching`: анкор целиком или ключ внутри фразы.
+    Ссылки с ключом не трогаем: связь выбрал человек или прошлая загрузка.
+    Запись идёт в транзакции загрузки — журнал её отменит.
     """
-    anchors = {
-        text: (pk, kind)
-        for text, pk, kind in Keyword.objects.filter(product=product, is_active=True)
-        .annotate(text=Lower("keyword"))
-        .values_list("text", "pk", "anchor_type")
-    }
+    pool = matching.candidates(product.pk)
     attached = 0
     links = PlacementLink.objects.filter(placement__product=product, keyword__isnull=True)
-    for link in links.annotate(text=Lower("anchor")).only("pk", "anchor"):
-        found = anchors.get(link.text)
-        if found is None:
+    for link in links.only("pk", "anchor", "target_url", "anchor_type"):
+        found, kind = matching.bind(link.anchor, pool, url=link.target_url)
+        if found.keyword is None:
             continue
-        link.keyword_id, kind = found
-        link.anchor_type = kind or AnchorType.EXACT
-        link.save(update_fields=["keyword", "anchor_type"])
+        link.keyword_id = found.keyword.id
+        fields = ["keyword"]
+        if link.anchor_type is None:
+            link.anchor_type = kind
+            fields.append("anchor_type")
+        link.save(update_fields=fields)
         attached += 1
     return attached
 

@@ -1,5 +1,6 @@
 """Анкоры продукта на экранах (E3-05, ADR-059): страница «Анкоры», окно «Новый анкор»,
-правка долей на месте и блок «Анкоры продукта» над ссылками размещения.
+правка долей на месте, блок «Анкоры продукта» над ссылками размещения и
+подсказка «ключ во фразе» в панели ссылки (ADR-069).
 
 Ответы на запись — JSON и всегда 200: отказ — вопрос человеку, а не ошибка
 запроса (4xx браузер пишет в консоль ошибкой).
@@ -19,6 +20,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.content.domain_settings import anchor_recommend
+from apps.keywords import matching
 from apps.keywords.anchors import Anchor, TypeStat, overview, pct_text, recommend
 from apps.keywords.models import (
     NAKED_TYPES,
@@ -72,6 +74,8 @@ def page_context(request: HttpRequest, product_id: int | None) -> dict[str, Any]
             "keys": len(keys),
             "naked_count": len(naked),
             "types": _type_rows(data.types),
+            "by_key": sum(t.kinds.by_key for t in data.types),
+            "kind_unknown": sum(t.kinds.unknown for t in data.types),
             "target_sum": pct_text(target_sum) if targets else "",
             "target_sum_ok": not targets or target_sum == PCT_MAX,
             "naked": [
@@ -122,6 +126,10 @@ def _type_rows(types: Sequence[TypeStat]) -> list[dict[str, Any]]:
                 "exact": _input(share.exact if share else None),
                 "diluted": _input(share.diluted if share else None),
                 "naked": _input(share.naked if share else None),
+                # Факт по виду ссылок внутри типа — под целью в той же ячейке.
+                "exact_fact": pct_text(stat.kinds.pct("exact")),
+                "diluted_fact": pct_text(stat.kinds.pct("diluted")),
+                "naked_fact": pct_text(stat.kinds.pct("naked")),
                 "placed_pct": pct_text(stat.placed_pct),
                 "waiting_pct": pct_text(stat.waiting_pct),
                 "total_pct": pct_text(stat.total_pct),
@@ -256,6 +264,52 @@ def anchor_json(keyword: Keyword) -> dict[str, Any]:
         "product": keyword.product_id,
         "naked": keyword.anchor_type in NAKED_TYPES,
     }
+
+
+# ---------- Ключ во фразе — подсказка в панели ссылки ----------
+
+
+def match_view(request: HttpRequest) -> JsonResponse:
+    """Ключи во фразе ссылки и её вид — тем же поиском, что форма и загрузки.
+
+    `keyword` — анкор, выбранный в ссылке: вид считается по нему. Не выбран —
+    по найденному, если выбор однозначен. Подсказка ничего не записывает:
+    форма проверяет всё заново при сохранении.
+    """
+    if not (
+        request.user.has_perm("placements.change_placement")
+        or request.user.has_perm("placements.add_placement")
+    ):
+        return JsonResponse({"ok": False, "message": "Нет прав на размещения."})
+    product = Product.objects.filter(pk=_digits(request.GET.get("product"))).first()
+    if product is None:
+        return JsonResponse({"ok": False, "message": "Выберите продукт размещения."})
+    text = " ".join((request.GET.get("text") or "").split())
+    url = (request.GET.get("url") or "").strip() or None
+    found = matching.find(text, matching.candidates(product.pk), url=url)
+    selected = Keyword.objects.filter(
+        product=product, pk=_digits(request.GET.get("keyword"))
+    ).first()
+    base: matching.Candidate | None = (
+        matching.Candidate(selected.pk, selected.keyword, selected.target_url, selected.anchor_type)
+        if selected is not None
+        else found.keyword
+    )
+    kind = matching.kind(text or base.keyword, base.keyword, base.anchor_type) if base else None
+    return JsonResponse(
+        {
+            "ok": True,
+            "chosen": found.keyword.id if found.keyword else None,
+            "ambiguous": found.ambiguous,
+            "exact": found.exact,
+            "candidates": [
+                {"id": c.id, "keyword": c.keyword, "url": c.target_url}
+                for c in found.candidates[:6]
+            ],
+            "kind": str(kind) if kind else None,
+            "kind_label": AnchorType(kind).label if kind else None,
+        }
+    )
 
 
 # ---------- Доли — правка на месте ----------

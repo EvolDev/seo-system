@@ -666,3 +666,49 @@ class TestSiteLatest:
         site = Site.objects.get(domain="brandnew.com")
         assert SiteLatest.objects.filter(site=site).exists()
         assert latest.stale() == []
+
+
+class TestDilutedAnchors:
+    """Ключ внутри фразы анкора (ADR-069): привязка, вид, сводка."""
+
+    def test_phrase_bound_to_key_and_ambiguous_in_summary(
+        self, convertio: Product, clideo: Product
+    ) -> None:
+        mp3 = Keyword.objects.create(
+            product=convertio,
+            keyword="mp4 to mp3 converter",
+            target_url="https://convertio.co/mp4-mp3/",
+            anchor_type="exact",
+        )
+        Keyword.objects.create(
+            product=convertio,
+            keyword="convert mp4 to mp3",
+            target_url="https://convertio.co/mp4-mp3/",
+            anchor_type="exact",
+        )
+        Keyword.objects.create(
+            product=convertio,
+            keyword="mp4 to mp3 online",
+            target_url="https://convertio.co/mp4-mp3-online/",
+            anchor_type="exact",
+        )
+        row = {
+            **TOMSGUIDE,
+            "Анкор1": "Convertio's mp4 to mp3 converter",
+            "Ссылка1": "https://convertio.co/mp4-mp3/",
+            "Анкор2": "convert mp4 to mp3 online",
+            "Ссылка2": "https://convertio.co/video-converter/",
+        }
+        upload = _check(_upload(convertio, [row]))
+        summary = upload.summary or {}
+        assert summary["unbound_total"] == 1
+        assert summary["unbound"][0]["anchor"] == "convert mp4 to mp3 online"
+        assert "разные страницы" in summary["unbound"][0]["why"]
+        _write(upload)
+        links = {link.link_index: link for link in PlacementLink.objects.all()}
+        assert (links[1].keyword, links[1].anchor, links[1].anchor_type) == (
+            mp3,
+            "Convertio's mp4 to mp3 converter",
+            "diluted",
+        )
+        assert (links[2].keyword, links[2].anchor_type) == (None, None)

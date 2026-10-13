@@ -14,6 +14,12 @@
  *    в полях анкора — анкоры нового продукта.
  * 5. Доли на странице «Анкоры» правятся на месте: значение уходит при смене
  *    поля, после записи список перечитывается без перезагрузки.
+ * 6. «Текст на сайте» и «Вид ссылки» (ADR-069): после паузы ввода сервер
+ *    ищет ключи во фразе (data-match-url) — под полем вид ссылки и найденные
+ *    ключи, щелчок по ключу выбирает его. Ключ не выбран и фразу ввели —
+ *    подставляется найденный, если выбор однозначен; выбранный человеком ключ
+ *    не трогаем. Сменили ключ — текст, равный прежнему ключу, меняется на
+ *    новый; свою фразу не трогаем. Устаревшие ответы отбрасываются.
  *
  * Обработчики на document — один раз; поля настраивает init(): скрипт
  * зовут в конце формы размещения (в панели записи — когда ссылки на месте),
@@ -283,9 +289,174 @@
       openDialog(productOf(select), item.text, select);
       return;
     }
+    select.dataset.auto = "";
     choose(select, item.option.value);
     picker.box.classList.remove("seo-picker-legacy");
     picker.close();
+  }
+
+  // ---------- Текст на сайте и вид ссылки (ADR-069) ----------
+
+  function rowOf(node) {
+    return node.closest(".inline-related") || node.closest("fieldset") || node.form;
+  }
+
+  function inRow(select, selector) {
+    var row = rowOf(select);
+    return row ? row.querySelector(selector) : null;
+  }
+
+  function keyText(select) {
+    return select.value && select.selectedOptions[0] ? select.selectedOptions[0].textContent.trim() : "";
+  }
+
+  function wireText(select) {
+    var text = inRow(select, "[data-anchor-text]");
+    if (!text || text.seoWired) return;
+    text.seoWired = true;
+    select.dataset.prevKey = keyText(select);
+    select.dataset.auto = "";
+    text.addEventListener("input", function () {
+      select.dataset.typed = "1";
+      schedule(select);
+    });
+    var url = urlInputOf(select);
+    if (url) url.addEventListener("change", function () { schedule(select); });
+    var kind = inRow(select, "[data-anchor-kind]");
+    if (kind) kind.addEventListener("change", function () { schedule(select, 0); });
+    select.addEventListener("change", function () { keyChanged(select, text); });
+    if (text.value || select.value) schedule(select, 0);
+  }
+
+  function keyChanged(select, text) {
+    var label = keyText(select);
+    if (label && (!text.value.trim() || norm(text.value) === norm(select.dataset.prevKey))) {
+      text.value = label;
+    }
+    select.dataset.prevKey = label;
+    schedule(select, 0);
+  }
+
+  function schedule(select, delay) {
+    if (!inRow(select, "[data-anchor-text]")) return;
+    clearTimeout(select.seoMatchTimer);
+    select.seoMatchTimer = setTimeout(function () { ask(select); }, delay === undefined ? 250 : delay);
+  }
+
+  async function ask(select) {
+    var text = inRow(select, "[data-anchor-text]");
+    var address = select.dataset.matchUrl;
+    var product = productOf(select);
+    var phrase = text ? text.value.trim() : "";
+    if (!text) return;
+    var seq = (select.seoMatchSeq || 0) + 1;
+    select.seoMatchSeq = seq;
+    if (!address || !product || (!phrase && !select.value)) {
+      hint(select).hidden = true;
+      return;
+    }
+    var url = urlInputOf(select);
+    var params = new URLSearchParams({
+      product: product,
+      text: phrase,
+      url: url ? url.value.trim() : "",
+      keyword: select.value || "",
+    });
+    var answer;
+    try {
+      var response = await fetch(address + "?" + params.toString(), {
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" },
+      });
+      if (!response.ok) throw new Error("сервер ответил " + response.status);
+      answer = await response.json();
+    } catch (error) {
+      if (seq === select.seoMatchSeq) say(select, [line("Ключ во фразе не проверился: " + error.message, true)]);
+      return;
+    }
+    // Пока шёл ответ, фразу, ключ или продукт поменяли — ответ устарел.
+    if (seq !== select.seoMatchSeq) return;
+    apply(select, answer);
+  }
+
+  function apply(select, answer) {
+    if (!answer.ok) {
+      say(select, [line(answer.message, true)]);
+      return;
+    }
+    var mayPick = select.dataset.auto === "1" || (!select.value && select.dataset.typed === "1");
+    var want = answer.chosen ? String(answer.chosen) : "";
+    if (mayPick && want !== select.value) {
+      if (want) {
+        choose(select, want);
+        select.dataset.auto = "1";
+        return;  // выбор ключа сам спросит сервер заново — с видом по этому ключу
+      }
+      if (select.value) {
+        select.value = "";
+        if (select.seoPicker) select.seoPicker.input.value = "";
+        select.dataset.prevKey = "";
+        select.dataset.auto = "";
+      }
+    }
+    var lines = [];
+    var kind = inRow(select, "[data-anchor-kind]");
+    if (select.value) {
+      if (kind && kind.value) {
+        lines.push(line("Вид: " + kind.selectedOptions[0].textContent.trim().toLowerCase() + " — выбран вручную"));
+      } else if (answer.kind_label) {
+        lines.push(line("Вид: " + answer.kind_label.toLowerCase()));
+      } else {
+        lines.push(line("Ключа «" + keyText(select) + "» во фразе нет — выберите вид ссылки", true));
+      }
+    }
+    if (answer.candidates.length) {
+      var head = answer.ambiguous ? "Во фразе ключи на разные страницы — выберите: " : "Во фразе: ";
+      var found = line(head, answer.ambiguous);
+      answer.candidates.forEach(function (candidate, index) {
+        if (index) found.appendChild(document.createTextNode(" · "));
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "seo-anchor-hint-pick";
+        button.textContent = candidate.keyword;
+        button.title = candidate.url;
+        if (String(candidate.id) === select.value) button.classList.add("seo-anchor-hint-current");
+        button.addEventListener("click", function () {
+          select.dataset.auto = "";
+          choose(select, candidate.id);
+        });
+        found.appendChild(button);
+      });
+      lines.push(found);
+    } else if (!select.value) {
+      lines.push(line("Ключей из списка во фразе нет — ссылка сохранится без анкора из списка"));
+    }
+    say(select, lines);
+  }
+
+  function line(text, warn) {
+    var node = document.createElement("div");
+    if (warn) node.className = "seo-anchor-hint-warn";
+    node.textContent = text;
+    return node;
+  }
+
+  function hint(select) {
+    var text = inRow(select, "[data-anchor-text]");
+    var box = text.parentNode.querySelector(".seo-anchor-hint");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "seo-anchor-hint";
+      box.setAttribute("aria-live", "polite");
+      text.insertAdjacentElement("afterend", box);
+    }
+    return box;
+  }
+
+  function say(select, lines) {
+    var box = hint(select);
+    box.replaceChildren.apply(box, lines);
+    box.hidden = !lines.length;
   }
 
   // ---------- Окно «Новый анкор» ----------
@@ -409,6 +580,7 @@
 
   function place(select, id, button) {
     enhance(select);
+    select.dataset.auto = "";
     if (!choose(select, id)) return;
     if (select.seoPicker) select.seoPicker.box.classList.remove("seo-picker-legacy");
     button.classList.add("seo-anchor-picked");
@@ -429,7 +601,10 @@
       if (select.value && select.selectedOptions[0].dataset.product !== product) {
         select.value = "";
         if (select.seoPicker) select.seoPicker.input.value = "";
+        select.dataset.prevKey = "";
+        select.dataset.auto = "";
       }
+      schedule(select, 0);
     });
     if (!block || !product) return;
     var url = block.dataset.summaryUrl.replace(/\/\d+\/$/, "/" + product + "/");
@@ -538,6 +713,7 @@
     if (!row || !row.querySelectorAll) return;
     row.querySelectorAll("select[data-anchor-select]").forEach(function (select) {
       enhance(select);
+      wireText(select);
       if (pendingPick) {
         var wanted = pendingPick;
         pendingPick = null;
@@ -547,7 +723,10 @@
   });
 
   function init(root) {
-    (root || document).querySelectorAll("select[data-anchor-select]").forEach(enhance);
+    (root || document).querySelectorAll("select[data-anchor-select]").forEach(function (select) {
+      enhance(select);
+      if (!isTemplate(select)) wireText(select);
+    });
   }
 
   document.addEventListener("seo:load", function () { init(document); });

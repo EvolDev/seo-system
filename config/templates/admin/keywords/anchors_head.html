@@ -23,7 +23,7 @@
   </dl>
 
   <details class="seo-anchors-block" open>
-    <summary><h3>Доли по типам страниц</h3><span class="seo-sub">цель — сколько ссылок вести на страницы типа; факт — по размещённым и ждущим</span></summary>
+    <summary><h3>Доли по типам страниц</h3><span class="seo-sub">цель — сколько ссылок вести на страницы типа; факт — по размещённым и ждущим; у прямого, разбавленного и безанкора под целью — факт внутри типа</span></summary>
     {% if page.types %}
     <div class="seo-table-wrap">
       <table class="seo-anchors-table">
@@ -54,14 +54,16 @@
               </div>
               <span class="seo-bullet-note seo-bullet-note-{{ row.state }}">{{ row.gap_text }}</span>
             </td>
-            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="exact" value=row.exact label="Прямой" %}</td>
-            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="diluted" value=row.diluted label="Разбавленный" %}</td>
-            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="naked" value=row.naked label="Безанкор" %}</td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="exact" value=row.exact label="Прямой" %}<span class="seo-anchors-fact" title="Факт по ссылкам типа">{{ row.exact_fact }}</span></td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="diluted" value=row.diluted label="Разбавленный" %}<span class="seo-anchors-fact" title="Факт по ссылкам типа">{{ row.diluted_fact }}</span></td>
+            <td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="type" id=row.stat.page_type field="naked" value=row.naked label="Безанкор" %}<span class="seo-anchors-fact" title="Факт по ссылкам типа">{{ row.naked_fact }}</span></td>
           </tr>
         {% endfor %}
         </tbody>
-        {% if page.target_sum %}
-        <tfoot><tr><td>Сумма целей</td><td class="seo-num-col {% if not page.target_sum_ok %}seo-anchors-warn{% endif %}"><b>{{ page.target_sum }}</b></td><td colspan="7" class="seo-sub">{% if not page.target_sum_ok %}не 100% — рекомендации всё равно считаются, но доли не сходятся{% endif %}</td></tr></tfoot>
+        {% if page.target_sum or page.by_key or page.kind_unknown %}
+        <tfoot><tr><td>Сумма целей</td><td class="seo-num-col {% if not page.target_sum_ok %}seo-anchors-warn{% endif %}"><b>{{ page.target_sum }}</b></td><td colspan="7" class="seo-sub">{% if not page.target_sum_ok %}не 100% — рекомендации всё равно считаются, но доли не сходятся.{% endif %}
+          {% if page.by_key %}Вид {{ page.by_key }} старых ссылок взят у ключа: у них вид не записан.{% endif %}
+          {% if page.kind_unknown %}Вид не определён у {{ page.kind_unknown }} ссылок — выберите его в размещении.{% endif %}</td></tr></tfoot>
         {% endif %}
       </table>
     </div>

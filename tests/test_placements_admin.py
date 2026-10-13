@@ -96,7 +96,7 @@ class TestCreate:
         response = admin_client.post(ADD_URL, _form(site, convertio, links))
         assert response.status_code == 200
         errors = response.context["inline_admin_formsets"][0].formset.errors
-        assert errors[0]["keyword"] == ["Выберите анкор."]
+        assert errors[0]["keyword"] == ["Выберите анкор или впишите текст ссылки."]
 
     def test_empty_slot_is_skipped(
         self, admin_client: Client, site: Site, convertio: Product

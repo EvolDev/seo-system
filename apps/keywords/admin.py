@@ -363,6 +363,11 @@ class KeywordCoverageAdmin(RecordAdmin):
                 name="keywords_anchor_add",
             ),
             path(
+                "match/",
+                view(require_GET(anchor_views.match_view)),
+                name="keywords_anchor_match",
+            ),
+            path(
                 "share/",
                 view(require_POST(anchor_views.share_view)),
                 name="keywords_anchor_share",

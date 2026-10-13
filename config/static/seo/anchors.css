@@ -259,3 +259,15 @@ body.admin-interface .seo-anchor-dialog input,
 body.admin-interface .seo-anchor-dialog select { width: 100%; box-sizing: border-box; font-weight: 400; }
 .seo-anchor-dialog-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--seo-up-bg, #fbe9e8); color: var(--seo-up, #c4302b); font-size: 0.8125rem; }
 .seo-anchor-dialog-buttons { display: flex; gap: 8px; margin-top: 4px; }
+
+/* Ключ во фразе и вид ссылки под «Текстом на сайте» (ADR-069). */
+.seo-anchor-hint { margin-top: 4px; font-size: 0.8125rem; color: var(--body-quiet-color, #666); display: grid; gap: 2px; }
+.seo-anchor-hint-warn { color: var(--seo-mark, #8a5a00); }
+.seo-anchor-hint-pick {
+  font: inherit; color: var(--link-fg, #2a65a8); background: none; border: 0; padding: 0;
+  cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px;
+}
+.seo-anchor-hint-pick:hover { text-decoration-style: solid; }
+.seo-anchor-hint-pick:focus-visible { outline: 2px solid var(--link-fg, #2a65a8); outline-offset: 1px; }
+.seo-anchor-hint-current { font-weight: 600; text-decoration: none; color: var(--body-fg, #333); }
+.seo-anchors-fact { display: block; font-size: 0.75rem; color: var(--body-quiet-color, #666); margin-top: 2px; }

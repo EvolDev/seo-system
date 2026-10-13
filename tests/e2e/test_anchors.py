@@ -2,7 +2,8 @@
 
 Поле анкора с поиском подставляет адрес и не трогает свой; новый анкор —
 окном, без ухода со страницы; рекомендация ставится в свободную ссылку, нет
-свободной — в новую; доля на странице «Анкоры» правится на месте.
+свободной — в новую; доля на странице «Анкоры» правится на месте; фраза с
+ключом внутри находит ключ и показывает вид ссылки (ADR-069).
 Серверную часть проверяют tests/test_anchor_screens.py и test_placements_admin.py.
 """
 
@@ -163,6 +164,55 @@ def test_picker_in_panel(admin_page: Page, live_server: LiveServer, placement: P
     expect(panel.locator("#links-0 input[data-anchor-url]")).to_have_value(
         "https://convertio.co/mp4-converter/"
     )
+
+
+def test_diluted_phrase_finds_key(
+    admin_page: Page, live_server: LiveServer, placement: Placement
+) -> None:
+    """ADR-069: фраза с брендом — ключ находится сам, вид «разбавленный», текст свой."""
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/{placement.pk}/change/")
+    add = page.locator(".inline-group .add-row a")
+    add.click()
+    add.click()
+    first = _row(page, 0)
+    picker = first.locator(".seo-picker-input")
+    text = first.locator("input[data-anchor-text]")
+    hint = first.locator(".seo-anchor-hint")
+
+    text.fill("Convertio's mp4 to mp3 tool")
+    expect(picker).to_have_value("mp4 to mp3")
+    expect(first.locator("input[data-anchor-url]")).to_have_value("https://convertio.co/mp4-mp3/")
+    expect(hint).to_contain_text("Вид: разбавленный")
+
+    # Ключ выбрали вручную, а во фразе его нет — вид не угадываем, фразу не трогаем.
+    picker.fill("mov")
+    picker.press("Enter")
+    expect(picker).to_have_value("mov to mp4")
+    expect(text).to_have_value("Convertio's mp4 to mp3 tool")
+    expect(hint).to_contain_text("во фразе нет")
+    hint.locator(".seo-anchor-hint-pick", has_text="mp4 to mp3").click()
+    expect(picker).to_have_value("mp4 to mp3")
+    expect(hint).to_contain_text("Вид: разбавленный")
+
+    # Текст, равный ключу, меняется вместе с ключом.
+    second = _row(page, 1)
+    second.locator(".seo-picker-input").fill("convert")
+    second.locator(".seo-picker-input").press("Enter")
+    expect(second.locator("input[data-anchor-text]")).to_have_value("convert")
+    second.locator(".seo-picker-input").fill("mp4 conv")
+    second.locator(".seo-picker-input").press("Enter")
+    expect(second.locator("input[data-anchor-text]")).to_have_value("mp4 converter")
+    expect(second.locator(".seo-anchor-hint")).to_contain_text("Вид: прямой")
+
+    page.locator("input[name=_save]").click()
+    page.wait_for_url(re.compile(r"/admin/placements/placement/(\?.*)?$"))
+    links = list(PlacementLink.objects.filter(placement=placement).order_by("link_index"))
+    assert [(link.anchor, link.keyword.keyword if link.keyword else None, link.anchor_type)
+            for link in links] == [
+        ("Convertio's mp4 to mp3 tool", "mp4 to mp3", "diluted"),
+        ("mp4 converter", "mp4 converter", "exact"),
+    ]  # fmt: skip
 
 
 def test_share_edited_in_place(
