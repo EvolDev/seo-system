@@ -1,0 +1,41 @@
+{% comment %}
+Деньги по месяцам: потрачено снизу, запланировано сверху, между частями — зазор
+цвета фона, верх скруглён. Горизонталь — бюджет месяца. Подложка — месяцы
+выбранного периода, подписи над столбиками — у них и у текущего месяца; всё
+остальное — в подсказке при наведении и в таблице «По месяцам».
+{% endcomment %}
+{% load l10n %}
+{% localize off %}
+<figure class="seo-econ-chart">
+  <figcaption>
+    <span class="seo-econ-chart-title">Деньги по месяцам</span>
+    <span class="seo-econ-sub">потрачено и запланировано, €</span>
+  </figcaption>
+  <ul class="seo-econ-legend">
+    <li><i class="seo-econ-key seo-econ-key-spent" aria-hidden="true"></i>потрачено — по дате публикации</li>
+    <li><i class="seo-econ-key seo-econ-key-planned" aria-hidden="true"></i>запланировано — по дате заявки</li>
+    {% if c.budget_y is not None %}<li><i class="seo-econ-key seo-econ-key-budget" aria-hidden="true"></i>бюджет месяца</li>{% endif %}
+  </ul>
+  <svg class="seo-econ-svg" viewBox="0 0 {{ c.width }} {{ c.height }}" role="img" aria-label="Деньги по месяцам: потрачено и запланировано, линия бюджета. Числа — в таблице «По месяцам».">
+    {% if c.band %}<rect class="seo-econ-band" x="{{ c.band.0 }}" y="{{ c.top }}" width="{{ c.band.1 }}" height="{{ c.plot_h }}"></rect>{% endif %}
+    {% for label, y in c.ticks %}
+    <line class="seo-econ-grid{% if forloop.first %} is-base{% endif %}" x1="{{ c.left }}" x2="{{ c.right }}" y1="{{ y }}" y2="{{ y }}"></line>
+    <text class="seo-econ-tick" x="{{ c.tick_x }}" y="{{ y }}" dy="4" text-anchor="end">{{ label }}</text>
+    {% endfor %}
+    {% for col in c.columns %}
+      {% for seg in col.segments %}<path class="seo-econ-fill-{{ seg.key }}" d="{{ seg.path }}"></path>{% endfor %}
+      {% if col.label %}<text class="seo-econ-value" x="{{ col.slot.cx }}" y="{{ col.label_y }}" text-anchor="middle">{{ col.label }}</text>{% endif %}
+    {% endfor %}
+    {% if c.budget_y is not None %}
+    <line class="seo-econ-budget" x1="{{ c.left }}" x2="{{ c.right }}" y1="{{ c.budget_y }}" y2="{{ c.budget_y }}"></line>
+    <text class="seo-econ-budget-label" x="{{ c.right }}" y="{{ c.budget_y }}" dy="-6" text-anchor="end">{{ c.budget_label }}</text>
+    {% endif %}
+    {% for s in c.slots %}
+    <text class="seo-econ-x{% if s.current %} is-current{% endif %}{% if s.in_period %} is-period{% endif %}" x="{{ s.cx }}" y="{{ c.month_y }}" text-anchor="middle">{{ s.short }}</text>
+    {% if s.year %}<text class="seo-econ-year" x="{{ s.cx }}" y="{{ c.year_y }}" text-anchor="middle">{{ s.year }}</text>{% endif %}
+    {% endfor %}
+    {% for s in c.slots %}<rect class="seo-econ-hit" x="{{ s.x }}" y="{{ c.top }}" width="{{ s.w }}" height="{{ c.plot_h }}" tabindex="0" data-tip="{{ s.tip }}"></rect>{% endfor %}
+  </svg>
+  {% if c.empty %}<p class="seo-econ-empty">Трат и плана в эти месяцы нет.</p>{% endif %}
+</figure>
+{% endlocalize %}

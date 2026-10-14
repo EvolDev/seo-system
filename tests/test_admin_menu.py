@@ -48,7 +48,7 @@ def test_admin_site_is_ours() -> None:
 def test_groups_follow_the_work(admin_client: Client) -> None:
     menu = _menu(admin_client)
     assert [group["name"] for group in menu] == ["Работа", "Справочники", "Настройки", "Служебное"]
-    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Счета"]
+    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Счета", "Экономика"]
     # Анкоры продукта — справочник (E3-05, ADR-059); форма ключа — в «Служебном».
     assert _names(menu[1]) == [
         "Каталог площадок",
@@ -76,10 +76,12 @@ def test_service_tables_only_in_service_group(admin_client: Client) -> None:
 
 
 def test_every_registered_model_once(admin_client: Client) -> None:
+    # «Экономика» — свой экран, а не таблица: модели у пункта нет.
     in_menu = [
         (model["model"]._meta.app_label, model["model"]._meta.model_name)
         for group in _menu(admin_client)
         for model in group["models"]
+        if "model" in model
     ]
     registered = {(model._meta.app_label, model._meta.model_name) for model in admin.site._registry}
     assert len(in_menu) == len(set(in_menu))
@@ -107,7 +109,10 @@ def test_home_starts_with_work(admin_client: Client) -> None:
         "Загрузки",
         "Размещения",
         "Счета",
+        "Экономика",
     ]
+    assert cards[-1]["url"] == reverse("admin:economics")
+    assert cards[-1]["note"].startswith("осталось в ")
     assert cards[0]["url"] == reverse("admin:sites_productsitelatest_changelist")
     assert "Convertio, список «Сентябрь 2026»" in cards[0]["note"]
     # «Работа» — карточками; ниже — остальные группы, без повтора.
@@ -123,6 +128,7 @@ def test_home_without_products(admin_client: Client) -> None:
         ("0", "предложений ждут разбора"),
         ("", ""),
         ("0", "к оплате"),
+        ("", ""),
     ]
 
 

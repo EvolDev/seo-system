@@ -1,0 +1,35 @@
+{% comment %}
+Размещено ссылок по месяцам — линия с числом у каждой точки, как график в
+таблице «Линкбилдинг» пользователя (просьба 14.10.2026). Точки — до текущего
+месяца: будущих публикаций нет. Подсказка — по сотрудникам и средняя цена.
+{% endcomment %}
+{% load l10n %}
+{% localize off %}
+<figure class="seo-econ-chart">
+  <figcaption>
+    <span class="seo-econ-chart-title">Размещено ссылок по месяцам</span>
+    <span class="seo-econ-sub">по дате публикации</span>
+  </figcaption>
+  <ul class="seo-econ-legend">
+    <li><i class="seo-econ-key seo-econ-key-placed" aria-hidden="true"></i>размещено ссылок</li>
+  </ul>
+  <svg class="seo-econ-svg" viewBox="0 0 {{ c.width }} {{ c.height }}" role="img" aria-label="Размещено ссылок по месяцам. Числа — в таблице «По месяцам».">
+    {% if c.band %}<rect class="seo-econ-band" x="{{ c.band.0 }}" y="{{ c.top }}" width="{{ c.band.1 }}" height="{{ c.plot_h }}"></rect>{% endif %}
+    {% for label, y in c.ticks %}
+    <line class="seo-econ-grid{% if forloop.first %} is-base{% endif %}" x1="{{ c.left }}" x2="{{ c.right }}" y1="{{ y }}" y2="{{ y }}"></line>
+    <text class="seo-econ-tick" x="{{ c.tick_x }}" y="{{ y }}" dy="4" text-anchor="end">{{ label }}</text>
+    {% endfor %}
+    {% if c.line %}<path class="seo-econ-line" d="{{ c.line }}"></path>{% endif %}
+    {% for p in c.points %}
+    <circle class="seo-econ-dot{% if p.slot.current %} is-current{% endif %}" cx="{{ p.slot.cx }}" cy="{{ p.cy }}" r="4"></circle>
+    {% if p.labeled %}<text class="seo-econ-value seo-econ-value-placed" x="{{ p.slot.cx }}" y="{{ p.cy }}" dy="-10" text-anchor="middle">{{ p.value }}</text>{% endif %}
+    {% endfor %}
+    {% for s in c.slots %}
+    <text class="seo-econ-x{% if s.current %} is-current{% endif %}{% if s.in_period %} is-period{% endif %}" x="{{ s.cx }}" y="{{ c.month_y }}" text-anchor="middle">{{ s.short }}</text>
+    {% if s.year %}<text class="seo-econ-year" x="{{ s.cx }}" y="{{ c.year_y }}" text-anchor="middle">{{ s.year }}</text>{% endif %}
+    {% endfor %}
+    {% for s in c.slots %}<rect class="seo-econ-hit" x="{{ s.x }}" y="{{ c.top }}" width="{{ s.w }}" height="{{ c.plot_h }}" tabindex="0" data-tip="{{ s.tip }}"></rect>{% endfor %}
+  </svg>
+  {% if c.empty %}<p class="seo-econ-empty">Опубликованных в эти месяцы нет.</p>{% endif %}
+</figure>
+{% endlocalize %}

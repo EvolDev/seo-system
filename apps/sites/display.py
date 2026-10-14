@@ -118,8 +118,9 @@ def writing_html(cents: int | None, currency: str) -> SafeString:
 
 
 def announce_text(cents: int | None, currency: str) -> str:
+    # Пусто — продавец цену не назвал: обычно её сообщают отдельно (14.10.2026).
     if cents is None:
-        return "нет"
+        return "не указано"
     return "бесплатно" if cents == 0 else money(cents, currency)
 
 

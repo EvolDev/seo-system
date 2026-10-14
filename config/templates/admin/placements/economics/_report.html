@@ -1,0 +1,184 @@
+{% comment %}
+Отчёт «Экономики» — на экране и в HTML-файле (export: без ссылок в систему).
+Сверху вниз по важности: плитки периода и полоса бюджета, графики по месяцам,
+разбивки плана и «что не посчитано», таблица по месяцам, размещения периода.
+Кнопки «строки ↓» и «Что не посчитано» отбирают размещения внизу (seo/economics.js).
+{% endcomment %}
+{% load l10n %}
+{% with e=econ %}
+<section class="seo-econ-tiles" aria-label="Итоги: {{ e.product_label }}, {{ e.label }}">
+  {% for t in e.tiles %}
+  <div class="seo-econ-tile seo-econ-tile-{{ t.key }}{% if t.over %} is-over{% endif %}"{% if t.filter %} data-econ-show="{{ t.filter }}" role="button" tabindex="0" title="Показать эти размещения в таблице внизу"{% endif %}>
+    <span class="seo-econ-tile-label">{% if t.key == "spent" or t.key == "planned" %}<i class="seo-econ-key seo-econ-key-{{ t.key }}" aria-hidden="true"></i>{% endif %}{{ t.label }}{% if t.filter %}<span class="seo-econ-tile-go" aria-hidden="true">↓</span>{% endif %}</span>
+    <span class="seo-econ-tile-value">{% if t.over %}<span class="seo-econ-over-icon" aria-hidden="true">▲</span>{% endif %}{{ t.value }}</span>
+    <span class="seo-econ-tile-note">{{ t.note }}{% if t.link and not export %} · <a href="{{ t.link }}" data-panel>{{ t.link_text }}</a>{% endif %}</span>
+  </div>
+  {% endfor %}
+</section>
+
+{% localize off %}
+{% with b=e.bar %}
+<section class="seo-econ-bar" aria-label="Бюджет периода">
+  <div class="seo-econ-bar-track{% if b.over %} is-over{% endif %}" aria-hidden="true">
+    {% if b.spent %}<span class="seo-econ-bar-seg seo-econ-fill-spent" style="width: {{ b.spent }}%"></span>{% endif %}
+    {% if b.planned %}<span class="seo-econ-bar-seg seo-econ-fill-planned" style="width: {{ b.planned }}%"></span>{% endif %}
+    {% if b.mark is not None %}<span class="seo-econ-bar-mark" style="left: {{ b.mark }}%"></span>{% endif %}
+  </div>
+  <ul class="seo-econ-legend">
+    {% for key, label, value, pct in b.legend %}
+    <li><i class="seo-econ-key seo-econ-key-{{ key }}" aria-hidden="true"></i>{{ label }} <b>{{ value }}</b>{% if pct %} <span class="seo-econ-sub">{{ pct }}</span>{% endif %}</li>
+    {% endfor %}
+    {% if b.over_text %}<li class="seo-econ-over-text"><span aria-hidden="true">▲</span> {{ b.over_text }}</li>{% endif %}
+  </ul>
+</section>
+{% endwith %}
+{% endlocalize %}
+
+<section class="seo-econ-charts">
+  {% include "admin/placements/economics/_money_chart.html" with c=e.money %}
+  {% include "admin/placements/economics/_links_chart.html" with c=e.links %}
+</section>
+
+<section class="seo-econ-details">
+  <div class="seo-econ-card">
+    <h3>План по статусам</h3>
+    <table class="seo-econ-mini">
+      <tbody>
+        {% for s in e.statuses %}
+        <tr>
+          <th scope="row">{{ s.name }}</th>
+          <td class="seo-econ-num">{{ s.count }}</td>
+          <td class="seo-econ-num"><b>{{ s.sum }}</b></td>
+          <td class="seo-econ-meter"><div>{% localize off %}<span class="seo-econ-fill-planned" style="width: {{ s.pct }}%"></span>{% endlocalize %}</div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="seo-econ-card">
+    <h3>По продавцам</h3>
+    {% if e.sellers %}
+    <table class="seo-econ-mini">
+      <tbody>
+        {% for s in e.sellers %}
+        <tr title="{{ s.tip }}">
+          <th scope="row">{{ s.name }}</th>
+          <td class="seo-econ-num">{{ s.count }}</td>
+          <td class="seo-econ-num"><b>{{ s.sum }}</b></td>
+          <td class="seo-econ-meter"><div>{% localize off %}{% if s.spent %}<span class="seo-econ-fill-spent" style="width: {{ s.spent }}%"></span>{% endif %}{% if s.planned %}<span class="seo-econ-fill-planned" style="width: {{ s.planned }}%"></span>{% endif %}{% endlocalize %}</div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="seo-econ-sub">За период размещений нет.</p>{% endif %}
+  </div>
+  <div class="seo-econ-card">
+    <h3>Что не посчитано</h3>
+    {% if e.issues %}
+    <ul class="seo-econ-issues">
+      {% for i in e.issues %}
+      <li><b>{{ i.count }}</b> {{ i.text }}{% if i.filter %} · <button type="button" class="seo-econ-link" data-econ-show="{{ i.filter }}">показать</button>{% elif i.url and not export %} · <a href="{{ i.url }}">в «Размещениях»</a>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="seo-econ-ok">Всё посчитано: у всех размещений периода есть сумма и дата.</p>{% endif %}
+    {% if e.approx %}<p class="seo-econ-sub">≈ — суммы не в евро пересчитаны по курсу ЕЦБ.</p>{% endif %}
+  </div>
+</section>
+
+<section class="seo-econ-card seo-econ-wide">
+  <h3>По месяцам <span class="seo-econ-sub">{{ e.chart_range }} · строки периода выделены</span></h3>
+  <div class="seo-econ-scroll">
+    <table class="seo-econ-table">
+      <thead>
+        <tr>
+          <th scope="col">Месяц</th>
+          <th scope="col" class="seo-econ-num">Размещено</th>
+          {% for name in e.table.employees %}<th scope="col" class="seo-econ-num seo-econ-soft">{{ name }}</th>{% endfor %}
+          <th scope="col" class="seo-econ-num">Потрачено</th>
+          <th scope="col" class="seo-econ-num">Ср. цена</th>
+          <th scope="col" class="seo-econ-num">Запланировано</th>
+          <th scope="col" class="seo-econ-num">Всего</th>
+          <th scope="col" class="seo-econ-num">Бюджет</th>
+          <th scope="col" class="seo-econ-num">Осталось</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in e.table.rows %}
+        <tr class="{% if r.in_period %}is-period{% endif %}{% if r.current %} is-current{% endif %}">
+          <th scope="row">{{ r.title }}</th>
+          <td class="seo-econ-num">{{ r.placed }}</td>
+          {% for count in r.employees %}<td class="seo-econ-num seo-econ-soft">{{ count|default:"" }}</td>{% endfor %}
+          <td class="seo-econ-num">{{ r.spent }}</td>
+          <td class="seo-econ-num">{{ r.average }}</td>
+          <td class="seo-econ-num">{{ r.planned }}</td>
+          <td class="seo-econ-num">{{ r.total }}</td>
+          <td class="seo-econ-num seo-econ-soft">{{ r.budget }}</td>
+          <td class="seo-econ-num{% if r.over %} is-over{% endif %}">{{ r.left }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        {% with t=e.table.total %}
+        <tr>
+          <th scope="row">Итого</th>
+          <td class="seo-econ-num">{{ t.placed }}</td>
+          {% for count in t.employees %}<td class="seo-econ-num seo-econ-soft">{{ count }}</td>{% endfor %}
+          <td class="seo-econ-num">{{ t.spent }}</td>
+          <td class="seo-econ-num">{{ t.average }}</td>
+          <td class="seo-econ-num">{{ t.planned }}</td>
+          <td class="seo-econ-num">{{ t.total }}</td>
+          <td class="seo-econ-num seo-econ-soft">{{ t.budget }}</td>
+          <td class="seo-econ-num{% if t.over %} is-over{% endif %}">{{ t.left }}</td>
+        </tr>
+        {% endwith %}
+      </tfoot>
+    </table>
+  </div>
+</section>
+
+<section class="seo-econ-card seo-econ-wide" id="econ-rows" data-econ-rows>
+  <h3>Размещения периода <span class="seo-econ-sub">{{ e.label }} · сначала дорогие</span></h3>
+  <div class="seo-econ-chips" role="group" aria-label="Какие размещения показать">
+    {% for key, label, count in e.chips %}
+    <button type="button" class="seo-econ-chip" data-econ-filter="{{ key }}" aria-pressed="{% if key == 'all' %}true{% else %}false{% endif %}">{{ label }} <b>{{ count }}</b></button>
+    {% endfor %}
+  </div>
+  {% if e.placements %}
+  <div class="seo-econ-scroll is-tall">
+    <table class="seo-econ-table">
+      <thead>
+        <tr>
+          <th scope="col">Площадка</th>
+          {% if e.is_all %}<th scope="col">Продукт</th>{% endif %}
+          <th scope="col">Статус</th>
+          <th scope="col">Продавец</th>
+          <th scope="col">Сотрудник</th>
+          <th scope="col">Заявка</th>
+          <th scope="col">Опубликовано</th>
+          <th scope="col" class="seo-econ-num">Сумма</th>
+          <th scope="col">Откуда сумма</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in e.placements %}
+        <tr data-kind="{{ p.kind }}" data-flags="{{ p.flags }}">
+          <th scope="row">{% if export %}{{ p.row.domain }}{% else %}<a href="{{ p.url }}" data-panel>{{ p.row.domain }}</a>{% endif %}</th>
+          {% if e.is_all %}<td>{{ p.row.product }}</td>{% endif %}
+          <td><span class="seo-econ-status seo-econ-status-{{ p.kind }}">{{ p.status }}</span></td>
+          <td>{{ p.row.seller }}</td>
+          <td>{{ p.row.employee }}</td>
+          <td class="seo-econ-nowrap">{{ p.ordered|default:"—" }}</td>
+          <td class="seo-econ-nowrap">{{ p.published|default:"—" }}</td>
+          <td class="seo-econ-num"><b>{{ p.sum }}</b></td>
+          <td class="seo-econ-soft">{{ p.source }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="seo-econ-empty" data-econ-none hidden>Таких размещений в периоде нет.</p>
+  {% else %}
+  <p class="seo-econ-sub">За период размещений нет.</p>
+  {% endif %}
+</section>
+{% endwith %}

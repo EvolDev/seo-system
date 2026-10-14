@@ -1,0 +1,30 @@
+{% load l10n %}
+{% comment %}
+Написание или анонс у предложения — карандашом, как цена (seo/site-card.js:
+те же data-price-*). Пустая сумма — «не указано», 0 — бесплатно. Валюта — та же,
+что у предложения. Сохранение перерисовывает карточку (data-card-form).
+{% endcomment %}
+{% with key=offer.pk|stringformat:"s"|add:":"|add:kind %}
+<span class="seo-price-editor seo-extra-editor" data-price-editor>
+  <span data-price-display>
+    <b>{{ text }}</b>
+    {% if can_change_type and editable %}<button type="button" class="seo-price-pencil seo-extra-pencil" data-price-open aria-label="Изменить: {{ label|lower }} у {{ seller_name }}" title="Изменить цену: {{ label|lower }}">✎</button>{% endif %}
+  </span>
+  {% if can_change_type and editable %}
+  <form method="post" action="{{ extra_price_url }}" data-card-form data-price-form{% if extra_open != key %} hidden{% endif %}>
+    {% csrf_token %}
+    <input type="hidden" name="offer" value="{{ offer.pk|unlocalize }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    {% if extra_open == key and extra_form.errors %}<div class="seo-price-error" role="alert">{{ extra_form.non_field_errors }}{% for field in extra_form %}{% if field.errors %}<div>{{ field.errors }}</div>{% endif %}{% endfor %}</div>{% endif %}
+    <div class="seo-price-fields">
+      <label>{{ label }}, {{ offer.currency }} <input type="text" inputmode="decimal" name="amount" value="{% if extra_open == key %}{{ extra_form.amount.value|default_if_none:"" }}{% else %}{{ amount }}{% endif %}" placeholder="не указано" autocomplete="off"></label>
+    </div>
+    <span class="seo-sub">Пусто — не указано, 0 — бесплатно.</span>
+    <div class="seo-price-actions">
+      <button type="submit" class="seo-btn seo-btn-small">Сохранить</button>
+      <button type="button" class="seo-btn seo-btn-small" data-price-cancel>Отмена</button>
+    </div>
+  </form>
+  {% endif %}
+</span>
+{% endwith %}

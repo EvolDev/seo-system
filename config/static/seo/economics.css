@@ -1,0 +1,174 @@
+/* «Экономика» (Работа → Экономика): бюджет, траты, план и ссылки по месяцам.
+   Тот же файл встраивается в HTML-отчёт (export.html) — только переменные цветов:
+   --body-*, --darkened-bg, --hairline-color и --seo-chart-* расцветок
+   (seo/admin-palettes.css, ADR-038). Сверху вниз — по важности: плитки и полоса
+   бюджета, графики рядом, разбивки, таблица по месяцам, размещения периода.
+   Графики — SVG; подписи и сетка — цветами текста, ряды — цветами графиков;
+   столбики — верх скруглён, части разделены зазором цвета фона. */
+.seo-econ {
+  --seo-econ-over: #d03b3b;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--body-fg);
+}
+html[data-mode="dark"] .seo-econ { --seo-econ-over: #ff7b72; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .seo-econ-export-page { --seo-econ-over: #ff7b72; }
+}
+.seo-econ-sub { font-size: 12px; font-weight: 400; color: var(--body-quiet-color); }
+.seo-econ-soft { color: var(--body-quiet-color); }
+
+/* Строка выбора: продукт, период, листание, выгрузка — одной строкой над всем. */
+.seo-econ-filters { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin: 0; }
+.seo-econ-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+body.admin-interface .seo-econ-filters .seo-btn { min-height: 30px; padding: 4px 12px; font-size: 0.8125rem; }
+.seo-econ-filters .seo-btn.is-off { opacity: 0.35; pointer-events: none; }
+.seo-econ-period { min-width: 9em; text-align: center; font-size: 15px; }
+.seo-econ-range label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.seo-econ-range input[type="month"] { min-height: 30px; padding: 2px 8px; border: 1px solid var(--hairline-color);
+  border-radius: 8px; background: var(--body-bg); color: var(--body-fg); font: inherit; }
+.seo-econ-export { margin-left: auto; }
+
+/* Плитки: пять итогов периода в ряд; узко — по две и по одной. */
+.seo-econ-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1280px) { .seo-econ-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .seo-econ-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.seo-econ-tile { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding: 10px 16px; border: 1px solid var(--hairline-color); border-radius: 10px; background: var(--darkened-bg); }
+.seo-econ-tile-label { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--body-quiet-color); }
+/* Плитка с размещениями — кнопка: показывает их строки в таблице внизу. */
+.seo-econ-tile[data-econ-show] { cursor: pointer; }
+.seo-econ-tile[data-econ-show]:hover,
+.seo-econ-tile[data-econ-show]:focus-visible { border-color: var(--admin-interface-generic-link-color); outline: none; }
+.seo-econ-tile-go { margin-left: auto; color: var(--admin-interface-generic-link-color); opacity: 0; }
+.seo-econ-tile:hover .seo-econ-tile-go, .seo-econ-tile:focus-visible .seo-econ-tile-go { opacity: 1; }
+.seo-econ-tile-value { font-size: 26px; font-weight: 600; line-height: 1.2; }
+.seo-econ-tile-note { font-size: 12px; color: var(--body-quiet-color); }
+.seo-econ-tile.is-over .seo-econ-tile-value,
+.seo-econ-tile.is-over .seo-econ-tile-label { color: var(--seo-econ-over); }
+.seo-econ-over-icon { margin-right: 4px; font-size: 0.6em; vertical-align: 0.25em; }
+.seo-econ-link { padding: 0; border: 0; background: none; color: var(--admin-interface-generic-link-color);
+  font: inherit; font-size: 12px; cursor: pointer; }
+.seo-econ-link:hover { text-decoration: underline; }
+
+/* Квадратик цвета у подписи: ряды графиков и полосы. */
+.seo-econ-key { display: inline-block; flex: none; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px;
+  vertical-align: -1px; }
+.seo-econ-key-spent { background: var(--seo-chart-spent); }
+.seo-econ-key-planned { background: var(--seo-chart-planned); }
+.seo-econ-key-placed { background: var(--seo-chart-placed); }
+.seo-econ-key-free { border: 1px solid var(--body-quiet-color); background: var(--body-bg); }
+.seo-econ-key-budget { width: 14px; height: 2px; border-radius: 0; background: var(--body-fg); opacity: 0.6;
+  vertical-align: 3px; }
+
+/* Полоса бюджета: 100% — бюджет периода, перерасход — за отметкой бюджета. */
+.seo-econ-bar { display: flex; flex-direction: column; gap: 6px; }
+.seo-econ-bar-track { position: relative; display: flex; gap: 2px; height: 14px; padding: 0; overflow: hidden;
+  border: 1px solid var(--hairline-color); border-radius: 7px; background: var(--body-bg); }
+.seo-econ-bar-seg { height: 100%; }
+.seo-econ-bar-seg:first-child { border-radius: 6px 0 0 6px; }
+.seo-econ-bar-mark { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--body-fg); }
+.seo-econ-fill-spent { background: var(--seo-chart-spent); fill: var(--seo-chart-spent); }
+.seo-econ-fill-planned { background: var(--seo-chart-planned); fill: var(--seo-chart-planned); }
+.seo-econ-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none;
+  font-size: 12px; color: var(--body-quiet-color); }
+.seo-econ-legend li { margin: 0; padding: 0; list-style: none; }
+.seo-econ-legend b { color: var(--body-fg); font-weight: 600; }
+.seo-econ-over-text { color: var(--seo-econ-over); font-weight: 600; }
+
+/* Графики: два рядом; уже 1100px — друг под другом. На телефоне — прокрутка
+   внутри карточки: подписи в SVG мельче 9px не читаются. */
+.seo-econ-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1500px) { .seo-econ-charts { grid-template-columns: minmax(0, 1fr); } }
+.seo-econ-chart, .seo-econ-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0;
+  padding: 12px 16px; border: 1px solid var(--hairline-color); border-radius: 10px; background: var(--darkened-bg); }
+.seo-econ-chart figcaption { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.seo-econ-chart-title, .seo-econ-card h3 { margin: 0; padding: 0; background: none; font-size: 14px; font-weight: 600;
+  color: var(--body-fg); text-transform: none; letter-spacing: 0; }
+.seo-econ-chart { overflow-x: auto; }
+/* Подписи — 12 px при любой ширине графика: --econ-k (seo/economics.js) — сколько
+   единиц рисунка в одном пикселе экрана; без скрипта текст тянется с рисунком. */
+.seo-econ-svg { --econ-k: 1; display: block; width: 100%; min-width: 480px; max-height: 420px; height: auto;
+  overflow: visible; }
+.seo-econ-svg text { font-family: inherit; font-size: calc(12px * var(--econ-k)); fill: var(--body-quiet-color); }
+.seo-econ-svg .seo-econ-value { font-size: calc(12px * var(--econ-k)); font-weight: 600; fill: var(--body-fg); }
+.seo-econ-svg .seo-econ-x.is-current { font-weight: 700; fill: var(--body-fg); }
+.seo-econ-svg .seo-econ-x.is-period { fill: var(--body-fg); }
+.seo-econ-svg .seo-econ-year { font-size: calc(11px * var(--econ-k)); }
+.seo-econ-grid { stroke: var(--hairline-color); stroke-width: 1; }
+.seo-econ-grid.is-base { stroke: var(--body-quiet-color); stroke-opacity: 0.6; }
+.seo-econ-band { fill: var(--body-fg); fill-opacity: 0.05; }
+.seo-econ-budget { stroke: var(--body-fg); stroke-opacity: 0.6; stroke-width: 1.5; }
+.seo-econ-svg .seo-econ-budget-label { font-weight: 600; fill: var(--body-fg); }
+.seo-econ-line { fill: none; stroke: var(--seo-chart-placed); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.seo-econ-dot { fill: var(--seo-chart-placed); stroke: var(--darkened-bg); stroke-width: 2; }
+.seo-econ-dot.is-current { r: 5; }
+.seo-econ-hit { fill: var(--body-fg); fill-opacity: 0; outline: none; }
+.seo-econ-hit:hover, .seo-econ-hit:focus-visible { fill-opacity: 0.06; }
+.seo-econ-hit:focus-visible { stroke: var(--admin-interface-generic-link-color); stroke-width: 1.5; }
+.seo-econ-empty { margin: 0; font-size: 12px; color: var(--body-quiet-color); }
+
+/* Подсказка графика: у курсора, строки — как в данных, первая — жирная. */
+.seo-econ-tip { position: fixed; z-index: 1000; max-width: 280px; padding: 8px 10px; border-radius: 8px;
+  background: var(--body-fg); color: var(--body-bg); font-size: 12px; line-height: 1.5; pointer-events: none;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%); }
+.seo-econ-tip b { display: block; }
+.seo-econ-tip[hidden] { display: none; }
+
+/* Разбивки: план по статусам, продавцы, «что не посчитано» — три карточки в ряд. */
+.seo-econ-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .seo-econ-details { grid-template-columns: minmax(0, 1fr); } }
+.seo-econ-mini { width: 100%; border-collapse: collapse; }
+/* Полосы строк штатной админки здесь не нужны: строки читаются по линейкам. */
+.seo-econ .seo-econ-mini tr, .seo-econ .seo-econ-table tr { background: none; }
+.seo-econ .seo-econ-mini th, .seo-econ .seo-econ-mini td { padding: 4px 8px 4px 0; border: 0; background: none;
+  font-size: 13px; font-weight: 400; vertical-align: middle; color: var(--body-fg); }
+.seo-econ .seo-econ-mini th { max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seo-econ-meter { width: 38%; }
+.seo-econ-meter div { display: flex; gap: 2px; align-items: center; }
+.seo-econ-meter span { flex: 0 1 auto; min-width: 2px; height: 8px; }
+.seo-econ-meter span:first-child { border-radius: 4px 0 0 4px; }
+.seo-econ-meter span:last-child { border-radius: 0 4px 4px 0; }
+.seo-econ-meter span:only-child { border-radius: 4px; }
+.seo-econ-issues { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.seo-econ-issues li { margin: 0; padding: 0; list-style: none; }
+.seo-econ-ok { margin: 0; font-size: 13px; color: var(--body-quiet-color); }
+
+/* Таблицы: по месяцам (как лист «Линкбилдинг») и размещения периода. Размещений
+   бывают сотни — их таблица прокручивается внутри карточки, шапка на месте. */
+.seo-econ-scroll { overflow-x: auto; }
+.seo-econ-scroll.is-tall { max-height: 70vh; overflow-y: auto; }
+.seo-econ .seo-econ-scroll.is-tall thead th { position: sticky; top: 0; z-index: 1; background: var(--darkened-bg); }
+@media print { .seo-econ-scroll.is-tall { max-height: none; overflow: visible; } }
+.seo-econ-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.seo-econ .seo-econ-table th, .seo-econ .seo-econ-table td { padding: 6px 10px; border: 0;
+  border-bottom: 1px solid var(--hairline-color); background: none; color: var(--body-fg); font-weight: 400;
+  text-align: left; white-space: nowrap; }
+.seo-econ .seo-econ-table thead th { font-size: 12px; font-weight: 600; color: var(--body-quiet-color);
+  text-transform: none; letter-spacing: 0; }
+.seo-econ .seo-econ-table tbody th { font-weight: 500; }
+.seo-econ .seo-econ-table tfoot th, .seo-econ .seo-econ-table tfoot td { border-top: 2px solid var(--hairline-color);
+  border-bottom: 0; font-weight: 600; }
+.seo-econ .seo-econ-table .seo-econ-num { text-align: right; font-variant-numeric: tabular-nums; }
+.seo-econ .seo-econ-table .seo-econ-soft { color: var(--body-quiet-color); }
+.seo-econ .seo-econ-table tr.is-period th, .seo-econ .seo-econ-table tr.is-period td {
+  background: color-mix(in srgb, var(--admin-interface-generic-link-color) 9%, transparent); }
+.seo-econ .seo-econ-table tr.is-current th { font-weight: 700; }
+.seo-econ .seo-econ-table .is-over { color: var(--seo-econ-over); font-weight: 600; }
+.seo-econ .seo-econ-table tbody tr:hover th, .seo-econ .seo-econ-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--body-fg) 5%, transparent); }
+.seo-econ-nowrap { white-space: nowrap; }
+.seo-econ-status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+  background: color-mix(in srgb, var(--seo-chart-planned) 16%, transparent); }
+.seo-econ-status-spent { background: color-mix(in srgb, var(--seo-chart-spent) 16%, transparent); }
+
+/* Отбор размещений: «Все», «Потрачено», «Запланировано» и что не посчитано. */
+.seo-econ-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.seo-econ-chip { min-height: 28px; padding: 3px 12px; border: 1px solid var(--hairline-color); border-radius: 999px;
+  background: var(--body-bg); color: var(--body-fg); font: inherit; font-size: 12px; cursor: pointer; }
+.seo-econ-chip b { margin-left: 4px; font-weight: 600; }
+.seo-econ-chip[aria-pressed="true"] { border-color: var(--admin-interface-generic-link-color);
+  background: color-mix(in srgb, var(--admin-interface-generic-link-color) 14%, transparent); }
+.seo-econ-chip:focus-visible { outline: 2px solid var(--admin-interface-generic-link-color); outline-offset: 1px; }
+.seo-econ-table tr[hidden] { display: none; }

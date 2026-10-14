@@ -1,0 +1,38 @@
+{% comment %}
+Строка выбора над отчётом: продукт, вид периода, листание и свой период «с — по»,
+выгрузка отчёта. Всё — адресом экрана: выбор можно сохранить закладкой.
+{% endcomment %}
+{% with e=econ %}
+<form class="seo-econ-filters" method="get" action="{% url 'admin:economics' %}" aria-label="Продукт и период">
+  <div class="seo-econ-group" role="group" aria-label="Продукт">
+    {% for name, url, active in e.products %}
+    <a class="seo-btn{% if active %} seo-btn-primary{% endif %}" href="{{ url }}"{% if active %} aria-current="true"{% endif %}>{{ name }}</a>
+    {% endfor %}
+  </div>
+  <div class="seo-econ-group seo-econ-segments" role="group" aria-label="Период">
+    {% for key, label, url, active in e.periods %}
+    <a class="seo-btn{% if active %} seo-btn-primary{% endif %}" href="{{ url }}"{% if active %} aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </div>
+  {% if e.range %}
+  <div class="seo-econ-group seo-econ-range">
+    {% for key, value in e.hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <label>с <input type="month" name="from" value="{{ e.range_from }}" max="{{ e.range_max }}" required></label>
+    <label>по <input type="month" name="to" value="{{ e.range_to }}" max="{{ e.range_max }}" required></label>
+    <button type="submit" class="seo-btn">Показать</button>
+  </div>
+  {% else %}
+  <div class="seo-econ-group seo-econ-nav">
+    {% if e.prev_url %}<a class="seo-btn" href="{{ e.prev_url }}" aria-label="Раньше">‹</a>{% endif %}
+    <b class="seo-econ-period">{{ e.label }}</b>
+    {% if e.next_url %}<a class="seo-btn" href="{{ e.next_url }}" aria-label="Позже">›</a>{% else %}<span class="seo-btn is-off" aria-hidden="true">›</span>{% endif %}
+    {% if e.today_url %}<a class="seo-btn" href="{{ e.today_url }}">Сейчас</a>{% endif %}
+  </div>
+  {% endif %}
+  <div class="seo-econ-group seo-econ-export">
+    <span class="seo-econ-sub">Скачать отчёт:</span>
+    <a class="seo-btn" href="{{ e.export_xlsx }}" data-no-soft download>Excel</a>
+    <a class="seo-btn" href="{{ e.export_html }}" data-no-soft download>HTML-страница</a>
+  </div>
+</form>
+{% endwith %}

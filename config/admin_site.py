@@ -17,8 +17,11 @@ from django.contrib.admin.apps import AdminConfig
 from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.template.response import TemplateResponse
-from django.urls import URLPattern, URLResolver, path
+from django.urls import URLPattern, URLResolver, path, reverse
 from django.views.decorators.http import require_POST
+
+# «Экономика» — свой экран, не таблица: пункт меню собирается в get_app_list.
+ECONOMICS = ("placements", "economics")
 
 # Группы меню: (название, код группы, [(приложение, модель)]). Порядок — как в меню.
 MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
@@ -30,6 +33,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "upload"),
             ("placements", "placement"),
             ("placements", "invoice"),
+            ECONOMICS,
         ],
     ),
     (
@@ -87,6 +91,16 @@ class SeoAdminSite(admin.AdminSite):
             for app in apps
             for model in app["models"]
         }
+        if request.user.has_perm("placements.view_placement"):
+            url = reverse("admin:economics")
+            models[ECONOMICS] = {
+                "name": "Экономика",
+                "object_name": "Economics",
+                "admin_url": url,
+                "view_only": True,
+                "add_url": None,
+                "perms": {"view": True},
+            }
         groups: list[dict[str, Any]] = []
         placed = set(HIDDEN)
         for name, code, keys in MENU:
@@ -112,9 +126,12 @@ class SeoAdminSite(admin.AdminSite):
         # «Мои фильтры» над колонкой фильтров любого списка (E9-10, ADR-050) —
         # не у одной модели, поэтому адреса у сайта. Импорт здесь: модуль сайта
         # загружается вместе с приложением админки, раньше моделей.
+        from apps.placements import economics_view
         from apps.workspace import views
 
         own = [
+            # Экономика: бюджет, траты, план и ссылки по месяцам (Работа → Экономика).
+            path("economics/", self.admin_view(economics_view.view), name="economics"),
             path(
                 "saved-filters/save/",
                 self.admin_view(require_POST(views.save_view)),
@@ -205,6 +222,10 @@ def _home_cards(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         + (" " if due else "")
         + "к оплате",
     )
+    if any(model["object_name"] == "Economics" for model in models):
+        from apps.placements import economics_view
+
+        notes["economics"] = economics_view.home_card(product)
     cards = []
     for model in models:
         value, note = notes.get(model["object_name"].lower(), ("", ""))

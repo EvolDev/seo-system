@@ -69,9 +69,11 @@ def test_price_editor(admin_page: Page, live_server: LiveServer, panel: bool) ->
         .filter(has=page.locator("[data-price-editor]"))
         .filter(has_text="Collaborator")
     )
-    row.locator("[data-price-open]").click()
-    row.locator("[name=amount]").fill("700.25")
-    row.get_by_role("button", name="Сохранить", exact=True).click()
+    # В строке три карандаша — цена, написание, анонс (ADR-071); нужен у цены.
+    price_editor = row.locator("[data-price-editor]:not(.seo-extra-editor)")
+    price_editor.locator("[data-price-open]").click()
+    price_editor.locator("[name=amount]").fill("700.25")
+    price_editor.get_by_role("button", name="Сохранить", exact=True).click()
     expect(card.locator("tr", has_text="Collaborator").first).to_contain_text("€700.25")
     site.refresh_from_db()
     assert site.price is not None and site.price.placement_cents == 90000

@@ -15,6 +15,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from django.db import transaction
@@ -160,6 +161,111 @@ def edit_price(
                 author=author,
             )
         return revised
+
+
+# Цены услуг рядом с размещением: поле предложения и подпись в истории.
+EXTRA_PRICES = {"writing": ("writing_cents", "Написание"), "announce": ("announce_cents", "Анонс")}
+MAX_CENTS = 2_147_483_647
+
+
+def set_extra_price(offer: SitePrice, kind: str, cents: int | None, *, author: Any = None) -> bool:
+    """Цена написания или анонса у предложения; пусто — «не указано».
+
+    Продавцы обычно называют её отдельно от прайса (пользователь, 14.10.2026).
+    Правка — на месте, прежнее значение — заметкой в истории площадки: новый
+    снимок перевёл бы рабочую цену и спрятал «новую цену» продавца, а сравнение
+    и разбор идут только по цене размещения (ADR-043). Как и тип ссылки,
+    значение уходит и в самый новый снимок того же продавца и услуги: у площадки
+    с заявкой в работе рабочая цена старше прайса. Вернёт, изменилось ли что-то.
+    """
+    if kind not in EXTRA_PRICES:
+        raise ValueError("Неизвестная цена.")
+    if cents is not None and not 0 <= cents <= MAX_CENTS:
+        raise ValueError("Проверьте сумму.")
+    column, label = EXTRA_PRICES[kind]
+    with transaction.atomic():
+        locked = SitePrice.objects.select_for_update().select_related("seller").get(pk=offer.pk)
+        if locked.placement_type == PlacementType.LINK_INSERTION:
+            raise ValueError("У вставки ссылки нет статьи и анонса — цену не задать.")
+        before = getattr(locked, column)
+        newest = (
+            SitePrice.objects.filter(
+                site_id=locked.site_id,
+                seller_id=locked.seller_id,
+                placement_type=locked.placement_type,
+            )
+            .order_by("-checked_at", "-pk")
+            .values_list("pk", flat=True)
+            .first()
+        )
+        ids = {locked.pk} | ({newest} if newest is not None else set())
+        changed = (
+            SitePrice.objects.filter(pk__in=ids)
+            .exclude(**{column: cents})
+            .update(**{column: cents})
+        )
+        if before != cents:
+            add_note(
+                locked.site_id,
+                f"{label} · {describe(locked)}: "
+                f"{_extra_text(before, locked.currency)} → {_extra_text(cents, locked.currency)}",
+                author=author,
+            )
+    return bool(changed)
+
+
+@dataclass(frozen=True)
+class WritingOutcome:
+    """Итог «Цены написания…»: сколько изменено, кого пропустили и почему."""
+
+    changed: int
+    same: int  # уже стояла эта цена
+    no_price: int  # нет рабочей цены
+    insertion: int  # рабочая цена — вставка ссылки: статьи нет
+    converted: int  # цена не в евро — пересчитано по курсу ЕЦБ
+    no_rate: int  # курса валюты нет — не пересчитать
+
+
+def set_writing_for_sites(
+    site_ids: Iterable[int], eur_cents: int, *, author: Any = None
+) -> WritingOutcome:
+    """Цена написания у рабочей цены площадок — действием «Цена написания…».
+
+    Сумма — в евро; у рабочей цены в другой валюте пересчитывается по
+    последнему курсу ЕЦБ: написание хранится в валюте предложения.
+    """
+    from apps.sites.rates import latest_rates
+
+    rates = latest_rates()
+    changed = same = no_price = insertion = converted = no_rate = 0
+    sites = Site.all_objects.filter(pk__in=list(site_ids)).select_related("price")
+    for site in sites:
+        price = site.price
+        if price is None:
+            no_price += 1
+            continue
+        if price.placement_type == PlacementType.LINK_INSERTION:
+            insertion += 1
+            continue
+        cents = eur_cents
+        if price.currency != "EUR":
+            rate = rates.get(price.currency)
+            if rate is None:
+                no_rate += 1
+                continue
+            cents = int((Decimal(eur_cents) * rate).quantize(Decimal(1), ROUND_HALF_UP))
+            converted += 1
+        if set_extra_price(price, "writing", cents, author=author):
+            changed += 1
+        else:
+            same += 1
+    return WritingOutcome(changed, same, no_price, insertion, converted, no_rate)
+
+
+def _extra_text(cents: int | None, currency: str) -> str:
+    if cents is None:
+        return "не указано"
+    return "бесплатно" if cents == 0 else money(cents, currency)
 
 
 def set_link_type(offer: SitePrice, value: str | None, *, author: Any = None) -> None:

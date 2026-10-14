@@ -411,6 +411,13 @@ body.admin-interface #changelist .actions label {
   margin: 0;
   font-size: 0.8125rem;
 }
+/* Поле своего действия (seo/action-fields.js) — только при нём. */
+body.admin-interface #changelist .actions label[hidden] { display: none; }
+body.admin-interface #changelist .actions input[data-for-action] {
+  width: 6em;
+  min-height: 30px;
+  padding: 2px 8px;
+}
 body.admin-interface #changelist .actions select {
   /* Не растягиваться на всю строку: выбор действия — такой же контрол, как кнопка. */
   flex: 0 1 auto;
@@ -725,21 +732,29 @@ body.admin-interface .submit-row .seo-run-btn + .seo-btn { margin-left: 8px; }
 
 /* Цвета графиков (ADR-038, E1-14): размещения — фиолетовый; траты по счетам и без
    счёта — пара «две группы». Проверены валидатором dataviz против фона карточек
-   (--darkened-bg); «Ahrefs — тёмная» — цвета «Google — тёмной», проверены на #323335. */
+   (--darkened-bg); «Ahrefs — тёмная» — цвета «Google — тёмной», проверены на #323335.
+   «Экономика»: потрачено — синий, запланировано — оранжевый (слоты 1 и 2 палитры
+   dataviz; у «Apple — светлой» оранжевый темнее — контраст 3:1 на #f5f5f7). */
 body.admin-interface,
 html[data-palette="emerald"] body.admin-interface {
   --seo-chart-placed: #4a3aa7;
   --seo-chart-invoiced: #2a78d6;
   --seo-chart-other: #1baf7a;
+  --seo-chart-spent: #2a78d6;
+  --seo-chart-planned: #eb6834;
 }
 html[data-palette="apple-light"] body.admin-interface {
   --seo-chart-placed: #b154e0;
   --seo-chart-invoiced: #2281fd;
   --seo-chart-other: #1aa3ba;
+  --seo-chart-spent: #2281fd;
+  --seo-chart-planned: #e4602b;
 }
 html[data-palette="google-dark"] body.admin-interface,
 html[data-palette="ahrefs"] body.admin-interface {
   --seo-chart-placed: #ad5ffe;
   --seo-chart-invoiced: #2178ee;
   --seo-chart-other: #0ea1b5;
+  --seo-chart-spent: #2178ee;
+  --seo-chart-planned: #d95926;
 }

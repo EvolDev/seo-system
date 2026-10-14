@@ -62,6 +62,7 @@ SCREENS = {
     "admin:placements_placement_change": "placement_card",
     "admin:placements_placement_add": "placement_card",
     "admin:placements_invoice_changelist": "invoice_list",
+    "admin:economics": "economics",
     "admin:keywords_keywordcoverage_changelist": "anchors",
     "admin:keywords_keyword_change": "anchors",
     "admin:placements_invoice_change": "invoice_card",

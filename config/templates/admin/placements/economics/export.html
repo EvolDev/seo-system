@@ -1,0 +1,62 @@
+<!doctype html>
+{% comment %}
+Отчёт «Экономики» отдельным файлом: открывается без системы и без интернета —
+стили и скрипт подсказок внутри (seo/economics.css и .js), цвета — светлые и
+тёмные по настройке системы. Тот же _report.html, что на экране, без ссылок.
+{% endcomment %}
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Экономика · {{ econ.product_label }} · {{ econ.label }}</title>
+<style>
+:root {
+  color-scheme: light;
+  --body-bg: #ffffff;
+  --body-fg: #1d1d1f;
+  --body-quiet-color: #5f5f64;
+  --darkened-bg: #f6f6f7;
+  --hairline-color: #e2e2e5;
+  --admin-interface-generic-link-color: #2a78d6;
+  --seo-radius: 8px;
+  --seo-chart-spent: #2a78d6;
+  --seo-chart-planned: #eb6834;
+  --seo-chart-placed: #4a3aa7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --body-bg: #1e1f20;
+    --body-fg: #e3e3e3;
+    --body-quiet-color: #b4b7b5;
+    --darkened-bg: #282a2c;
+    --hairline-color: #3c3f42;
+    --admin-interface-generic-link-color: #7cacf8;
+    --seo-chart-spent: #2178ee;
+    --seo-chart-planned: #d95926;
+    --seo-chart-placed: #ad5ffe;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--body-bg); color: var(--body-fg);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+.seo-econ-export-page { max-width: 1680px; margin: 0 auto; padding: 24px 16px 40px; }
+.seo-econ-export-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+.seo-econ-export-head h1 { margin: 0; font-size: 22px; font-weight: 600; }
+@media print { .seo-econ-chips, .seo-econ-link, .seo-econ-tile-go { display: none !important; } }
+{{ inline_css|safe }}
+</style>
+</head>
+<body>
+<main class="seo-econ seo-econ-export-page" data-econ>
+  <header class="seo-econ-export-head">
+    <h1>Экономика размещений</h1>
+    <span class="seo-econ-sub">{{ econ.product_label }} · {{ econ.label }} · отчёт на {{ econ.generated|date:"d.m.Y H:i" }}</span>
+  </header>
+  {% include "admin/placements/economics/_report.html" with export=True %}
+</main>
+<script>
+{{ inline_js|safe }}
+</script>
+</body>
+</html>

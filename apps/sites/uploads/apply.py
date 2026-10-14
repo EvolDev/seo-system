@@ -24,6 +24,7 @@ from django.utils import timezone
 from apps.sites import latest
 from apps.sites.models import (
     MetricSource,
+    PlacementType,
     Seller,
     Site,
     SiteList,
@@ -33,6 +34,7 @@ from apps.sites.models import (
     SitePrice,
     Upload,
     UploadItem,
+    UploadKind,
     ensure_product_sites,
 )
 from apps.sites.uploads.plan import LIST_LIMIT, Plan, PlanItem, start_of_day
@@ -234,15 +236,23 @@ class Writer:
             for row in rows:
                 today[(row.site_id, row.placement_type)] = row
         # Последняя ручная правка относится только к этому продавцу и услуге.
-        previous_types = {
-            (site_id, service): (link_type, manual)
-            for site_id, service, link_type, manual in SitePrice.objects.filter(
+        previous = {
+            (site_id, service): (link_type, manual, writing, announce)
+            for site_id, service, link_type, manual, writing, announce in SitePrice.objects.filter(
                 site_id__in=ids, seller=self.seller
             )
             .order_by("site_id", "placement_type", "-checked_at", "-pk")
             .distinct("site_id", "placement_type")
-            .values_list("site_id", "placement_type", "link_type", "link_type_manual")
+            .values_list(
+                "site_id",
+                "placement_type",
+                "link_type",
+                "link_type_manual",
+                "writing_cents",
+                "announce_cents",
+            )
         }
+        previous_types = {key: (row[0], row[1]) for key, row in previous.items()}
         overrides = {key: value for key, (value, manual) in previous_types.items() if manual}
         result: list[SitePrice] = []
         new: list[SitePrice] = []
@@ -251,6 +261,7 @@ class Writer:
             site_id = self.site_ids[item.record.domain]
             values = self._price_values(item)
             key = (site_id, item.service)
+            self._extra_prices(values, item.service, previous.get(key))
             if values["link_type"] is None and key in previous_types:
                 values["link_type"] = previous_types[key][0]
             if key in overrides:
@@ -290,6 +301,31 @@ class Writer:
         self.counts["offers_created"] = len(new)
         self.counts["offers_updated"] = len(updated)
         return result
+
+    def _extra_prices(
+        self, values: dict[str, object], service: str, previous: tuple[Any, ...] | None
+    ) -> None:
+        """Написание и анонс, которых нет в файле прайса (ADR-071).
+
+        Своя цена из файла главнее; нет её — сумма для всех площадок, вписанная
+        в сводке загрузки; нет и её — прежняя цена того же продавца за ту же
+        услугу: её могли вписать в карточке, и новый прайс без этой колонки не
+        должен её стирать. У вставки ссылки статьи и анонса нет; каталог
+        Collaborator цены услуг даёт сам — ему ничего не подставляем.
+        """
+        if self.upload.kind != UploadKind.PRICE_LIST or service == PlacementType.LINK_INSERTION:
+            return
+        for index, column, default in (
+            (2, "writing_cents", self.upload.writing_cents),
+            (3, "announce_cents", self.upload.announce_cents),
+        ):
+            if values[column] is not None:
+                continue
+            if default is not None:
+                values[column] = default
+                self.counts[f"{column}_default"] += 1
+            elif previous is not None and previous[index] is not None:
+                values[column] = previous[index]
 
     def _price_values(self, item: PlanItem) -> dict[str, object]:
         record = item.record

@@ -89,8 +89,9 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
         <span class="seo-sub">{{ working.get_placement_type_display }} · {{ working.seller }} · цена от {{ working.checked_at|date:"d.m.Y" }}</span>
       </div>
       <div class="seo-card-kv">
-        <span>Написание: <b>{% if working_writing %}{{ working_writing }}{% else %}не предлагает — пишем сами{% endif %}</b></span>
-        <span>Анонс: <b>{{ working_announce }}</b></span>
+        {% if working_writing %}{% firstof working_writing as writing_text %}{% else %}{% firstof "не указано — пишем сами" as writing_text %}{% endif %}
+        <span class="seo-extra-line">Написание: {% include "admin/sites/site/extra_price_editor.html" with offer=working kind="writing" label="Написание" text=writing_text amount=working_writing_amount editable=working_extra seller_name=working.seller.name %}</span>
+        <span class="seo-extra-line">Анонс: {% include "admin/sites/site/extra_price_editor.html" with offer=working kind="announce" label="Анонс" text=working_announce amount=working_announce_amount editable=working_extra seller_name=working.seller.name %}</span>
         <div class="seo-card-link-type">Тип ссылки: {% include "admin/sites/site/link_type_select.html" with offer=working %}</div>
       </div>
       {% else %}
@@ -111,8 +112,8 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
               <td>{{ row.offer.get_placement_type_display }}</td>
               <td class="seo-right">{% include "admin/sites/site/price_editor.html" with offer=row.offer price=row.price amount=row.amount latest_id=row.offer.pk seller_name=row.offer.seller_name big=False %}</td>
               <td>{% if row.is_working %}<span class="seo-chip seo-down">рабочая</span>{% elif row.other_service %}<span class="seo-flat">другая услуга</span>{% elif row.delta %}{{ row.delta }}{% endif %}</td>
-              <td>{{ row.writing|default:"—" }}</td>
-              <td>{{ row.announce }}</td>
+              <td>{% if row.writing %}{% firstof row.writing as writing_text %}{% else %}{% firstof "—" as writing_text %}{% endif %}{% include "admin/sites/site/extra_price_editor.html" with offer=row.offer kind="writing" label="Написание" text=writing_text amount=row.writing_amount editable=row.extra seller_name=row.offer.seller_name %}</td>
+              <td>{% include "admin/sites/site/extra_price_editor.html" with offer=row.offer kind="announce" label="Анонс" text=row.announce amount=row.announce_amount editable=row.extra seller_name=row.offer.seller_name %}</td>
               {% if has_gray_price %}<td>{{ row.gray }}</td>{% endif %}
               <td>{% include "admin/sites/site/link_type_select.html" with offer=row.offer %}</td>
               <td class="seo-sub">{{ row.offer.checked_at|date:"d.m.Y" }}</td>

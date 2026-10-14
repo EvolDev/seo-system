@@ -178,3 +178,12 @@
 /* Каталог: «Нет в этом файле» (ADR-068) — предупреждение о выгрузке с фильтром и список. */
 .seo-absent-warning { max-width: 900px; margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--seo-up-bg, #fbe9e8); color: var(--seo-up, #c4302b); }
 .seo-absent-list { columns: 2 320px; margin: 6px 0; padding-left: 18px; }
+
+/* Сводка прайса: написание и анонс одной суммой — тем, у кого их нет в файле (ADR-071). */
+.seo-extra-prices { margin: 16px 0 0; padding: 12px 16px; border: 1px solid var(--hairline-color); border-radius: 10px;
+  background: var(--darkened-bg); }
+.seo-extra-prices legend { padding: 0 6px; font-weight: 600; font-size: 14px; }
+.seo-extra-prices .seo-sub { margin: 0 0 8px; }
+.seo-extra-fields { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.seo-extra-fields label { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; }
+.seo-extra-fields input { width: 7em; }

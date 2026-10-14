@@ -10,6 +10,7 @@
 import datetime as dt
 import json
 from collections.abc import Iterable
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, ClassVar
 from urllib.parse import urlencode
 
@@ -553,6 +554,8 @@ class UploadAdmin(RecordAdmin):
             "issues": service.issues(upload),
             "busy": busy,
             "list_name": f"{upload.source_name} · {upload.prices_date:%d.%m.%Y}",
+            "writing_amount": _amount(upload.writing_cents),
+            "announce_amount": _amount(upload.announce_cents),
         }
         if catalog_kind and not busy and upload.status != UploadStatus.FAILED:
             context.update(_catalog_context(upload))
@@ -720,6 +723,20 @@ class UploadAdmin(RecordAdmin):
             spec = filters.parse_spec(json.loads(request.POST.get("filters") or "{}"))
         except ValueError:
             spec = {}
+        if upload.kind == UploadKind.PRICE_LIST:
+            # Написание и анонс для площадок без своей цены в файле (ADR-071).
+            extra: dict[str, int | None] = {}
+            for name, label in (("writing", "написания"), ("announce", "анонса")):
+                raw = (request.POST.get(name) or "").strip()
+                cents = _cents(raw)
+                if raw and cents is None:
+                    return _answer(
+                        request, upload, error=f"Цена {label} — число, например 30 или 0."
+                    )
+                extra[f"{name}_cents"] = cents
+            for field, value in extra.items():
+                setattr(upload, field, value)
+            upload.save(update_fields=list(extra))
         service.start(upload, UploadStatus.WRITING)
         with bind_run_id(upload.run_id or new_run_id()):
             upload_write.delay(upload.pk, action, parts, spec)
@@ -882,6 +899,25 @@ class UploadAdmin(RecordAdmin):
             or upload.kind in (UploadKind.PRICE_LIST, UploadKind.COLLABORATOR_CATALOG)
             else ["Файл", "Колонки", "Сводка до записи", "Записано"],
         }
+
+
+def _cents(value: str) -> int | None:
+    """«30», «30,50», «1 200» → центы; пусто, не число или меньше нуля — None."""
+    text = value.replace("\u202f", "").replace("\xa0", "").replace(" ", "").replace(",", ".")
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or not 0 <= amount <= Decimal("21474836.47"):
+        return None
+    return int((amount * 100).quantize(Decimal(1), ROUND_HALF_UP))
+
+
+def _amount(cents: int | None) -> str:
+    if cents is None:
+        return ""
+    units, rest = divmod(cents, 100)
+    return f"{units}" if rest == 0 else f"{units},{rest:02d}"
 
 
 def _answer(

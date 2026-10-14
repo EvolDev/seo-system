@@ -165,6 +165,9 @@ class Plan:
         ]
         blocked = set(self.blocked)
         planned = [r for r in records if r.domain not in blocked]
+        # Площадки с публикацией, у которых в файле нет цены написания или анонса:
+        # сводка предлагает вписать её одной суммой на всех (ADR-071).
+        articles = [r for r in planned if PlacementType.GUEST_POST in r.offers]
         return {
             "rows": rows,
             "blank_rows": blank_rows,
@@ -181,6 +184,9 @@ class Plan:
             "changed_down": down,
             "changed_up": up,
             "currency": self.currency,
+            "guest_posts": len(articles),
+            "no_writing": sum(1 for r in articles if r.writing_cents is None),
+            "no_announce": sum(1 for r in articles if r.announce_cents is None),
             **_capped("rejected", sorted(rejected, key=lambda r: str(r["domain"]))),
             **_capped("duplicates", duplicates),
             **_capped("errors", sorted(errors, key=lambda e: int(str(e["line"])))),

@@ -40,6 +40,8 @@ SETTING_KEYS: dict[str, str] = {
     # Загрузка цен — 13-CONFIG.md §2.5
     "OFFER_RECHECK": "Повторный разбор предложения продавца: min_change_pct",
     "UPLOAD_PRICE_CAP": "Цена из файла похожа на ошибку, если больше: eur",
+    # Экономика — 13-CONFIG.md §2.6
+    "MONTHLY_BUDGET": "Бюджет на размещения в месяц, EUR: eur",
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
@@ -128,6 +130,30 @@ class UploadPriceCap:
 
 
 @dataclass(frozen=True)
+class MonthlyBudget:
+    """Бюджет на размещения в месяц, евро — `MONTHLY_BUDGET` (экран «Экономика»).
+
+    Каждый месяц начинается с полной суммы: остаток не переносится. Продукт
+    может задать свою сумму (ADR-035), «Все продукты» — сумма бюджетов.
+    """
+
+    eur: float
+
+    @classmethod
+    def parse(cls, value: Any) -> "MonthlyBudget":
+        if not isinstance(value, dict) or set(value) != {"eur"}:
+            raise ValueError("Нужен объект ровно с полем eur.")
+        number = value["eur"]
+        if not isinstance(number, int | float) or isinstance(number, bool) or number < 0:
+            raise ValueError("eur — сумма в евро, не меньше нуля.")
+        return cls(float(number))
+
+    @property
+    def eur_cents(self) -> int:
+        return round(self.eur * 100)
+
+
+@dataclass(frozen=True)
 class AnchorRecommend:
     """Рекомендации анкоров в размещении — `ANCHOR_RECOMMEND` (E3-05, ADR-059).
 
@@ -202,6 +228,7 @@ SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "GRAY_ZONES": GrayZones.parse,
     "GRAY_TERMS": parse_gray_terms,
     "ANCHOR_RECOMMEND": AnchorRecommend.parse,
+    "MONTHLY_BUDGET": MonthlyBudget.parse,
 }
 
 
@@ -258,6 +285,18 @@ def anchor_recommend(product_id: int | None) -> AnchorRecommend:
         return AnchorRecommend.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"ANCHOR_RECOMMEND: {error}") from error
+
+
+def monthly_budget(product_id: int | None) -> MonthlyBudget:
+    """Действующий бюджет на месяц для продукта: его значение, иначе общее."""
+    value = get_setting("MONTHLY_BUDGET", product_id)
+    if value is None:
+        # Общее значение заводит миграция content.0008 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки MONTHLY_BUDGET — заведите общее значение.")
+    try:
+        return MonthlyBudget.parse(value)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"MONTHLY_BUDGET: {error}") from error
 
 
 def gray_terms() -> tuple[str, ...]:

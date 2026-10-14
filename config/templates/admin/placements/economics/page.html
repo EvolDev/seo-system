@@ -1,0 +1,22 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Экран «Экономика» (Работа → Экономика): бюджет месяца, траты, план и ссылки.
+Выбор продукта и периода — строкой над всем, что ниже: ссылки и форма с
+адресом, без перезагрузки (seo/soft-nav.js). Сам отчёт — _report.html, тот же
+и в HTML-файле отчёта. Данные — apps/placements/economics_view.py.
+{% endcomment %}
+{% load seo_assets %}
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% asset 'seo/economics.css' %}">
+{% endblock %}
+{% block extrahead %}{{ block.super }}
+<script src="{% asset 'seo/economics.js' %}" defer></script>
+{% endblock %}
+{% block bodyclass %}{{ block.super }} seo-econ-page{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Начало</a> › Экономика</div>{% endblock %}
+{% block content %}
+<div class="seo-econ" data-econ>
+  {% include "admin/placements/economics/_filters.html" %}
+  {% include "admin/placements/economics/_report.html" %}
+</div>
+{% endblock %}

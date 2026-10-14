@@ -1038,6 +1038,10 @@ class Upload(models.Model):
     columns = models.JSONField("колонки файла", null=True, blank=True)
     mapping = models.JSONField("разметка", null=True, blank=True)
     currency = models.CharField("валюта цен", max_length=3, null=True, blank=True)
+    # Прайс: написание и анонс одной суммой — тем площадкам, у которых этой цены в
+    # файле нет (продавцы обычно называют её отдельно). Центы в валюте файла.
+    writing_cents = models.IntegerField("написание для всех, центы", null=True, blank=True)
+    announce_cents = models.IntegerField("анонс для всех, центы", null=True, blank=True)
     status = PgEnumField(
         "состояние",
         enum_type="upload_status",

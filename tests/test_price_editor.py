@@ -153,7 +153,10 @@ def test_permission_and_cross_site(admin_client: Client, client: Client, price: 
     client.force_login(viewer)
     assert edit(client, price).status_code == 403
     card = client.get(reverse("admin:sites_site_card", args=[price.site_id]))
-    assert b"data-price-open" not in card.content
+    # Цену размещения без права добавлять предложения не править; написание и
+    # анонс правятся на месте — им хватает права менять предложение (ADR-071).
+    assert 'title="Изменить цену"'.encode() not in card.content
+    assert "Изменить цену: написание".encode() in card.content
     other = Site.objects.create(domain="wrong.example")
     url = reverse("admin:sites_site_card_price", args=[other.pk])
     assert (

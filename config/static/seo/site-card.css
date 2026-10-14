@@ -344,5 +344,10 @@ body.admin-interface .seo-card-sec .seo-btn.seo-btn-small { min-height: 28px; pa
 .seo-price-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .seo-price-fields input { width: 100px; }
 .seo-price-editor form { padding: 8px; border: 1px solid var(--hairline-color); border-radius: 6px; }
+/* Написание и анонс: карандаш в строке рядом с суммой, форма — под ней. */
+.seo-extra-line { display: inline-flex; gap: 6px; align-items: flex-start; }
+.seo-extra-editor { vertical-align: top; }
+.seo-extra-editor form { display: flex; flex-direction: column; gap: 6px; }
+.seo-extra-pencil { font-size: 15px; padding: 0 4px; }
 .seo-price-error { max-width: 280px; color: var(--error-fg); white-space: normal; }
 .seo-price-error ul { margin: 4px 0; padding-left: 14px; }

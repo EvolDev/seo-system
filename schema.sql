@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.28 от 14.10.2026 — написание и анонс для всех площадок прайса (ADR-071)
 -- Версия 1.27 от 14.10.2026 — личные шаблоны конструктора выгрузки (ADR-070)
 -- Версия 1.26 от 12.10.2026 — снятие с продажи: площадки нет в полном каталоге продавца (ADR-068)
 -- Версия 1.25 от 09.10.2026 — активность анкоров в отчётном списке (ADR-067)
@@ -356,6 +357,8 @@ CREATE TABLE uploads (
     created_at    timestamptz NOT NULL DEFAULT now(),
     written_at    timestamptz,
     journaled     boolean NOT NULL DEFAULT false, -- запись шла с журналом: отменяется целиком (ADR-060)
+    writing_cents  integer,                     -- прайс: написание тем, у кого его нет в файле (ADR-071)
+    announce_cents integer,                     -- прайс: анонс — так же
     CONSTRAINT uploads_seller_check
         CHECK (seller_id IS NOT NULL OR kind IN ('ahrefs_batch','placements','ahrefs_refdomains','anchors')),
     CONSTRAINT uploads_product_check

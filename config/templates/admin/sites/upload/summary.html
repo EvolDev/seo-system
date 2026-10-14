@@ -48,13 +48,29 @@
     «{{ list_name }}». Рабочая цена сама переходит на новую цену того же продавца; новые цены других
     продавцов и площадки с заявкой в работе ждут вашего решения в разборе. Валюта цен — {{ summary.currency }}.
   </p>
-  <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" class="submit-row" data-run-form="all" data-done-url="{% url 'admin:sites_upload_review' upload.pk %}">
+  <form method="post" action="{% url 'admin:sites_upload_write' upload.pk %}" data-run-form="all" data-done-url="{% url 'admin:sites_upload_review' upload.pk %}">
     {% csrf_token %}
-    <button type="submit" class="default seo-run-btn">Записать в базу</button>
-    {% if upload.kind == 'price_list' %}<a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">Назад: колонки</a>{% endif %}
-    <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
-      {% include "admin/sites/upload/_undo_button.html" %}
-    <div class="seo-inline-loader" data-loader hidden></div>
+    {% if upload.kind == 'price_list' %}
+    {# Написание и анонс одной суммой — тем, у кого их нет в файле (ADR-071). #}
+    <fieldset class="seo-extra-prices">
+      <legend>Цены, которых нет в файле</legend>
+      <p class="seo-sub">
+        {% if summary.guest_posts is not None %}Из {{ summary.guest_posts }} площадок с публикацией без цены написания — {{ summary.no_writing }}, без цены анонса — {{ summary.no_announce }}.{% endif %}
+        Продавец назвал цену отдельно — впишите: она встанет им всем. Пусто — не указано; у площадок, где цену уже вписывали, останется прежняя.
+      </p>
+      <div class="seo-extra-fields">
+        <label>Написание, {{ summary.currency|default:upload.currency }} <input type="text" inputmode="decimal" name="writing" value="{{ writing_amount }}" placeholder="не указано" autocomplete="off"></label>
+        <label>Анонс, {{ summary.currency|default:upload.currency }} <input type="text" inputmode="decimal" name="announce" value="{{ announce_amount }}" placeholder="не указано" autocomplete="off"></label>
+      </div>
+    </fieldset>
+    {% endif %}
+    <div class="submit-row">
+      <button type="submit" class="default seo-run-btn">Записать в базу</button>
+      {% if upload.kind == 'price_list' %}<a class="seo-btn" href="{% url 'admin:sites_upload_columns' upload.pk %}">Назад: колонки</a>{% endif %}
+      <a class="seo-btn" href="{% url 'admin:sites_upload_changelist' %}">К загрузкам</a>
+        {% include "admin/sites/upload/_undo_button.html" %}
+      <div class="seo-inline-loader" data-loader hidden></div>
+    </div>
   </form>
 {% endif %}
 {% endblock %}

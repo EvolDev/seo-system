@@ -14,7 +14,7 @@ import math
 from collections.abc import Iterable, Iterator
 from collections.abc import Set as AbstractSet
 from contextlib import suppress
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django import forms
@@ -302,6 +302,11 @@ class SiteAdmin(RecordAdmin):
                 name="sites_site_card_price",
             ),
             path(
+                "<int:object_id>/card/extra-price/",
+                self.admin_site.admin_view(require_POST(self.card_extra_price_view)),
+                name="sites_site_card_extra_price",
+            ),
+            path(
                 "<int:object_id>/card/link-type/",
                 self.admin_site.admin_view(require_POST(self.card_link_type_view)),
                 name="sites_site_card_link_type",
@@ -370,6 +375,7 @@ class SiteAdmin(RecordAdmin):
         object_id: int,
         gray_form: "GrayReadingForm | None" = None,
         price_form: "OfferPriceForm | None" = None,
+        extra_form: "OfferExtraPriceForm | None" = None,
     ) -> HttpResponse:
         """Карточка: панели (заголовок X-Seo-Partial) — только содержимое, иначе страница.
 
@@ -386,6 +392,11 @@ class SiteAdmin(RecordAdmin):
             "gray": gray,
             "price_form": price_form,
             "price_offer_id": price_form.data.get("offer") if price_form is not None else None,
+            # Правка написания или анонса с ошибкой: тот редактор открыт, ошибка в нём.
+            "extra_form": extra_form,
+            "extra_open": f"{extra_form.data.get('offer')}:{extra_form.data.get('kind')}"
+            if extra_form is not None
+            else "",
             "can_edit_price": self.has_change_permission(request, site)
             and request.user.has_perm("sites.add_siteprice")
             and request.user.has_perm("sites.change_siteprice"),
@@ -444,6 +455,30 @@ class SiteAdmin(RecordAdmin):
             else:
                 return self._back_to_card(request, object_id)
         return self.card_view(request, object_id, price_form=form)
+
+    def card_extra_price_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Цена написания или анонса у предложения — карандашом в карточке."""
+        site = get_object_or_404(Site.all_objects, pk=object_id)
+        if not self.has_change_permission(request, site) or not request.user.has_perm(
+            "sites.change_siteprice"
+        ):
+            return HttpResponse(status=403)
+        form = OfferExtraPriceForm(request.POST)
+        if form.is_valid():
+            offer = get_object_or_404(SitePrice, pk=form.cleaned_data["offer"], site=site)
+            amount = form.cleaned_data["amount"]
+            try:
+                offers.set_extra_price(
+                    offer,
+                    form.cleaned_data["kind"],
+                    None if amount is None else int(amount * 100),
+                    author=request.user,
+                )
+            except ValueError as error:
+                form.add_error(None, str(error))
+            else:
+                return self._back_to_card(request, object_id)
+        return self.card_view(request, object_id, extra_form=form)
 
     def card_link_type_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         site = get_object_or_404(Site.all_objects, pk=object_id)
@@ -534,9 +569,13 @@ def _card_context(
                 "other_service": working is not None and not same_service,
                 "pending": offer.reviewed_at is None,
                 "writing": writing_html(offer.writing_cents, offer.currency),
+                "writing_amount": price_amount(offer.writing_cents),
                 "announce": announce_text(offer.announce_cents, offer.currency)
                 if offer.placement_type == PlacementType.GUEST_POST
                 else "—",
+                "announce_amount": price_amount(offer.announce_cents),
+                # У вставки ссылки нет статьи и анонса — править нечего.
+                "extra": offer.placement_type != PlacementType.LINK_INSERTION,
                 "gray": offers.money(offer.gray_cents, offer.currency) or "—",
             }
         )
@@ -624,6 +663,11 @@ def _card_context(
         ),
         "currencies": offers.CURRENCIES,
         "price_url": reverse("admin:sites_site_card_price", args=[site.pk]),
+        "extra_price_url": reverse("admin:sites_site_card_extra_price", args=[site.pk]),
+        "working_writing_amount": price_amount(working.writing_cents) if working else "",
+        "working_announce_amount": price_amount(working.announce_cents) if working else "",
+        "working_extra": working is not None
+        and working.placement_type != PlacementType.LINK_INSERTION,
         "working_writing": writing_html(working.writing_cents, working.currency) if working else "",
         "working_announce": announce_text(working.announce_cents, working.currency)
         if working
@@ -676,6 +720,22 @@ class OfferPriceForm(forms.Form):
         error_messages={"required": "Укажите цену.", "invalid": "Введите число."},
     )
     currency = forms.ChoiceField(choices=[(value, value) for value in offers.CURRENCIES])
+
+
+class OfferExtraPriceForm(forms.Form):
+    """Написание или анонс у предложения: пустая сумма — «не указано», 0 — бесплатно."""
+
+    offer = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    kind = forms.ChoiceField(choices=[(key, key) for key in offers.EXTRA_PRICES])
+    amount = forms.DecimalField(
+        label="Сумма",
+        required=False,
+        localize=True,
+        min_value=0,
+        max_value=Decimal("21474836.47"),
+        decimal_places=2,
+        error_messages={"invalid": "Введите число."},
+    )
 
 
 class GrayReadingForm(forms.Form):
@@ -2031,6 +2091,20 @@ class SellerActionForm(helpers.ActionForm):
         required=False,
         label="статус",
     )
+    # Видно только при «Цене написания…» (seo/action-fields.js).
+    writing = forms.CharField(
+        required=False,
+        label="написание, €",
+        widget=forms.TextInput(
+            attrs={
+                "inputmode": "decimal",
+                "placeholder": "30",
+                "size": 6,
+                "autocomplete": "off",
+                "data-for-action": "set_writing_action",
+            }
+        ),
+    )
 
 
 class OffersChangeList(PerPageChangeList):
@@ -2118,13 +2192,14 @@ class ProductSiteLatestAdmin(RecordAdmin):
     actions = (
         "take_placement_action",
         "set_status_action",
+        "set_writing_action",
         "accept_new_prices_action",
         "fix_seller_action",
         "keep_current_action",
     )
 
     class Media:
-        js = (Js("seo/country-picker.js"),)
+        js = (Js("seo/country-picker.js"), Js("seo/action-fields.js"))
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             "all": (Css("seo/offers.css"), Css("seo/gray.css"), Css("flags/sprite-hq.css"))
         }
@@ -2498,6 +2573,39 @@ class ProductSiteLatestAdmin(RecordAdmin):
         # Строка списка — представление; статус меняется у «продукт × площадка».
         return bool(request.user.has_perm("sites.change_productsite"))
 
+    @admin.action(description="Цена написания…", permissions=["fix_price"])
+    def set_writing_action(
+        self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
+    ) -> None:
+        """Цена написания у рабочей цены отмеченных площадок — суммой в евро рядом.
+
+        Продавцы называют её отдельно от прайса, одной на все свои площадки
+        (пользователь, 14.10.2026). Пусто в поле — не трогаем: «не указано»
+        ставится карандашом в карточке.
+        """
+        cents = _euro_cents(request.POST.get("writing"))
+        if cents is None:
+            self.message_user(
+                request,
+                "Впишите цену написания в евро рядом с действием: например, 30; 0 — бесплатно.",
+                messages.WARNING,
+            )
+            return
+        result = offers.set_writing_for_sites(_site_ids(queryset), cents, author=request.user)
+        text = f"Цена написания {offers.money(cents, 'EUR')} поставлена: {result.changed}."
+        skipped = [
+            (result.same, "уже стояла эта цена"),
+            (result.no_price, "нет рабочей цены"),
+            (result.insertion, "рабочая цена — вставка ссылки, статьи нет"),
+            (result.no_rate, "нет курса валюты рабочей цены"),
+        ]
+        reasons = [f"{reason} — {count}" for count, reason in skipped if count]
+        if reasons:
+            text += " Пропущено: " + "; ".join(reasons) + "."
+        if result.converted:
+            text += f" У {result.converted} рабочая цена не в евро — пересчитано по курсу ЕЦБ."
+        self.message_user(request, text, messages.SUCCESS if result.changed else messages.WARNING)
+
     @admin.action(description="Оставить как есть", permissions=["fix_price"])
     def keep_current_action(
         self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
@@ -2526,6 +2634,18 @@ def _posted_id(request: HttpRequest, name: str) -> int:
     """Номер из формы; не номер — 0: такой записи нет, фильтр ничего не найдёт."""
     value = request.POST.get(name) or ""
     return int(value) if value.isdigit() else 0
+
+
+def _euro_cents(value: str | None) -> int | None:
+    """«30», «30,5», «1 200.00» → центы; пусто, не число, меньше нуля — None."""
+    text = (value or "").strip().replace("\u202f", "").replace(" ", "").replace(",", ".")
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or amount < 0 or amount > Decimal("21474836.47"):
+        return None
+    return int((amount * 100).quantize(Decimal(1), ROUND_HALF_UP))
 
 
 def _site_ids(queryset: models.QuerySet[ProductSiteLatest]) -> list[int]:
