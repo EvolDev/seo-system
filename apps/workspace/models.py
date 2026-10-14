@@ -104,3 +104,39 @@ class UserSettings(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} · {self.product or '—'}"
+
+
+class ExportProfile(models.Model):
+    """Личная раскладка выгрузки. Пустое имя — последний черновик экрана.
+
+    Идентификаторы полей стабильны; фильтры и отмеченные размещения не
+    сохраняются. revision предотвращает незаметную замену из другой вкладки.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, models.PROTECT, related_name="export_profiles", db_index=False
+    )
+    screen = models.TextField("экран")
+    name = models.TextField("название", blank=True)
+    config = models.JSONField("раскладка")
+    revision = models.IntegerField("версия", default=1, db_default=1)
+    created_at = models.DateTimeField("создан", db_default=PgNow())
+    updated_at = models.DateTimeField("изменён", db_default=PgNow())
+    deleted_at = models.DateTimeField("удалён", null=True, blank=True)
+
+    class Meta:
+        db_table = "export_profiles"
+        verbose_name = "шаблон выгрузки"
+        verbose_name_plural = "шаблоны выгрузки"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                models.F("user"),
+                models.F("screen"),
+                Lower("name"),
+                condition=models.Q(deleted_at__isnull=True),
+                name="export_profiles_name_key",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name or "Последняя выгрузка"

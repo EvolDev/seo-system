@@ -146,7 +146,7 @@ def url_name(model_admin: "ModelAdmin[Any]") -> str:
 def is_export(request: HttpRequest) -> bool:
     """Запрос — выгрузка, а не список: `get_changelist` отдаёт `ExportChangeList`."""
     match = request.resolver_match
-    return match is not None and (match.url_name or "").endswith("_export")
+    return match is not None and (match.url_name or "").endswith(("_export", "_export_designer"))
 
 
 # Снятые галочки по спискам: {"sites_productsitelatest": ["dr", …]}. Храним снятые,
@@ -250,6 +250,7 @@ def _write_sheet(worksheet: Any, sheet: Sheet) -> None:
     header = []
     for column in sheet.columns:
         cell = WriteOnlyCell(worksheet, value=column.title)
+        cell.data_type = "s"
         cell.font = _HEADER_FONT
         header.append(cell)
     worksheet.append(header)

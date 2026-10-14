@@ -1,0 +1,11 @@
+<li class="seo-export"><form method="post" action="{{ url }}" data-designer-open>{% csrf_token %}
+<button class="seo-btn seo-export-launch" type="submit">Выгрузить ▾</button></form></li>
+<script>
+if(!window.seoDesignerOpen){window.seoDesignerOpen=true;document.addEventListener('submit',function(e){
+const f=e.target.closest('[data-designer-open]');if(!f)return;
+e.stopPropagation();const transitionStyle=document.createElement('style');transitionStyle.textContent='@view-transition{navigation:none}';document.head.append(transitionStyle);f.querySelectorAll('[data-picked]').forEach(n=>n.remove());
+const across=document.querySelector('#changelist-form input[name=select_across]');
+const ids=across&&across.value==='1'?[]:Array.from(document.querySelectorAll('#result_list input.action-select:checked')).map(n=>n.value);
+ids.forEach(id=>{const n=document.createElement('input');n.type='hidden';n.name='ids';n.value=id;n.dataset.picked='';f.append(n)});
+});}
+</script>

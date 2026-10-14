@@ -79,6 +79,7 @@ TABLES = [
     "placement_status_changes",
     # E9-10
     "saved_filters",
+    "export_profiles",
     # E9-12
     "user_settings",
     # E1-09

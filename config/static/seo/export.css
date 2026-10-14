@@ -66,3 +66,20 @@
   background: var(--body-bg);
 }
 .seo-export-note { margin-left: auto; color: var(--body-quiet-color); font-size: 12px; }
+
+/* Вход в конструктор — та же форма и расцветка, что у object-tools ссылок. */
+body.admin-interface .object-tools .seo-export-launch {
+  min-height: 0;
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--object-tools-bg);
+  color: var(--object-tools-fg);
+  font-size: 11px;
+  line-height: 20px;
+  text-transform: uppercase;
+}
+body.admin-interface .object-tools .seo-export-launch:hover {
+  background: var(--object-tools-hover-bg);
+}
+.object-tools [data-designer-open] { margin: 0; padding: 0; }

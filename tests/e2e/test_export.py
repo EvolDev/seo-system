@@ -82,7 +82,10 @@ def test_sites_export_window(
 
     _columns(window, "Домен", "DR")
     expect(window.locator("[data-export-all]")).not_to_be_checked()
-    with page.expect_download() as download_info:
+    with (
+        page.expect_response(lambda r: "attachment" in r.headers.get("content-disposition", "")),
+        page.expect_download() as download_info,
+    ):
         window.locator("button", has_text="Excel").click()
     download = download_info.value
     assert download.suggested_filename.startswith("Площадки Convertio ")
@@ -100,9 +103,14 @@ def test_sites_export_window(
     page.locator("#result_list input.action-select").nth(2).check()
     window = _window(page)
     expect(window.locator("[data-export-rows]")).to_have_text("Строки: отмеченные — 2")
-    with page.expect_download() as download_info:
+    with (
+        page.expect_response(lambda r: "attachment" in r.headers.get("content-disposition", "")),
+        page.expect_download() as download_info,
+    ):
         window.locator("button", has_text="CSV").click()
-    content = Path(download_info.value.path()).read_bytes()
+    csv_path = tmp_path / "sites.csv"
+    download_info.value.save_as(csv_path)
+    content = csv_path.read_bytes()
     assert content.startswith(b"\xef\xbb\xbf")
     table = list(csv.reader(io.StringIO(content.decode("utf-8-sig")), delimiter=";"))
     assert table[0] == ["Домен", "DR"]
@@ -136,17 +144,17 @@ def test_month_report_from_placements(
         dropdown.locator("select").select_option(label="сентябрь 2026")
     assert "month=2026-09" in page.url
 
-    window = _window(page)
-    with page.expect_download() as download_info:
-        window.locator("button", has_text="Excel").click()
+    page.locator("[data-designer-open] button").click()
+    expect(page.locator("#server-status")).to_contain_text("Готово: 20 строк")
+    with (
+        page.expect_response(lambda r: "attachment" in r.headers.get("content-disposition", "")),
+        page.expect_download() as download_info,
+    ):
+        page.locator("#download-xlsx").click()
     download = download_info.value
-    # Список открыт с рабочим продуктом (ADR-057) — он и в имени файла.
-    assert download.suggested_filename == "Размещения Convertio сентябрь 2026.xlsx"
+    assert download.suggested_filename == "Размещения.xlsx"
     path = tmp_path / "month.xlsx"
     download.save_as(path)
     book = load_workbook(path)
-    assert book.sheetnames == ["Размещения", "Итого"]
+    assert book.sheetnames == ["Размещения"]
     assert len(list(book["Размещения"].iter_rows())) == 1 + 20
-    total = [cell.value for cell in book["Итого"][2]]
-    assert total[:3] == ["Всего", None, 20]
-    assert same_document(page)

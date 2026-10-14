@@ -45,7 +45,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.keywords import anchor_views
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
 from apps.placements import export as placement_export
-from apps.placements import invoices, other_products
+from apps.placements import export_designer_view, invoices, other_products
 from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLinkFormSet
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import (
@@ -487,6 +487,13 @@ class PlacementAdmin(RecordAdmin):
     def get_urls(self) -> list[URLPattern]:
         own = [
             path(
+                "export-designer/",
+                self.admin_site.admin_view(
+                    require_http_methods(["GET", "POST"])(self.export_designer_view)
+                ),
+                name="placements_placement_export_designer",
+            ),
+            path(
                 "export/<str:fmt>/",
                 self.admin_site.admin_view(require_http_methods(["GET", "POST"])(self.export_view)),
                 name=export.url_name(self),
@@ -519,6 +526,9 @@ class PlacementAdmin(RecordAdmin):
             ),
         ]
         return own + super().get_urls()
+
+    def export_designer_view(self, request: HttpRequest) -> HttpResponse:
+        return export_designer_view.view(self, request)
 
     def export_choices(self, request: HttpRequest) -> list[export.Choice]:
         """Галочки окна выгрузки (тег `export_tools`) — колонки листа «Размещения»."""

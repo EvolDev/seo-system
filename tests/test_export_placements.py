@@ -299,11 +299,9 @@ def test_csv_first_sheet_only(admin_client: Client, base: dict[str, Any]) -> Non
 
 def test_buttons_and_queries(admin_client: Client, base: dict[str, Any]) -> None:
     page = admin_client.get(LIST_URL, {"month": "2026-09"}).content.decode()
-    assert f'href="{_url()}?month=2026-09"' in page
-    assert f'data-csv="{_url("csv")}?month=2026-09"' in page
-    for group in ("Размещение", "Площадка на сегодня", "Сверх листа таблицы"):
-        assert f"<legend>{group}</legend>" in page
-    assert "Анкоры и ссылки" in page
+    designer = reverse("admin:placements_placement_export_designer")
+    assert f'action="{designer}?month=2026-09"' in page
+    assert "data-designer-open" in page
     with CaptureQueriesContext(connection) as small:
         admin_client.get(_url(), {"month": "2026-10"})
     with CaptureQueriesContext(connection) as big:
@@ -332,5 +330,5 @@ def test_chosen_columns_picked_rows_and_totals(admin_client: Client, base: dict[
     assert len(rows) == 2
     totals = [[cell.value for cell in row] for row in book["Итого"].iter_rows()]
     assert totals[1] == ["Всего", None, 1, 581.82, 0]
-    page = admin_client.get(LIST_URL).content.decode()
-    assert 'name="columns" value="dr">' in page  # снятая галочка запомнилась
+    admin_client.get(LIST_URL)
+    assert "dr" in admin_client.session["seo_export_off"]["placements_placement"]

@@ -22,6 +22,12 @@ register = template.Library()
 def export_tools(context: template.Context, cl: Any) -> SafeString:
     request = context["request"]
     model_admin = cl.model_admin
+    if export.list_key(model_admin) == "placements_placement":
+        return render_to_string(
+            "admin/placements/placement/export_button.html",
+            {"url": reverse("admin:placements_placement_export_designer") + cl.get_query_string()},
+            request=request,
+        )
     off = export.unchecked(request, export.list_key(model_admin))
     groups: dict[str, list[tuple[export.Choice, bool]]] = {}
     for choice in model_admin.export_choices(request):

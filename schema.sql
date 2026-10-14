@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.27 от 14.10.2026 — личные шаблоны конструктора выгрузки (ADR-070)
 -- Версия 1.26 от 12.10.2026 — снятие с продажи: площадки нет в полном каталоге продавца (ADR-068)
 -- Версия 1.25 от 09.10.2026 — активность анкоров в отчётном списке (ADR-067)
 -- Версия 1.24 от 08.10.2026 — тип ссылки у предложения продавца и размещения (ADR-066)
@@ -866,6 +867,21 @@ CREATE TABLE saved_filters (
 );
 -- Название одно на списке у пользователя, без учёта регистра; удалённые не мешают.
 CREATE UNIQUE INDEX saved_filters_name_key ON saved_filters (user_id, screen, lower(name))
+    WHERE deleted_at IS NULL;
+
+-- Именованный профиль экспорта; name='' — последний черновик пользователя.
+CREATE TABLE export_profiles (
+    id          bigserial PRIMARY KEY,
+    user_id     integer NOT NULL REFERENCES auth_user(id),
+    screen      text NOT NULL,
+    name        text NOT NULL,
+    config      jsonb NOT NULL,
+    revision    integer NOT NULL DEFAULT 1,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    deleted_at  timestamptz
+);
+CREATE UNIQUE INDEX export_profiles_name_key ON export_profiles (user_id, screen, lower(name))
     WHERE deleted_at IS NULL;
 
 -- Личные настройки пользователя (ADR-057): рабочий продукт — с ним открываются
