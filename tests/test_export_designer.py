@@ -73,6 +73,20 @@ def test_default_and_typed_excel(admin_client: Client, placed: Placement) -> Non
     assert excel["Content-Type"].startswith("application/vnd.openxmlformats")
 
 
+def test_default_money_like_google_sheet(admin_client: Client, placed: Placement) -> None:
+    # Рабочая таблица в формате Financial: точка, две цифры копеек, без знака валюты.
+    value = config("paid", "target")
+    placed.price_paid_cents = 750
+    placed.save()
+    preview = post(admin_client, "preview", config=value).json()
+    assert preview["rows"] == [["7.50", "example.com"]]
+    copied = post(admin_client, "copy", config=value, digest=preview["digest"], start=0, stop=1)
+    assert copied.json()["rows"] == [["7.50"]]
+    response = post(admin_client, "download", config=value, digest=preview["digest"], format="csv")
+    rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig")), delimiter=";"))
+    assert rows[1] == ["7.50", "example.com"]
+
+
 def test_renamed_reordered_fields_csv_and_formula_safety(
     admin_client: Client, placed: Placement
 ) -> None:

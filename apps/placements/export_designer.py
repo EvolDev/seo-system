@@ -284,7 +284,8 @@ def initial(registry: dict[str, Field]) -> dict[str, Any]:
         "order": "current",
         "columns": columns,
         "delimiter": ";",
-        "decimal": ",",
+        # Как в рабочей Google-таблице (формат Financial): 206.14, 7.50 — без знака валюты.
+        "decimal": ".",
     }
 
 
@@ -336,7 +337,7 @@ def validate(raw: object, registry: dict[str, Field]) -> dict[str, Any]:
     mode, order = raw.get("mode"), raw.get("order")
     if mode not in ("custom", "template") or order not in ("current", "file"):
         raise DesignError("Выберите режим колонок и порядок строк.")
-    delimiter, decimal = raw.get("delimiter", ";"), raw.get("decimal", ",")
+    delimiter, decimal = raw.get("delimiter", ";"), raw.get("decimal", ".")
     if delimiter not in (",", ";", "\t") or decimal not in (".", ","):
         raise DesignError("Неверный формат CSV.")
     if not any(c["enabled"] for c in clean) and mode == "custom":
