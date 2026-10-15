@@ -61,6 +61,7 @@
 .seo-rev-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
 .seo-rev-head h1 { margin: 0 0 4px; }
 .seo-progress { min-width: 220px; }
+.seo-rev-undo { margin-top: 8px; text-align: right; }
 .seo-bar { height: 8px; border-radius: 4px; background: var(--darkened-bg, #eee); overflow: hidden; margin-top: 4px; }
 .seo-bar i { display: block; height: 100%; background: var(--seo-down); transition: width 0.2s; }
 .seo-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }

@@ -5,7 +5,9 @@
 транзакции:
 
 1. строки, которые загрузка поменяла или удалила, возвращаются такими, какими
-   были до неё (по первой записи журнала о строке);
+   были до неё (по первой записи журнала о строке); площадка, у которой
+   рабочая цена — из этой загрузки (выбрали на разборе, мимо журнала),
+   получает рабочую цену до загрузки из строки разбора (`ref_price`);
 2. строки, которые она вставила, удаляются — вместе со всем, что на них успели
    сослать после (`config.deletion`: размещение, созданное вручную на площадке
    из загрузки, уйдёт с площадкой — подтверждение это показывает);
@@ -37,7 +39,7 @@ from django.contrib.auth.models import User
 from django.db import connection, models, transaction
 
 from apps.sites import latest
-from apps.sites.models import Upload, UploadStatus
+from apps.sites.models import SitePrice, Upload, UploadStatus
 from config import db, deletion
 
 # Отмена по журналу пишет историю статусов от своего run_id — потом её стирает.
@@ -63,6 +65,7 @@ class Report:
     after: dict[str, int] = field(default_factory=dict)  # удалится созданное после загрузки
     kept_users: int = 0
     later: list[Upload] = field(default_factory=list)
+    working_prices: int = 0  # площадкам вернулась рабочая цена, выбранная до разбора
 
     def lines(self) -> list[str]:
         if not self.journaled:
@@ -78,6 +81,8 @@ class Report:
         result += [
             f"Вернётся как было — {name.lower()}: {count}" for name, count in self.restored.items()
         ]
+        if self.working_prices:
+            result.append(f"Вернётся рабочая цена до загрузки — площадки: {self.working_prices}")
         result += [
             f"В том числе созданное после загрузки — {name.lower()}: {count}"
             for name, count in self.after.items()
@@ -179,6 +184,9 @@ def _run(upload: Upload) -> Report:
         for table, rows in before.items():
             _restore(cursor, table, rows)
             report.restored[_plural(_model(table))] = len(rows)
+        report.working_prices = _working_prices_back(
+            cursor, upload.pk, inserted.get(SitePrice._meta.db_table, [])
+        )
 
     users = inserted.pop(User._meta.db_table, [])
     roots: dict[deletion.Model, list[int]] = {_model(t): ids for t, ids in inserted.items()}
@@ -221,6 +229,31 @@ def _journal(cursor: Any, upload_id: int) -> tuple[dict[str, list[int]], dict[st
         else:
             before[table].append(json.loads(row) if isinstance(row, str) else row)
     return dict(inserted), dict(before)
+
+
+def _working_prices_back(cursor: Any, upload_id: int, prices: list[int]) -> int:
+    """Рабочая цена из отменяемой загрузки → рабочая цена до неё (из строки разбора).
+
+    «Сделать рабочей» на разборе идёт уже после записи, мимо журнала: 15.10.2026
+    пробная отмена загрузки №65 оставила бы 259 площадок вовсе без рабочей цены —
+    удаление цены из файла только очищает ссылку на неё.
+    """
+    if not prices:
+        return 0
+    cursor.execute(
+        """
+        UPDATE sites AS s SET price_id = r.ref_price_id
+        FROM (
+            SELECT DISTINCT ON (site_id) site_id, ref_price_id
+            FROM upload_items
+            WHERE upload_id = %s AND ref_price_id IS NOT NULL
+            ORDER BY site_id, id
+        ) AS r
+        WHERE s.id = r.site_id AND s.price_id = ANY(%s)
+        """,
+        [upload_id, prices],
+    )
+    return int(cursor.rowcount)
 
 
 def _restore(cursor: Any, table: str, rows: list[Any]) -> None:

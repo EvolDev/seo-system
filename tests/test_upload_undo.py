@@ -28,11 +28,12 @@ from apps.sites.models import (
     SiteStatusChange,
     Upload,
     UploadChange,
+    UploadItem,
     UploadKind,
     UploadStatus,
 )
 from apps.sites.tasks import upload_write
-from apps.sites.uploads import service, undo
+from apps.sites.uploads import review, service, undo
 from apps.sites.uploads.plan import start_of_day
 from config import deletion
 
@@ -129,6 +130,40 @@ class TestDeletedBetween:
         site.refresh_from_db()
         assert site.price_id is None  # вернуть удалённую цену нечем, но отмена прошла
         assert not Placement.objects.filter(product=clideo).exists()
+
+
+class TestDecidedInReview:
+    """Цену из файла сделали рабочей на разборе — уже после записи, мимо журнала.
+
+    15.10.2026: пробная отмена загрузки №65 оставила бы 259 площадок без
+    рабочей цены вместо прежней.
+    """
+
+    def test_undo_returns_working_price_before_upload(self, clideo: Product) -> None:
+        site = Site.objects.create(domain="tomsguide.com")
+        old_price = SitePrice.objects.create(
+            site=site,
+            seller=Seller.objects.create(name="Morgan Hugha"),
+            placement_cents=9900,
+            source=MetricSource.CSV_IMPORT,
+            checked_at=start_of_day(dt.date(2026, 8, 1)),
+            reviewed_at=timezone.now(),
+        )
+        site.price = old_price
+        site.save(update_fields=["price"])
+        upload = _written(clideo, [TOMSGUIDE])
+        item = UploadItem.objects.get(upload=upload, site=site)
+        assert item.needs_decision and item.ref_price_id == old_price.pk
+        review.decide(upload, [item.pk], "fix", author=None)
+        site.refresh_from_db()
+        assert site.price_id == item.price_id
+
+        assert "Вернётся рабочая цена до загрузки — площадки: 1" in undo.preview(upload).lines()
+        undo.undo(upload)
+
+        site.refresh_from_db()
+        assert site.price_id == old_price.pk
+        assert not SitePrice.objects.filter(pk=item.price_id).exists()
 
 
 class TestAnalyze:
