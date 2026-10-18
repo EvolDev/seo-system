@@ -148,6 +148,22 @@ class Placement(models.Model):
         blank=True,
         db_index=False,
     )
+    # Статью пишем мы (ADR-072): кто пишет, сколько ему платят и где черновик.
+    # Цена — своя у размещения: при назначении подставляется ставка копирайтера.
+    copywriter = models.ForeignKey(
+        "content.Copywriter",
+        models.PROTECT,
+        verbose_name="копирайтер",
+        related_name="placements",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
+    copywriter_cents = models.IntegerField("цена копирайтера, центы", null=True, blank=True)
+    copywriter_currency = models.CharField(
+        "валюта копирайтера", max_length=3, null=True, blank=True
+    )
+    draft_url = models.TextField("черновик", null=True, blank=True)
     run_id = models.UUIDField("run_id", null=True, blank=True, default=current_run_id)
     created_at = models.DateTimeField("создано", db_default=PgNow())
     updated_at = models.DateTimeField("изменено", auto_now=True, db_default=PgNow())

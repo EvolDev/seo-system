@@ -1,0 +1,20 @@
+/* Карточка копирайтера (ADR-072): итоги строкой и таблица его статей. Таблица —
+   во всю ширину поля карточки; панель растягивается по ней (E9-11). */
+.seo-copywriter { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* Блок статей — во всю ширину формы: подпись сверху, таблица под ней. */
+.form-row.field-placements_block .flex-container { display: block; }
+.form-row.field-placements_block .flex-container > label { display: block; width: auto; margin-bottom: 6px; }
+.form-row.field-placements_block .readonly { margin-left: 0; padding-left: 0; }
+.seo-copywriter-sum { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; color: var(--body-quiet-color); }
+.seo-copywriter-sum b { color: var(--body-fg); }
+.seo-copywriter-scroll { max-height: 60vh; overflow: auto; }
+.seo-copywriter-table { border-collapse: collapse; font-size: 13px; }
+.seo-copywriter-table th, .seo-copywriter-table td { padding: 5px 8px; border-bottom: 1px solid var(--hairline-color);
+  text-align: left; white-space: nowrap; background: none; }
+.seo-copywriter-table thead th { position: sticky; top: 0; background: var(--body-bg); font-size: 12px;
+  color: var(--body-quiet-color); text-transform: none; letter-spacing: 0; }
+.seo-copywriter-link { display: inline-block; min-width: 24px; text-align: center; font-weight: 600; }
+.seo-copywriter-table .seo-right { text-align: right; font-variant-numeric: tabular-nums; }
+.seo-copywriter-status { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+  background: color-mix(in srgb, var(--seo-chart-spent, #2a78d6) 16%, transparent); }
+.seo-copywriter-status.is-writing { background: color-mix(in srgb, var(--seo-chart-planned, #eb6834) 16%, transparent); }

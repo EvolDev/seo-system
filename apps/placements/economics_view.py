@@ -60,7 +60,7 @@ STATUS_LABELS = {status.value: str(status.label) for status in PlacementStatus}
 def euros(cents: int, *, approx: bool = False) -> str:
     """«€16 236», «−€1 200»: целые евро, разряды узким пробелом; по курсу — «≈»."""
     sign = "−" if cents < 0 else ""
-    value = f"{sign}€{round(abs(cents) / 100):,}".replace(",", " ")
+    value = f"{sign}€{round(abs(cents) / 100):,}".replace(",", "\u202f")
     return f"≈{value}" if approx else value
 
 
@@ -92,7 +92,7 @@ def count_text(value: int, forms: tuple[str, str, str]) -> str:
         form = forms[2]
     else:
         form = {1: forms[0], 2: forms[1], 3: forms[1], 4: forms[1]}.get(value % 10, forms[2])
-    return f"{value:,}".replace(",", " ") + f" {form}"
+    return f"{value:,}".replace(",", "\u202f") + f" {form}"
 
 
 PLACEMENTS_FORMS = ("размещение", "размещения", "размещений")
@@ -335,6 +335,12 @@ def money_tip(month: Month) -> str:
         f"Всего: {euros(month.total_cents)} из {euros(month.budget_cents)}",
         ("Перерасход: " if month.left_cents < 0 else "Осталось: ") + euros(abs(month.left_cents)),
     ]
+    if month.copy_cents or month.copy_planned_cents:
+        # Копирайт — не из бюджета (ADR-072): в подсказке отдельной строкой.
+        copy = euros(month.copy_cents, approx=month.copy_converted)
+        if month.copy_planned_cents:
+            copy += f", в работе {euros(month.copy_planned_cents)}"
+        lines.append(f"Копирайт: {copy} — не из бюджета")
     return "\n".join(lines)
 
 
@@ -499,9 +505,27 @@ def tiles(state: State, report: Report) -> list[dict[str, Any]]:
         {
             "key": "placed",
             "label": "Размещено ссылок",
-            "value": f"{total.placed:,}".replace(",", " "),
+            "value": f"{total.placed:,}".replace(",", "\u202f"),
             "note": placed_note,
             "filter": "spent",
+        },
+        {
+            "key": "copy",
+            "label": "Копирайт",
+            "value": euros(total.copy_cents, approx=total.copy_converted),
+            "note": " · ".join(
+                part
+                for part in (
+                    f"в работе {euros(total.copy_planned_cents)}"
+                    if total.copy_planned_cents
+                    else "",
+                    "не из бюджета",
+                )
+                if part
+            )
+            if total.copy_cents or total.copy_planned_cents
+            else "статьям периода копирайтеров не назначали",
+            "filter": "copy",
         },
     ]
 
@@ -555,7 +579,21 @@ def breakdowns(report: Report) -> dict[str, Any]:
             )
         )
     top_seller = max([group.cents for group in shown] + [1])
+    writers = report.by_copywriter
+    top_writer = max([group.cents for group in writers] + [1])
     return {
+        "copywriters": [
+            {
+                "name": group.name,
+                "count": group.count,
+                "sum": euros(group.cents),
+                "spent": group.spent_cents * 100 / top_writer,
+                "planned": group.planned_cents * 100 / top_writer,
+                "tip": f"{group.name}: за размещённые {euros(group.spent_cents)}, "
+                f"за статьи в работе {euros(group.planned_cents)}",
+            }
+            for group in writers
+        ],
         "statuses": [
             {
                 "name": group.name,
@@ -608,6 +646,14 @@ def issues(state: State, report: Report) -> list[dict[str, Any]]:
                 "filter": "nopaid",
             }
         )
+    if report.no_copy_price:
+        found.append(
+            {
+                "count": report.no_copy_price,
+                "text": "с копирайтером, но без цены статьи — в «Копирайт» не вошли",
+                "filter": "nocopy",
+            }
+        )
     if report.no_published:
         params = {"month": "none", "status__exact": PlacementStatus.PLACED.value}
         params["product__id__exact"] = str(state.product_id or ALL)
@@ -634,8 +680,14 @@ def month_rows(report: Report) -> dict[str, Any]:
                 "employees": [month.by_employee.get(name, 0) for name in report.employees],
                 "spent": euros(month.spent_cents, approx=month.converted),
                 "average": euros(month.average_cents) if month.average_cents is not None else "—",
+                "copy": euros(month.copy_cents, approx=month.copy_converted)
+                if month.copy_cents
+                else "—",
+                "average_with_copy": euros(month.average_with_copy_cents)
+                if month.average_with_copy_cents is not None
+                else "—",
+                "with_copy": euros(month.with_copy_cents),
                 "planned": euros(month.planned_cents) if month.planned_cents else "—",
-                "total": euros(month.total_cents),
                 "budget": euros(month.budget_cents),
                 "left": euros(month.left_cents),
                 "over": month.left_cents < 0,
@@ -650,9 +702,14 @@ def month_rows(report: Report) -> dict[str, Any]:
         total.planned += month.planned
         total.budget_cents += month.budget_cents
         total.converted = total.converted or month.converted
+        total.copy_cents += month.copy_cents
+        total.copy_converted = total.copy_converted or month.copy_converted
         for name, count in month.by_employee.items():
             total.by_employee[name] = total.by_employee.get(name, 0) + count
     return {
+        # Колонки копирайта — только когда он есть: без него они повторяли бы
+        # «Потрачено» и «Ср. цену» и путали (пользователь, 14.10.2026).
+        "has_copy": any(month.copy_cents for month in report.months),
         "employees": [name or "без сотрудника" for name in report.employees],
         "rows": rows,
         "total": {
@@ -660,8 +717,12 @@ def month_rows(report: Report) -> dict[str, Any]:
             "employees": [total.by_employee.get(name, 0) for name in report.employees],
             "spent": euros(total.spent_cents, approx=total.converted),
             "average": euros(total.average_cents) if total.average_cents is not None else "—",
+            "copy": euros(total.copy_cents, approx=total.copy_converted),
+            "average_with_copy": euros(total.average_with_copy_cents)
+            if total.average_with_copy_cents is not None
+            else "—",
+            "with_copy": euros(total.with_copy_cents),
             "planned": euros(total.planned_cents),
-            "total": euros(total.total_cents),
             "budget": euros(total.budget_cents),
             "left": euros(total.left_cents),
             "over": total.left_cents < 0,
@@ -683,6 +744,10 @@ def placement_rows(report: Report) -> list[dict[str, Any]]:
             flags.append("nodate")
         if row.spent and row.eur_cents is None:
             flags.append("nopaid")
+        if row.copywriter:
+            flags.append("copy")
+            if row.copy_cents is None:
+                flags.append("nocopy")
         if row.eur_cents is None:
             source = "нет суммы"
         elif row.from_paid:
@@ -701,6 +766,9 @@ def placement_rows(report: Report) -> list[dict[str, Any]]:
                 if row.eur_cents is not None
                 else "—",
                 "source": source,
+                "copy": euros(row.copy_cents, approx=row.copy_converted)
+                if row.copy_cents is not None
+                else "",
                 "url": reverse("admin:placements_placement_change", args=[row.id]),
             }
         )
@@ -719,6 +787,8 @@ def chips(report: Report) -> list[tuple[str, str, int]]:
             ("noprice", "Без суммы в плане", report.no_price),
             ("nodate", "Без даты отправки", report.no_order_date),
             ("nopaid", "Размещено без «Заплачено»", report.no_paid),
+            ("copy", "С копирайтером", sum(1 for row in rows if row.copywriter)),
+            ("nocopy", "Копирайтер без цены", report.no_copy_price),
         )
         if key in ("all", "spent", "planned") or count
     ]
@@ -776,8 +846,11 @@ def context(state: State, report: Report) -> dict[str, Any]:
             "issues": issues(state, report),
             "table": month_rows(report),
             "placements": placement_rows(report),
+            "has_copy_rows": any(row.copywriter for row in report.rows),
             "chips": chips(report),
-            "approx": report.total.converted or any(m.converted for m in report.months),
+            "approx": report.total.converted
+            or report.total.copy_converted
+            or any(m.converted or m.copy_converted for m in report.months),
             "export_xlsx": state.url(**{EXPORT_PARAM: "xlsx"}),
             "export_html": state.url(**{EXPORT_PARAM: "html"}),
             "generated": timezone.localtime(),

@@ -53,6 +53,7 @@ def test_groups_follow_the_work(admin_client: Client) -> None:
     assert _names(menu[1]) == [
         "Каталог площадок",
         "Продавцы",
+        "Копирайтеры",
         "Рабочие списки",
         "Продукты",
         "Анкоры",

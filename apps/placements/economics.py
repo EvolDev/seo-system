@@ -8,7 +8,9 @@
   сколько заплатим площадке по рабочей цене (`expected_spend_cents` из
   `v_product_site_latest` — одна точка правды, ADR-043). Месяц — по дате
   отправки заявки, без неё — текущий: «собираемся потратить сейчас»;
-- бюджет — настройка `MONTHLY_BUDGET` на каждый месяц, остаток не переносится.
+- бюджет — настройка `MONTHLY_BUDGET` на каждый месяц, остаток не переносится;
+- копирайт — цена статьи нашему копирайтеру (ADR-072): в тот же месяц, что и
+  размещение, отдельно от бюджета — платим за него не мы.
 
 Отчёт — сырым SQL (ADR-003): одна выборка размещений, дальше — суммы в Python
 (размещений сотни, не тысячи).
@@ -35,7 +37,8 @@ _ROWS_SQL = """
 WITH rows AS MATERIALIZED (
     SELECT p.id, p.site_id, p.product_id, p.status::text AS status, p.seller_id,
            p.employee_id, p.ordered_at, p.published_at, p.price_paid_cents,
-           coalesce(p.currency, 'EUR') AS currency
+           coalesce(p.currency, 'EUR') AS currency, p.copywriter_id, p.copywriter_cents,
+           coalesce(p.copywriter_currency, 'EUR') AS copywriter_currency
     FROM placements p
     WHERE p.status IN ('in_work', 'ordered', 'writing', 'placed')
       AND (%(product)s::bigint IS NULL OR p.product_id = %(product)s::bigint)
@@ -59,12 +62,15 @@ SELECT r.id, r.site_id, s.domain, pr.name, r.status, se.name,
             ELSE e.expected_spend_cents
        END AS eur_cents,
        r.status = 'placed' OR r.price_paid_cents > 0 AS from_paid,
-       r.price_paid_cents, r.currency
+       r.price_paid_cents, r.currency,
+       cw.name, round(r.copywriter_cents / eur_rate(r.copywriter_currency))::bigint,
+       r.copywriter_cents IS NOT NULL AND r.copywriter_currency <> 'EUR'
 FROM rows r
 JOIN sites s ON s.id = r.site_id
 JOIN products pr ON pr.id = r.product_id
 LEFT JOIN sellers se ON se.id = r.seller_id
 LEFT JOIN auth_user u ON u.id = r.employee_id
+LEFT JOIN copywriters cw ON cw.id = r.copywriter_id
 LEFT JOIN expected e ON e.site_id = r.site_id AND e.product_id = r.product_id
 ORDER BY r.id
 """
@@ -88,6 +94,9 @@ class Row:
     from_paid: bool  # сумма из «Заплачено», иначе — по рабочей цене площадки
     paid_cents: int | None
     currency: str
+    copywriter: str = ""  # пусто — копирайтер не назначен
+    copy_cents: int | None = None  # цена статьи копирайтеру, евро-центы
+    copy_converted: bool = False
 
     @property
     def spent(self) -> bool:
@@ -110,6 +119,9 @@ class Month:
     planned: int = 0
     converted: bool = False
     by_employee: dict[str, int] = field(default_factory=dict)
+    copy_cents: int = 0  # копирайт размещённых — не из бюджета
+    copy_planned_cents: int = 0  # копирайт статей в работе
+    copy_converted: bool = False
 
     @property
     def total_cents(self) -> int:
@@ -123,6 +135,15 @@ class Month:
     def average_cents(self) -> int | None:
         return round(self.spent_cents / self.priced) if self.priced else None
 
+    @property
+    def with_copy_cents(self) -> int:
+        """Потрачено + копирайт: во что обошлось размещение вместе со статьёй."""
+        return self.spent_cents + self.copy_cents
+
+    @property
+    def average_with_copy_cents(self) -> int | None:
+        return round(self.with_copy_cents / self.priced) if self.priced else None
+
     def add(self, row: Row) -> None:
         cents = row.eur_cents or 0
         if row.spent:
@@ -135,6 +156,12 @@ class Month:
             self.planned += 1
             self.planned_cents += cents
         self.converted = self.converted or row.converted
+        if row.copy_cents is not None:
+            if row.spent:
+                self.copy_cents += row.copy_cents
+            else:
+                self.copy_planned_cents += row.copy_cents
+            self.copy_converted = self.copy_converted or row.copy_converted
 
 
 @dataclass(frozen=True)
@@ -173,11 +200,13 @@ class Report:
     rows: list[Row]  # размещения периода
     by_status: list[Group]
     by_seller: list[Group]
+    by_copywriter: list[Group]  # spent — копирайт размещённых, planned — в работе
     employees: list[str]  # колонки «размещено» по сотрудникам, в порядке убывания
     no_price: int  # в плане без суммы: нет рабочей цены или порога написания
     no_order_date: int  # в плане без даты отправки — посчитаны текущим месяцем
     no_paid: int  # размещено без «Заплачено»
     no_published: int  # размещено без даты публикации — ни в один месяц не попали
+    no_copy_price: int  # копирайтер назначен, цены статьи нет
     current: dt.date  # текущий месяц
 
 
@@ -222,6 +251,9 @@ def rows(product_id: int | None, today: dt.date | None = None) -> list[Row]:
             from_paid=bool(from_paid),
             paid_cents=None if paid is None else int(paid),
             currency=str(currency),
+            copywriter=str(copywriter or ""),
+            copy_cents=None if copy is None else int(copy),
+            copy_converted=bool(copy_converted),
         )
         for (
             pk,
@@ -238,6 +270,9 @@ def rows(product_id: int | None, today: dt.date | None = None) -> list[Row]:
             from_paid,
             paid,
             currency,
+            copywriter,
+            copy,
+            copy_converted,
         ) in fetched
     ]
 
@@ -305,6 +340,23 @@ def report(
         ),
         key=lambda group: (-group.cents, group.name),
     )
+    writers: dict[str, list[Row]] = {}
+    for row in chosen:
+        if row.copywriter:
+            writers.setdefault(row.copywriter, []).append(row)
+    by_copywriter = sorted(
+        (
+            Group(
+                name,
+                len(items),
+                sum(row.copy_cents or 0 for row in items),
+                spent_cents=sum(row.copy_cents or 0 for row in items if row.spent),
+                planned_cents=sum(row.copy_cents or 0 for row in items if not row.spent),
+            )
+            for name, items in writers.items()
+        ),
+        key=lambda group: (-group.cents, group.name),
+    )
     employees: dict[str, int] = {}
     for month in months.values():
         for name, count in month.by_employee.items():
@@ -318,10 +370,12 @@ def report(
         rows=sorted(chosen, key=lambda row: (-(row.eur_cents or 0), row.domain)),
         by_status=by_status,
         by_seller=by_seller,
+        by_copywriter=by_copywriter,
         employees=sorted(employees, key=lambda name: (-employees[name], name == "", name)),
         no_price=sum(1 for row in planned if row.eur_cents is None),
         no_order_date=sum(1 for row in planned if row.ordered_at is None),
         no_paid=sum(1 for row in chosen if row.spent and row.eur_cents is None),
         no_published=sum(1 for row in found if row.spent and row.published_at is None),
+        no_copy_price=sum(1 for row in chosen if row.copywriter and row.copy_cents is None),
         current=current,
     )

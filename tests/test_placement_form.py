@@ -189,7 +189,7 @@ class TestPanelLayout:
         # Только форма: в меню страницы есть своя группа «Служебное».
         page = page[page.index('id="placement_form"') :]
         headings = re.findall(r'class="fieldset-heading">([^<]+)<', page)
-        assert headings[:2] == ["Заявка", "Публикация"]
+        assert headings[:3] == ["Заявка", "Статья", "Публикация"]
         # Ссылки статьи — между «Публикацией» и «Проверками».
         order = [">Публикация<", 'id="links-group"', ">Проверки<", ">Комментарий<", ">Служебное<"]
         positions = [page.index(mark) for mark in order]

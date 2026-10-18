@@ -320,3 +320,7 @@ class DomainSettingAdmin(RecordAdmin):
         if obj.key in LINE_LIST_KEYS and isinstance(obj.value, list):
             return ", ".join(str(item) for item in obj.value)
         return _show(obj.value)
+
+
+# Копирайтеры (ADR-072) — своим модулем; регистрируются при загрузке этого.
+from apps.content import copywriter_admin  # noqa: E402, F401

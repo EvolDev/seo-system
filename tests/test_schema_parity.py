@@ -93,6 +93,8 @@ TABLES = [
     "site_latest",
     # E1-24
     "seller_ratings",
+    # E1-14, ADR-072
+    "copywriters",
 ]
 
 VIEWS = [

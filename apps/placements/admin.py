@@ -239,6 +239,7 @@ def _queue_checks(placement_ids: list[int]) -> list[str]:
 # «Проверками»: Django рисует их после всех групп, поэтому группы после
 # ссылок шаблон рисует отдельно (admin/placements/placement/change_form.html).
 REQUEST = "Заявка"
+ARTICLE = "Статья"
 PUBLICATION = "Публикация"
 CHECKS = "Проверки"
 COMMENT = "Комментарий"
@@ -410,6 +411,11 @@ class PlacementAdmin(RecordAdmin):
                 )
             },
         ),
+        # Кто пишет статью, сколько ему платят и где черновик (ADR-072).
+        (
+            ARTICLE,
+            {"fields": ("copywriter", ("copywriter_cents", "copywriter_currency"), "draft_url")},
+        ),
         (
             PUBLICATION,
             {
@@ -439,7 +445,12 @@ class PlacementAdmin(RecordAdmin):
     )
 
     class Media:
-        js = (Js("seo/indexation.js"), Js("seo/invoices.js"), Js("seo/anchors.js"))
+        js = (
+            Js("seo/indexation.js"),
+            Js("seo/invoices.js"),
+            Js("seo/anchors.js"),
+            Js("seo/copywriter-pick.js"),
+        )
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             # offers.css — «прочие данные из файла» в том же виде, что в карточке площадки.
             "all": (

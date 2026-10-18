@@ -73,6 +73,23 @@
     {% else %}<p class="seo-econ-sub">За период размещений нет.</p>{% endif %}
   </div>
   <div class="seo-econ-card">
+    <h3>Копирайтеры <span class="seo-econ-sub">не из бюджета</span></h3>
+    {% if e.copywriters %}
+    <table class="seo-econ-mini">
+      <tbody>
+        {% for s in e.copywriters %}
+        <tr title="{{ s.tip }}">
+          <th scope="row">{{ s.name }}</th>
+          <td class="seo-econ-num">{{ s.count }}</td>
+          <td class="seo-econ-num"><b>{{ s.sum }}</b></td>
+          <td class="seo-econ-meter"><div>{% localize off %}{% if s.spent %}<span class="seo-econ-fill-spent" style="width: {{ s.spent }}%"></span>{% endif %}{% if s.planned %}<span class="seo-econ-fill-planned" style="width: {{ s.planned }}%"></span>{% endif %}{% endlocalize %}</div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="seo-econ-sub">За период статей с копирайтером нет. Копирайтера назначают в панели размещения — группа «Статья».</p>{% endif %}
+  </div>
+  <div class="seo-econ-card">
     <h3>Что не посчитано</h3>
     {% if e.issues %}
     <ul class="seo-econ-issues">
@@ -96,8 +113,12 @@
           {% for name in e.table.employees %}<th scope="col" class="seo-econ-num seo-econ-soft">{{ name }}</th>{% endfor %}
           <th scope="col" class="seo-econ-num">Потрачено</th>
           <th scope="col" class="seo-econ-num">Ср. цена</th>
+          {% if e.table.has_copy %}
+          <th scope="col" class="seo-econ-num" title="Статьи наших копирайтеров за размещённые в этом месяце. Не из бюджета">Копирайт</th>
+          <th scope="col" class="seo-econ-num" title="Потрачено на площадки плюс копирайт — во что обошлись размещения со статьями">Потрачено + копирайт</th>
+          <th scope="col" class="seo-econ-num" title="«Потрачено + копирайт», делённое на число размещённых с суммой">Ср. цена + копирайт</th>
+          {% endif %}
           <th scope="col" class="seo-econ-num">Запланировано</th>
-          <th scope="col" class="seo-econ-num">Всего</th>
           <th scope="col" class="seo-econ-num">Бюджет</th>
           <th scope="col" class="seo-econ-num">Осталось</th>
         </tr>
@@ -110,8 +131,12 @@
           {% for count in r.employees %}<td class="seo-econ-num seo-econ-soft">{{ count|default:"" }}</td>{% endfor %}
           <td class="seo-econ-num">{{ r.spent }}</td>
           <td class="seo-econ-num">{{ r.average }}</td>
+          {% if e.table.has_copy %}
+          <td class="seo-econ-num">{{ r.copy }}</td>
+          <td class="seo-econ-num">{{ r.with_copy }}</td>
+          <td class="seo-econ-num">{{ r.average_with_copy }}</td>
+          {% endif %}
           <td class="seo-econ-num">{{ r.planned }}</td>
-          <td class="seo-econ-num">{{ r.total }}</td>
           <td class="seo-econ-num seo-econ-soft">{{ r.budget }}</td>
           <td class="seo-econ-num{% if r.over %} is-over{% endif %}">{{ r.left }}</td>
         </tr>
@@ -125,8 +150,12 @@
           {% for count in t.employees %}<td class="seo-econ-num seo-econ-soft">{{ count }}</td>{% endfor %}
           <td class="seo-econ-num">{{ t.spent }}</td>
           <td class="seo-econ-num">{{ t.average }}</td>
+          {% if e.table.has_copy %}
+          <td class="seo-econ-num">{{ t.copy }}</td>
+          <td class="seo-econ-num">{{ t.with_copy }}</td>
+          <td class="seo-econ-num">{{ t.average_with_copy }}</td>
+          {% endif %}
           <td class="seo-econ-num">{{ t.planned }}</td>
-          <td class="seo-econ-num">{{ t.total }}</td>
           <td class="seo-econ-num seo-econ-soft">{{ t.budget }}</td>
           <td class="seo-econ-num{% if t.over %} is-over{% endif %}">{{ t.left }}</td>
         </tr>
@@ -134,6 +163,7 @@
       </tfoot>
     </table>
   </div>
+  {% if not e.table.has_copy %}<p class="seo-econ-sub">Колонки копирайта появятся, когда статьям назначат копирайтеров с ценой — панель размещения, группа «Статья».</p>{% endif %}
 </section>
 
 <section class="seo-econ-card seo-econ-wide" id="econ-rows" data-econ-rows>
@@ -157,6 +187,10 @@
           <th scope="col">Опубликовано</th>
           <th scope="col" class="seo-econ-num">Сумма</th>
           <th scope="col">Откуда сумма</th>
+          {% if e.has_copy_rows %}
+          <th scope="col">Копирайтер</th>
+          <th scope="col" class="seo-econ-num">Копирайт</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -171,6 +205,10 @@
           <td class="seo-econ-nowrap">{{ p.published|default:"—" }}</td>
           <td class="seo-econ-num"><b>{{ p.sum }}</b></td>
           <td class="seo-econ-soft">{{ p.source }}</td>
+          {% if e.has_copy_rows %}
+          <td>{{ p.row.copywriter }}</td>
+          <td class="seo-econ-num">{{ p.copy }}</td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>

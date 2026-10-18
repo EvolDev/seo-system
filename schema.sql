@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.29 от 14.10.2026 — копирайтеры, цена статьи и черновик у размещения (ADR-072)
 -- Версия 1.28 от 14.10.2026 — написание и анонс для всех площадок прайса (ADR-071)
 -- Версия 1.27 от 14.10.2026 — личные шаблоны конструктора выгрузки (ADR-070)
 -- Версия 1.26 от 12.10.2026 — снятие с продажи: площадки нет в полном каталоге продавца (ADR-068)
@@ -419,6 +420,21 @@ CREATE TABLE product_ref_domains (
 
 -- ---------- Блок 2. Размещения ----------
 
+-- Наши копирайтеры (ADR-072): пишут статьи, где статью пишем мы. Ставка — за
+-- статью, справочно: цена статьи фиксируется в размещении при назначении.
+CREATE TABLE copywriters (
+    id          bigserial PRIMARY KEY,
+    name        text NOT NULL,
+    rate_cents  integer,                            -- ставка за статью
+    currency    char(3) NOT NULL DEFAULT 'EUR',
+    contacts    text,
+    notes       text,
+    is_active   boolean NOT NULL DEFAULT true,      -- не работает — не предлагается в размещении
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+-- Имя без учёта регистра — как у продавцов.
+CREATE UNIQUE INDEX copywriters_name_key ON copywriters (lower(name));
+
 CREATE TABLE placements (
     id                     bigserial PRIMARY KEY,
     site_id                bigint NOT NULL REFERENCES sites(id),
@@ -443,6 +459,10 @@ CREATE TABLE placements (
     extra                  jsonb,          -- прочие данные строки файла: заголовок → значение (ADR-051)
     seller_id              bigint REFERENCES sellers(id),    -- через кого куплено
     employee_id            integer REFERENCES auth_user(id), -- кто из сотрудников вёл
+    copywriter_id          bigint REFERENCES copywriters(id), -- кто пишет статью (ADR-072)
+    copywriter_cents       integer,        -- цена статьи копирайтеру
+    copywriter_currency    char(3),
+    draft_url              text,           -- черновик статьи
     run_id                 uuid,
     created_at             timestamptz NOT NULL DEFAULT now(),
     updated_at             timestamptz NOT NULL DEFAULT now()

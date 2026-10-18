@@ -31,7 +31,7 @@ body.admin-interface .seo-econ-filters .seo-btn { min-height: 30px; padding: 4px
 .seo-econ-export { margin-left: auto; }
 
 /* Плитки: пять итогов периода в ряд; узко — по две и по одной. */
-.seo-econ-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.seo-econ-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 1280px) { .seo-econ-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .seo-econ-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .seo-econ-tile { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0;
@@ -117,8 +117,9 @@ body.admin-interface .seo-econ-filters .seo-btn { min-height: 30px; padding: 4px
 .seo-econ-tip[hidden] { display: none; }
 
 /* Разбивки: план по статусам, продавцы, «что не посчитано» — три карточки в ряд. */
-.seo-econ-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-@media (max-width: 1100px) { .seo-econ-details { grid-template-columns: minmax(0, 1fr); } }
+.seo-econ-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1500px) { .seo-econ-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .seo-econ-details { grid-template-columns: minmax(0, 1fr); } }
 .seo-econ-mini { width: 100%; border-collapse: collapse; }
 /* Полосы строк штатной админки здесь не нужны: строки читаются по линейкам. */
 .seo-econ .seo-econ-mini tr, .seo-econ .seo-econ-table tr { background: none; }

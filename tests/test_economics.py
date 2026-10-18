@@ -222,7 +222,7 @@ def test_charts(data: tuple[Product, Product]) -> None:
     convertio, _clideo = data
     report = economics.report(OCTOBER, [(convertio.pk, "Convertio")], convertio.pk, TODAY)
     money = economics_view.money_chart(report)
-    assert money.budget_y is not None and money.budget_label == "бюджет €30 000"
+    assert money.budget_y is not None and money.budget_label == "бюджет €30\u202f000"
     october = money.columns[-1]
     assert [segment.key for segment in october.segments] == ["spent", "planned"]
     assert october.label == "€830"
@@ -233,7 +233,7 @@ def test_charts(data: tuple[Product, Product]) -> None:
 
 
 def test_money_texts() -> None:
-    assert economics_view.euros(-1266800) == "−€12 668"
+    assert economics_view.euros(-1266800) == "−€12\u202f668"
     assert economics_view.euros(12500, approx=True) == "≈€125"
     assert economics_view.compact(4266800) == "€42,7k"
     assert economics_view.count_text(21, economics_view.LINKS_FORMS) == "21 ссылка"
@@ -249,10 +249,12 @@ class TestScreen:
         assert response.status_code == 200
         html = response.content.decode()
         assert "Октябрь 2026" in html
-        assert "€30 000" in html  # бюджет
+        assert "€30\u202f000" in html  # бюджет
         assert "Деньги по месяцам" in html and "Размещено ссылок по месяцам" in html
         assert 'data-econ-filter="nopaid"' in html
         assert "ordered.com" in html and "rejected.com" not in html
+        # Без копирайтеров колонки копирайта не повторяют «Потрачено» и «Ср. цену».
+        assert "Потрачено + копирайт" not in html and "Колонки копирайта появятся" in html
 
     def test_menu_and_home_card(self, admin_client: Client, data: tuple[Product, Product]) -> None:
         html = admin_client.get(reverse("admin:index")).content.decode()

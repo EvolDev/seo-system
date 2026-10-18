@@ -95,6 +95,15 @@ def _summary(sheet: Any, state: State, report: Report) -> None:
         ("Размещено ссылок", total.placed, "опубликовано за период", False),
         ("Средняя цена, €", total.average_cents, "потрачено ÷ размещённые с суммой", True),
         ("В плане размещений", total.planned, "", False),
+        ("Копирайт, €", total.copy_cents, "статьи наших копирайтеров — не из бюджета", True),
+        ("Копирайт в работе, €", total.copy_planned_cents, "статьи, которые пишутся", True),
+        ("Потрачено + копирайт, €", total.with_copy_cents, "во что обошлись размещения", True),
+        (
+            "Ср. цена + копирайт, €",
+            total.average_with_copy_cents,
+            "«потрачено + копирайт» ÷ размещённые с суммой",
+            True,
+        ),
     ]
     row = 5
     for title, value, note, money in lines:
@@ -130,6 +139,19 @@ def _summary(sheet: Any, state: State, report: Report) -> None:
         _money(sheet, row, 4, group.spent_cents)
         _money(sheet, row, 5, group.planned_cents)
 
+    if report.by_copywriter:
+        row += 2
+        sheet.cell(row=row, column=1, value="По копирайтерам").font = BOLD
+        row += 1
+        _header(sheet, row, ["Копирайтер", "Статей", "Всего, €", "Размещённые, €", "В работе, €"])
+        for group in report.by_copywriter:
+            row += 1
+            sheet.cell(row=row, column=1, value=group.name)
+            sheet.cell(row=row, column=2, value=group.count)
+            _money(sheet, row, 3, group.cents)
+            _money(sheet, row, 4, group.spent_cents)
+            _money(sheet, row, 5, group.planned_cents)
+
     found = issues(state, report)
     if found:
         row += 2
@@ -150,8 +172,10 @@ def _months(sheet: Any, report: Report) -> None:
         *employees,
         "Потрачено, €",
         "Ср. цена, €",
+        "Копирайт, €",
+        "Потрачено + копирайт, €",
+        "Ср. цена + копирайт, €",
         "Запланировано, €",
-        "Всего, €",
         "Бюджет, €",
         "Осталось, €",
     ]
@@ -169,10 +193,12 @@ def _months(sheet: Any, report: Report) -> None:
             sheet.cell(row=row, column=3 + offset, value=month.by_employee.get(name) or None)
         _money(sheet, row, first_money, month.spent_cents)
         _money(sheet, row, first_money + 1, month.average_cents)
-        _money(sheet, row, first_money + 2, month.planned_cents)
-        _money(sheet, row, first_money + 3, month.total_cents)
-        _money(sheet, row, first_money + 4, month.budget_cents)
-        left = _money(sheet, row, first_money + 5, month.left_cents)
+        _money(sheet, row, first_money + 2, month.copy_cents)
+        _money(sheet, row, first_money + 3, month.with_copy_cents)
+        _money(sheet, row, first_money + 4, month.average_with_copy_cents)
+        _money(sheet, row, first_money + 5, month.planned_cents)
+        _money(sheet, row, first_money + 6, month.budget_cents)
+        left = _money(sheet, row, first_money + 7, month.left_cents)
         if month.left_cents < 0:
             left.font = OVER
         if in_period:
@@ -189,12 +215,15 @@ def _months(sheet: Any, report: Report) -> None:
     spent = sum(m.spent_cents for m in report.months)
     planned = sum(m.planned_cents for m in report.months)
     budget = sum(m.budget_cents for m in report.months)
+    copy = sum(m.copy_cents for m in report.months)
     for offset, cents in enumerate(
         (
             spent,
             round(spent / priced) if priced else None,
+            copy,
+            spent + copy,
+            round((spent + copy) / priced) if priced else None,
             planned,
-            spent + planned,
             budget,
             budget - spent - planned,
         )
@@ -240,7 +269,7 @@ def _months(sheet: Any, report: Report) -> None:
         Reference(sheet, min_col=first_money, min_row=1, max_row=last), titles_from_data=True
     )
     money.add_data(
-        Reference(sheet, min_col=first_money + 2, min_row=1, max_row=last), titles_from_data=True
+        Reference(sheet, min_col=first_money + 5, min_row=1, max_row=last), titles_from_data=True
     )
     money.set_categories(months)
     money.x_axis.number_format = MONTH
@@ -250,7 +279,7 @@ def _months(sheet: Any, report: Report) -> None:
     money.series[1].graphicalProperties.line.noFill = True
     budget_line = LineChart()
     budget_line.add_data(
-        Reference(sheet, min_col=first_money + 4, min_row=1, max_row=last), titles_from_data=True
+        Reference(sheet, min_col=first_money + 6, min_row=1, max_row=last), titles_from_data=True
     )
     budget_line.series[0].graphicalProperties.line.solidFill = BUDGET_COLOR
     budget_line.series[0].graphicalProperties.line.width = 19000
@@ -274,6 +303,8 @@ def _placements(sheet: Any, state: State, report: Report) -> None:
         "Откуда сумма",
         "Заплачено в валюте",
         "Валюта",
+        "Копирайтер",
+        "Копирайт, €",
     ]
     _header(sheet, 1, titles)
     sheet.freeze_panes = "B2"
@@ -300,7 +331,9 @@ def _placements(sheet: Any, state: State, report: Report) -> None:
         sheet.cell(row=row, column=10, value=source)
         _money(sheet, row, 11, item.paid_cents)
         sheet.cell(row=row, column=12, value=item.currency if item.paid_cents is not None else None)
-    widths = (30, 12, 20, 24, 14, 12, 12, 12, 12, 24, 14, 8)
+        sheet.cell(row=row, column=13, value=item.copywriter or None)
+        _money(sheet, row, 14, item.copy_cents)
+    widths = (30, 12, 20, 24, 14, 12, 12, 12, 12, 24, 14, 8, 18, 12)
     for column, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     if row > 1:

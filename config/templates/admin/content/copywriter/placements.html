@@ -1,0 +1,37 @@
+{% comment %}
+Статьи копирайтера в карточке (ADR-072): сначала те, что пишутся, затем
+размещённые. Площадка открывает размещение в той же панели (data-panel),
+черновик и статья — в новой вкладке. Дата — публикации, у статей в работе —
+отправки заявки. Данные — apps/content/copywriter_admin.py.
+{% endcomment %}
+<div class="seo-copywriter">
+  <div class="seo-copywriter-sum">
+    <span>Пишет сейчас: <b>{{ writing }}</b>{% if writing %} · {{ writing_sum }}{% endif %}</span>
+    <span>Размещено: <b>{{ placed }}</b></span>
+    <span>Заработал: <b>{{ earned }}</b></span>
+    <span>В этом месяце: <b>{{ earned_month }}</b></span>
+  </div>
+  {% if rows %}
+  <div class="seo-copywriter-scroll">
+    <table class="seo-copywriter-table">
+      <thead>
+        <tr><th>Площадка</th><th>Статус</th><th>Черновик</th><th>Статья</th><th class="seo-right">Цена</th><th>Дата</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><a href="{{ r.url }}" data-panel title="Открыть размещение">{{ r.row.site.domain }}</a>{% if several_products %} <span class="seo-sub">{{ r.row.product.name }}</span>{% endif %}</td>
+          <td><span class="seo-copywriter-status{% if r.writing %} is-writing{% endif %}">{{ r.status }}</span></td>
+          <td>{% if r.row.draft_url %}<a class="seo-copywriter-link" href="{{ r.row.draft_url }}" target="_blank" rel="noopener" title="Черновик — в новой вкладке" aria-label="Черновик {{ r.row.site.domain }}">↗</a>{% else %}<span class="seo-sub">—</span>{% endif %}</td>
+          <td>{% if r.row.article_url %}<a class="seo-copywriter-link" href="{{ r.row.article_url }}" target="_blank" rel="noopener" title="Статья — в новой вкладке" aria-label="Статья {{ r.row.site.domain }}">↗</a>{% else %}<span class="seo-sub">—</span>{% endif %}</td>
+          <td class="seo-right">{{ r.price|default:"—" }}</td>
+          <td title="{% if r.writing %}заявка отправлена{% else %}опубликовано{% endif %}">{% if r.writing %}{{ r.row.ordered_at|date:"d.m.Y"|default:"—" }}{% else %}{{ r.row.published_at|date:"d.m.Y"|default:"—" }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="seo-sub">Статей в работе и размещённых пока нет. Копирайтера назначают в панели размещения — группа «Статья».</p>
+  {% endif %}
+</div>

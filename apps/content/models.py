@@ -1,4 +1,4 @@
-"""Блоки 4–5 модели данных: настройки и промпты.
+"""Блоки 4–5 модели данных: настройки, промпты, копирайтеры.
 
 Пока только `prompt_templates` и `prompt_variants` — на них ссылается
 `llm_calls` (ADR-031), и `domain_settings` — из неё читает порог написания
@@ -9,6 +9,7 @@
 from typing import ClassVar
 
 from django.db import models
+from django.db.models.functions import Lower
 
 from config.db import PgNow
 
@@ -108,3 +109,40 @@ class DomainSetting(models.Model):
 
     def __str__(self) -> str:
         return f"{self.key} · {self.product or 'общее'}"
+
+
+class Copywriter(models.Model):
+    """Наш копирайтер: пишет статьи для площадок, где статью пишем мы (ADR-072).
+
+    Ставка — за статью, справочно: при назначении она подставляется в
+    размещение, и дальше цена статьи живёт там — смена ставки уже назначенные
+    статьи не меняет. Имя уникально без учёта регистра.
+    """
+
+    name = models.TextField("имя")
+    rate_cents = models.IntegerField("ставка за статью, центы", null=True, blank=True)
+    currency = models.CharField("валюта ставки", max_length=3, default="EUR", db_default="EUR")
+    contacts = models.TextField("контакты", null=True, blank=True)
+    notes = models.TextField("заметки", null=True, blank=True)
+    is_active = models.BooleanField(
+        "работает",
+        default=True,
+        db_default=True,
+        help_text="Не работает — не предлагается в размещении, его статьи остаются.",
+    )
+    created_at = models.DateTimeField("заведён", db_default=PgNow())
+
+    class Meta:
+        db_table = "copywriters"
+        verbose_name = "копирайтер"
+        verbose_name_plural = "копирайтеры"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                Lower("name"),
+                name="copywriters_name_key",
+                violation_error_message="Копирайтер с таким именем уже есть (регистр не важен).",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
