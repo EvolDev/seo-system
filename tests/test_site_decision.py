@@ -50,10 +50,11 @@ def test_panel_gets_only_the_form(admin_client: Client, row: ProductSite) -> Non
     assert response.status_code == 200
     assert "<html" not in page
     assert '<h2 class="seo-panel-title">coingabbar.com · Convertio</h2>' in page
-    # Статус — кнопками; рядом — карточка той же площадки в той же панели.
+    # Статус — кнопками; сверху — вкладки площадки (ADR-073): «Площадка» —
+    # карточка той же площадки в той же панели.
     assert 'type="radio" name="status"' in page and 'name="comment"' in page
     card = reverse("admin:sites_site_card", args=[row.site_id])
-    assert f'<a href="{card}" data-panel>Карточка площадки</a>' in page
+    assert f'href="{card}" data-panel aria-current="page"><b>Площадка</b>' in page
     assert "data-panel-save" in page
     assert "seo/widgets.css" in page.split("<header")[0]  # стили кнопок — до содержимого
     assert "Импортирована без решения" in page

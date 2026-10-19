@@ -168,6 +168,8 @@ def _collapse_duplicates(target: Seller, source_ids: Sequence[int]) -> int:
         Site.all_objects.filter(price_id=extra).update(price_id=keep)
         UploadItem.objects.filter(price_id=extra).update(price_id=keep)
         UploadItem.objects.filter(ref_price_id=extra).update(ref_price_id=keep)
+        # Предложение, по которому взяли размещение (ADR-073), — тот же факт.
+        Placement.objects.filter(price_id=extra).update(price_id=keep)
     if pairs:
         SitePrice.objects.filter(pk__in=[extra for extra, _ in pairs]).delete()
     return len(pairs)

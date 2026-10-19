@@ -18,6 +18,7 @@
     {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
     {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
     <button type="submit" class="seo-btn seo-btn-primary">{% block seo_button %}Удалить{% endblock %}</button>
-    <a href="#" class="seo-btn cancel-link">Отмена</a>
+    {# В панели (корзина на вкладке размещения) — назад к записи в той же панели. #}
+    {% if panel_cancel_url %}<a href="{{ panel_cancel_url }}" class="seo-btn" data-panel>Отмена</a>{% else %}<a href="#" class="seo-btn cancel-link">Отмена</a>{% endif %}
   </form>
 {% endblock %}

@@ -92,9 +92,14 @@ def test_decision_panel_on_sites_list(
     expect(status).to_have_text("Новая")
     panel = page.locator(PANEL)
 
-    # Esc — панель закрылась, ничего не поменялось.
+    # Esc — панель закрылась, ничего не поменялось. Размещений нет — свой
+    # статус площадки (ADR-073): в работу берут «Взять в размещение».
     status.click()
-    expect(panel.locator(".seo-choice-item")).to_have_text([choice.label for choice in SiteStatus])
+    own = [SiteStatus.NEW, SiteStatus.VIEWED, SiteStatus.DISCARDED, SiteStatus.REJECTED]
+    expect(panel.locator(".seo-choice-item")).to_have_text(
+        [choice.label for choice in (*own, SiteStatus.BLACKLISTED)]
+    )
+    expect(panel.locator("a.seo-btn", has_text="Взять в размещение")).to_be_visible()
     page.keyboard.press("Escape")
     expect(panel).to_be_hidden()
 
@@ -136,7 +141,8 @@ def test_placement_status_from_list(
     page.goto(f"{live_server.url}/admin/placements/placement/?o=1")
     mark(page)
     row = page.locator("#result_list tbody tr", has_text="alpha.com")
-    row.locator("a[title='Сменить статус']").click()
+    # Статус — фишка размещения (ADR-073): открывает его панелью.
+    row.locator("a.seo-st").click()
     panel = page.locator(PANEL)
     expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com")
     # Колонка площадок видна: панель начинается правее неё.
@@ -154,7 +160,7 @@ def test_placement_status_from_list(
     panel.locator("[data-panel-save]").click()
 
     expect(panel).to_be_hidden()
-    expect(row.locator("a[title='Сменить статус']")).to_have_text("Размещено")
+    expect(row.locator("a.seo-st")).to_contain_text("Размещено")
     expect(page.locator(".seo-toast-success")).to_have_text("Размещение «alpha.com» — сохранено.")
     assert same_document(page)
     placement = Placement.objects.get(site__domain="alpha.com")
@@ -172,9 +178,7 @@ def test_status_history_in_panel_and_card(
     page = admin_page
     page.goto(f"{live_server.url}/admin/placements/placement/?o=1")
     mark(page)
-    status = page.locator("#result_list tbody tr", has_text="alpha.com").locator(
-        "a[title='Сменить статус']"
-    )
+    status = page.locator("#result_list tbody tr", has_text="alpha.com").locator("a.seo-st")
     panel = page.locator(PANEL)
     status.click()
     panel.locator(".seo-choice-item", has_text="Заявка отправлена").click()
@@ -189,9 +193,10 @@ def test_status_history_in_panel_and_card(
     expect(history.first).to_contain_text("admin, панель")
     expect(history.last).to_contain_text("Создано: В работе")
 
-    # Карточка площадки из той же панели: у Convertio две смены (словарь общий,
-    # ADR-062: размещение «В работе» сразу двигает площадку), список раскрывается.
-    panel.locator("a[data-panel]", has_text="Карточка площадки").click()
+    # Карточка площадки из той же панели — вкладка «Площадка» (ADR-073): у
+    # Convertio две смены (словарь общий, ADR-062: размещение «В работе» сразу
+    # двигает площадку), список раскрывается.
+    panel.locator("a.seo-ptab", has_text="Площадка").click()
     expect(panel.locator(".seo-panel-title")).to_have_text("alpha.com")
     summary = panel.locator(".seo-status-history summary")
     expect(summary).to_have_text("история (2)")
@@ -436,9 +441,12 @@ def test_panel_width_fits_content(
 def test_working_seller_card_from_placements(
     admin_page: Page, live_server: LiveServer, known: Site
 ) -> None:
-    """Из размещений открывается и сохраняется штатная карточка рабочей цены."""
+    """Из размещений открывается и сохраняется штатная карточка продавца размещения.
+
+    Продавец — свой у размещения (ADR-073); рабочая цена у другого — подсказкой.
+    """
     seller = Seller.objects.create(name="Working seller", contacts="working@example.com")
-    historical = Seller.objects.create(name="Historical seller")
+    historical = Seller.objects.create(name="Historical seller", contacts="historical@example.com")
     price = SitePrice.objects.create(site=known, seller=seller, placement_cents=12300)
     known.price = price
     known.save(update_fields=["price"])
@@ -449,20 +457,22 @@ def test_working_seller_card_from_placements(
     page.goto(f"{live_server.url}/admin/placements/placement/")
     mark(page)
     row = page.locator("#result_list tbody tr", has_text="known.com")
-    link = row.locator(".field-working_seller_cell a")
-    expect(link).to_have_text("Working seller")
-    expect(link).to_have_attribute("href", f"/admin/sites/seller/{seller.pk}/change/")
+    cell = row.locator(".field-seller_cell")
+    link = cell.locator("a")
+    expect(link).to_have_text("Historical seller")
+    expect(link).to_have_attribute("href", f"/admin/sites/seller/{historical.pk}/change/")
+    expect(cell.locator(".seo-sub")).to_have_text("рабочая цена — Working seller")
     link.click()
     panel = page.locator(PANEL)
-    expect(panel.locator("input[name=name]")).to_have_value("Working seller")
-    expect(panel.locator("input[name=contacts]")).to_have_value("working@example.com")
+    expect(panel.locator("input[name=name]")).to_have_value("Historical seller")
+    expect(panel.locator("input[name=contacts]")).to_have_value("historical@example.com")
     expect(panel.locator("textarea[name=notes]")).to_be_visible()
     expect(panel.locator("input[name=metrics_trusted]")).to_be_visible()
     assert same_document(page)
-    panel.locator("input[name=name]").fill("Updated working seller")
+    panel.locator("input[name=name]").fill("Updated seller")
     panel.locator("[data-panel-save]").click()
     expect(panel).to_be_hidden()
-    expect(row.locator(".field-working_seller_cell a")).to_have_text("Updated working seller")
+    expect(row.locator(".field-seller_cell a")).to_have_text("Updated seller")
     assert same_document(page)
 
 
@@ -496,9 +506,9 @@ def test_placement_seller_without_working_price(admin_page: Page, live_server: L
     page = admin_page
     page.goto(f"{live_server.url}/admin/placements/placement/")
     row = page.locator("#result_list tbody tr", has_text="mailtrap.io")
-    cell = row.locator(".field-working_seller_cell")
+    cell = row.locator(".field-seller_cell")
     expect(cell.locator("a")).to_have_text("Zain MediaX")
-    expect(cell.locator(".seo-sub")).to_have_text("рабочая цена не выбрана")
+    expect(cell.locator(".seo-sub")).to_have_count(0)
     cell.locator("a").click()
     expect(page.locator(PANEL).locator("input[name=name]")).to_have_value("Zain MediaX")
     site.refresh_from_db()
@@ -515,13 +525,17 @@ def test_take_site_prefills_and_saves_in_work(
     row = page.locator("#result_list tbody tr", has_text="known.com")
     row.locator('a[title="Взять в размещение"]').click()
     panel = page.locator(PANEL)
-    expect(panel.locator("select[name=seller]")).to_have_value(str(price.seller_id))
-    expect(panel.locator("select[name=placement_type]")).to_have_value(price.placement_type)
+    # «Через кого» — рабочая цена выбрана заранее (ADR-073).
+    expect(panel.locator(".seo-panel-title")).to_have_text("known.com — новое размещение")
+    expect(panel.locator(f"input[name=offer][value='{price.pk}']")).to_be_checked()
     panel.locator("[data-panel-save]").click()
+    # Записали из строки — новое размещение сразу в той же панели, вкладкой №1.
+    expect(panel.locator(".seo-ptab-on")).to_contain_text("№1 · Collaborator")
+    page.keyboard.press("Escape")
     expect(panel).to_be_hidden()
     placement = Placement.objects.get(site=known, product__name="Convertio")
     assert placement.status == PlacementStatus.IN_WORK
-    assert placement.seller_id == price.seller_id
+    assert (placement.seller_id, placement.price_id) == (price.seller_id, price.pk)
     assert placement.price_paid_cents is None
 
 

@@ -1,0 +1,1189 @@
+<title>Повторные размещения</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!-- Прототип повторных размещений, версия 3 (18.10.2026), после замечаний ко
+     второй: статус площадки с размещениями — по её размещениям, своего у неё
+     нет (остаются только решения до размещений и «больше не работаем»);
+     фишки — полным названием статуса с датой; период над списками прячет
+     старые размещения; повтор может идти параллельно с идущим.
+     spacecoastdaily.com — со скрина и из рабочей базы, остальное — примеры. -->
+<style>
+:root{
+  /* Раскладка: жёлтая полоса прототипа сверху (как заметки на макете), под ней —
+     админка как на скрине: шапка, строка крошек, меню слева, список, панель
+     площадки справа. Цвета — «Google — тёмная» и «Apple — светлая»
+     из config/static/seo/admin-palettes.css. */
+  --bg:#1e1f20;--surface:#282a2c;--raised:#333537;--line:#3c4043;--line-strong:#5e6164;
+  --fg:#e3e3e3;--fg-2:#c4c7c5;--muted:#9aa0a6;
+  --link:#a8c7fa;--accent:#a8c7fa;--on-accent:#062e6f;--accent-soft:#1f2f47;
+  --module:#004a77;--on-module:#c2e7ff;--row-selected:#0b3565;
+  --ok:#6dd58c;--ok-soft:#173524;--no:#ff8a80;--no-soft:#3d1d1b;--warn:#f2c14e;--warn-soft:#3a2f12;
+  --note:#2c2817;--note-fg:#f1e3b0;--note-muted:#cdbf8f;--note-line:#5a4f2a;--note-accent:#f2c14e;--note-on:#2b2100;
+  --scrim:rgba(0,0,0,.55);--shadow:-12px 0 32px rgba(0,0,0,.55);--pop-shadow:0 12px 32px rgba(0,0,0,.5);
+  --toast-bg:#e3e3e3;--toast-fg:#1e1f20;
+  --radius:20px;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#ffffff;--surface:#f5f5f7;--raised:#e8e8ed;--line:#e5e5ea;--line-strong:#d2d2d7;
+    --fg:#1d1d1f;--fg-2:#424245;--muted:#6e6e73;
+    --link:#0066cc;--accent:#0071e3;--on-accent:#ffffff;--accent-soft:#e8f2ff;
+    --module:#e8e8ed;--on-module:#1d1d1f;--row-selected:#e8f2ff;
+    --ok:#17803a;--ok-soft:#e3f3e8;--no:#c4302b;--no-soft:#fbe9e8;--warn:#8a5a00;--warn-soft:#fff3d1;
+    --note:#fff8dc;--note-fg:#4a3b00;--note-muted:#7a6720;--note-line:#ecd98f;--note-accent:#8a5a00;--note-on:#ffffff;
+    --scrim:rgba(20,20,30,.35);--shadow:-12px 0 32px rgba(20,30,45,.18);--pop-shadow:0 12px 32px rgba(20,30,45,.18);
+    --toast-bg:#1d1d1f;--toast-fg:#ffffff;
+    --radius:980px;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#ffffff;--surface:#f5f5f7;--raised:#e8e8ed;--line:#e5e5ea;--line-strong:#d2d2d7;
+  --fg:#1d1d1f;--fg-2:#424245;--muted:#6e6e73;
+  --link:#0066cc;--accent:#0071e3;--on-accent:#ffffff;--accent-soft:#e8f2ff;
+  --module:#e8e8ed;--on-module:#1d1d1f;--row-selected:#e8f2ff;
+  --ok:#17803a;--ok-soft:#e3f3e8;--no:#c4302b;--no-soft:#fbe9e8;--warn:#8a5a00;--warn-soft:#fff3d1;
+  --note:#fff8dc;--note-fg:#4a3b00;--note-muted:#7a6720;--note-line:#ecd98f;--note-accent:#8a5a00;--note-on:#ffffff;
+  --scrim:rgba(20,20,30,.35);--shadow:-12px 0 32px rgba(20,30,45,.18);--pop-shadow:0 12px 32px rgba(20,30,45,.18);
+  --toast-bg:#1d1d1f;--toast-fg:#ffffff;
+  --radius:980px;
+  color-scheme:light;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font)}
+button,input,select,textarea,table{font:inherit;color:inherit}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.gut{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* ---------- Полоса прототипа ---------- */
+.proto{background:var(--note);color:var(--note-fg);border-bottom:1px solid var(--note-line)}
+.proto-in{padding-block:12px 14px}
+.proto-top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.proto-name{font-size:16px;font-weight:650;margin:0;display:flex;align-items:center;gap:8px}
+.tag{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--note-line);border-radius:999px;padding:1px 8px;color:var(--note-muted)}
+.ghost{border:1px solid var(--note-line);background:transparent;color:var(--note-fg);border-radius:999px;padding:5px 12px;cursor:pointer}
+.ghost:hover{border-color:var(--note-accent)}
+.proto-tools{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px}
+.proto-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 32px;margin-top:10px}
+.proto-body h2{font-size:14px;font-weight:650;margin:0 0 4px}
+.proto-body ul,.proto-body ol{margin:0;padding-left:20px;display:grid;gap:3px;max-width:78ch}
+.proto-body p{margin:6px 0 0;color:var(--note-muted);font-size:13px}
+
+/* ---------- Админка ---------- */
+.a-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 28px;padding-block:14px;background:var(--bg)}
+.a-logo{font-size:22px;color:var(--fg)}
+.a-prod{display:flex;align-items:center;gap:8px;color:var(--fg-2)}
+.a-prod .sel{border:1px solid var(--line-strong);border-radius:8px;padding:4px 28px 4px 10px;font-weight:600;color:var(--fg);position:relative}
+.a-prod .sel::after{content:"▾";position:absolute;right:9px;top:4px;color:var(--muted)}
+.a-crumbs{background:var(--module);color:var(--on-module);padding-block:9px}
+.a-main{display:grid;grid-template-columns:210px minmax(0,1fr);gap:24px;padding-block:18px 32px}
+.a-nav{display:flex;flex-direction:column;align-self:start}
+.a-module{background:var(--module);color:var(--on-module);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:8px 10px}
+.a-nav button,.a-nav span{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:8px 10px;color:var(--fg);font-weight:600}
+.a-nav button{cursor:pointer}
+.a-nav button:hover{background:var(--surface)}
+.a-nav button[aria-current="page"]{background:var(--row-selected)}
+.a-nav span{color:var(--muted);font-weight:400}
+.a-content{min-width:0}
+.a-title{font-size:20px;font-weight:400;margin:0 0 12px}
+.a-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--surface);padding:10px 12px;border-radius:6px}
+.a-search{display:flex;align-items:center;gap:8px;flex:1 1 280px;min-width:0}
+.input{background:var(--bg);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px;min-width:0;color:var(--fg);width:100%}
+.input::placeholder{color:var(--muted)}
+.a-search .input{max-width:300px}
+.btn{border:1px solid var(--line-strong);background:transparent;color:var(--link);border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.danger{background:var(--no);border-color:var(--no);color:var(--bg)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.a-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:12px 0 4px}
+.a-actions select{background:var(--bg);border:1px solid var(--line-strong);border-radius:6px;padding:5px 8px;color:var(--fg)}
+.a-actions .muted{color:var(--fg-2)}
+.a-filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 0}
+.f-label{color:var(--fg-2);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-right:4px;min-width:58px}
+.fchip{border:1px solid var(--line-strong);background:transparent;color:var(--fg-2);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer}
+.fchip:hover{border-color:var(--accent)}
+.fchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.f-hint{color:var(--muted);font-size:12.5px;margin:6px 0 10px}
+.fchip.period{margin-left:10px;border-style:dashed;color:var(--link)}
+.fchip.period[aria-pressed="true"]{border-style:solid;border-color:var(--link);background:transparent;color:var(--link)}
+.pop-item.on{color:var(--link);font-weight:600}
+.pop-own{border-top:1px solid var(--line);margin-top:4px;padding:4px 8px 6px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.pop-own .pop-title{padding:4px 0 0}
+.pop-own.on .pop-title{color:var(--link)}
+.pop-row{display:flex;align-items:center;gap:6px}
+.pop-row span{width:18px;color:var(--fg-2)}
+.pop-row select{background:var(--bg);border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px;color:var(--fg)}
+.a-table-wrap{overflow-x:auto;border-top:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;min-width:900px}
+th{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-2);text-align:left;padding:10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+th.r,td.r{text-align:right}
+th.cb,td.cb{width:34px}
+tbody tr:hover td{background:var(--surface)}
+tbody tr.sel td{background:var(--row-selected)}
+.dom{display:inline-flex;align-items:center;gap:6px}
+.icon-btn{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:6px;border:1px solid transparent;background:none;color:var(--muted);cursor:pointer;padding:0;flex:none}
+.icon-btn:hover{color:var(--fg);border-color:var(--line-strong)}
+.icon-btn svg{width:15px;height:15px}
+.star{display:inline-grid;color:var(--muted)}
+.star svg{width:14px;height:14px}
+.slink{background:none;border:0;padding:0;color:var(--link);cursor:pointer;text-align:left}
+.slink:hover{text-decoration:underline}
+.quiet{color:var(--muted)}
+.chips{display:inline-flex;align-items:center;gap:4px}
+.chip{border:1px solid var(--line-strong);background:transparent;color:var(--link);border-radius:999px;padding:1px 10px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.chip:hover{border-color:var(--accent)}
+.chip.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.chip.no{background:var(--no-soft);color:var(--no);border-color:transparent}
+.chip.live{border-color:var(--link)}
+.c-date{margin-left:6px;opacity:.75;font-variant-numeric:tabular-nums;font-size:12.5px}
+.badge{display:inline-block;font-size:11px;line-height:16px;border:1px solid var(--line-strong);border-radius:999px;padding:0 6px;color:var(--fg-2)}
+.a-count{color:var(--fg-2);margin:12px 0 0}
+.a-note{color:var(--muted);font-size:12.5px;margin:6px 0 0;max-width:90ch}
+
+/* ---------- Всплывающий список ---------- */
+.pop{position:fixed;z-index:35;background:var(--bg);border:1px solid var(--line-strong);border-radius:10px;box-shadow:var(--pop-shadow);padding:6px;display:flex;flex-direction:column;gap:2px;min-width:260px;max-width:calc(100vw - 32px);max-height:60vh;overflow:auto}
+.pop-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-2);padding:4px 8px}
+.pop-item{display:flex;gap:8px;align-items:baseline;background:none;border:0;border-radius:6px;padding:6px 8px;text-align:left;color:var(--fg);cursor:pointer;white-space:nowrap}
+.pop-item:hover{background:var(--surface)}
+.pop-item .ok{color:var(--ok)}
+.pop-item .no{color:var(--no)}
+.pop-item .live{color:var(--link)}
+.pop-item .hint{margin-left:auto;padding-left:12px}
+
+/* ---------- Панель площадки ---------- */
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(600px,100vw);background:var(--bg);border-left:1px solid var(--line);box-shadow:var(--shadow);display:flex;flex-direction:column;z-index:20;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-right:env(safe-area-inset-right,0px);animation:slide .16s ease-out}
+@keyframes slide{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+.p-head{display:flex;align-items:flex-start;gap:12px;padding:16px 20px 12px;border-bottom:1px solid var(--line)}
+.p-title{flex:1;min-width:0}
+.p-domain{font-size:20px;font-weight:600;color:var(--fg);overflow-wrap:anywhere}
+.p-sub{color:var(--fg-2);font-size:13px}
+.p-tabs{display:flex;flex-wrap:wrap;gap:6px;padding:10px 20px;border-bottom:1px solid var(--line)}
+.p-tab{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;border:1px solid var(--line-strong);border-radius:10px;background:transparent;padding:5px 11px;cursor:pointer;color:var(--fg);text-align:left;min-width:0}
+.p-tab b{font-size:13px}
+.p-tab span{font-size:12px;color:var(--fg-2)}
+.p-tab:hover{border-color:var(--accent)}
+.p-tab[aria-selected="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.p-tab.add{border-style:dashed;color:var(--link);font-weight:600}
+.p-tab.more{border-style:dashed}
+.p-tab.deal{flex-direction:row;align-items:stretch;padding:0;cursor:default}
+.p-tab-main{display:flex;flex-direction:column;align-items:flex-start;background:none;border:0;color:inherit;padding:5px 6px 5px 11px;cursor:pointer;text-align:left;border-radius:10px 0 0 10px}
+.p-trash{display:grid;place-items:center;background:none;border:0;border-left:1px solid var(--line);color:var(--no);padding:0 8px;cursor:pointer;border-radius:0 10px 10px 0}
+.p-trash:hover{background:var(--no-soft)}
+.p-trash svg{width:15px;height:15px}
+.p-body{flex:1;overflow:auto;padding:14px 20px 20px;display:flex;flex-direction:column;gap:12px}
+.p-group{display:flex;flex-direction:column;gap:8px}
+.p-h{background:var(--module);color:var(--on-module);font-size:13px;font-weight:600;padding:7px 10px;margin:4px 0 0;border-radius:3px}
+.p-row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;align-items:center}
+.p-row .lbl{color:var(--fg-2);font-size:13px}
+.p-row textarea{resize:vertical}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0}
+.tile{background:var(--surface);border-radius:8px;padding:8px 10px;min-width:0}
+.tile dt{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-2);margin:0 0 2px}
+.tile dd{margin:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.choice{display:flex;flex-direction:column;gap:6px}
+.choice-row{display:flex;flex-wrap:wrap;gap:6px}
+.cbtn{border:1px solid var(--line-strong);background:transparent;color:var(--fg);border-radius:var(--radius);padding:4px 12px;cursor:pointer;font-size:13px}
+.cbtn:hover{border-color:var(--accent)}
+.cbtn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.cbtn.stop[aria-pressed="true"]{background:var(--no);border-color:var(--no);color:var(--bg)}
+.hint{color:var(--muted);font-size:12.5px}
+.warn{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:13px}
+.known{background:var(--surface);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--fg-2)}
+.known ul{margin:4px 0 0;padding-left:18px}
+.deals{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.deal-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;width:100%;border:1px solid var(--line-strong);border-radius:10px;background:transparent;padding:8px 11px;cursor:pointer;color:var(--fg);text-align:left}
+.deal-row:hover{border-color:var(--accent)}
+.offers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.offers li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.grow{flex:1;min-width:0}
+.t-ok,.t-cheap{font-size:11.5px;font-weight:600;line-height:18px;padding:0 8px;border-radius:999px;white-space:nowrap}
+.t-ok{background:var(--ok-soft);color:var(--ok)}
+.t-cheap{background:var(--accent-soft);color:var(--link)}
+.newbox,.delbox{border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.newbox{border:1px dashed var(--accent);background:var(--accent-soft)}
+.delbox{border:1px solid var(--no);background:var(--no-soft)}
+.opts{display:flex;flex-direction:column;gap:6px}
+.opt{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:8px;cursor:pointer;background:var(--bg)}
+.opt:has(input:checked){border-color:var(--accent)}
+.check{display:flex;gap:8px;align-items:center;cursor:pointer}
+.p-actions{display:flex;flex-wrap:wrap;gap:8px}
+.p-foot{display:flex;gap:10px;padding:12px 20px;border-top:1px solid var(--line);background:var(--bg)}
+
+/* ---------- Окно действия ---------- */
+.modal{position:fixed;inset:0;background:var(--scrim);display:grid;place-items:center;z-index:30;padding:16px}
+.m-card{background:var(--bg);border:1px solid var(--line);border-radius:12px;width:min(580px,100%);max-height:calc(100% - 32px);overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--pop-shadow)}
+.m-card h2{font-size:18px;font-weight:600;margin:0}
+.m-card h3{font-size:13px;font-weight:600;margin:0 0 4px;color:var(--fg-2);text-transform:uppercase;letter-spacing:.05em}
+.m-card ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.m-card label{display:flex;gap:8px;align-items:baseline;cursor:pointer}
+.m-card .hint{margin:0 0 4px}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translate(-50%,16px);opacity:0;background:var(--toast-bg);color:var(--toast-fg);padding:9px 16px;border-radius:999px;font-weight:600;pointer-events:none;transition:opacity .18s,transform .18s;z-index:40;max-width:calc(100vw - 32px);text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:900px){
+  .proto-body{grid-template-columns:minmax(0,1fr)}
+  .proto-tools{margin-left:0}
+  .a-main{grid-template-columns:minmax(0,1fr)}
+  .a-nav{flex-direction:row;flex-wrap:wrap;gap:6px}
+  .a-nav .a-module,.a-nav span{display:none}
+  .a-nav button{width:auto;border:1px solid var(--line-strong);border-radius:999px;padding:5px 14px}
+}
+@media (max-width:640px){
+  .p-row{grid-template-columns:minmax(0,1fr);gap:4px}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (prefers-reduced-motion:reduce){
+  .panel{animation:none}
+  .toast{transition:none}
+}
+</style>
+
+<div class="proto">
+  <div class="proto-in gut">
+    <div class="proto-top">
+      <h1 class="proto-name">Повторные размещения <span class="tag">прототип · 3</span></h1>
+      <div class="proto-tools">
+        <button class="ghost" type="button" data-act="reset">Сбросить пример</button>
+        <button class="ghost" type="button" data-act="theme" id="theme-btn">Светлая</button>
+      </div>
+    </div>
+    <div class="proto-body">
+      <div>
+        <h2>Что поменялось после замечаний</h2>
+        <ul>
+          <li>Статус площадки — по её размещениям. Свой статус у неё есть, только пока размещений нет: Новая, Просмотрено, Отбрасываю, Отказ, Чёрный список.</li>
+          <li>Когда размещения есть, на вкладке «Площадка» вместо статусов — список размещений и «Больше не работаем».</li>
+          <li>Фишки — полным названием статуса и датой, когда его поставили.</li>
+          <li>Период — кнопкой рядом со статусами: месяц, 3 месяца, год, всё время или свой — с месяца и года по месяц и год. Работает с любым выбранным статусом — по дате, когда его поставили: «Просмотрено» за месяц, «Новая» за неделю, «Размещено» за сентябрь.</li>
+          <li>Повтор может идти параллельно с идущим размещением.</li>
+          <li>Другие продукты — только для просмотра: статус, ссылка на статью и карточка их размещения видны, но не меняются. Менять — переключив продукт в шапке.</li>
+          <li>Сотрудник в новом размещении подставляется сам — тот, кто вошёл.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Что потыкать</h2>
+        <ol>
+          <li>spacecoastdaily.com → домен: панель открывается на размещении, на вкладке «Площадка» статусов больше нет.</li>
+          <li>Статус «Просмотрено» + «Период ▾» → «Месяц»: только просмотренные за месяц. «Новая» + «Месяц» — добавленные за месяц.</li>
+          <li>«Размещено» + свой период с сентября по октябрь 2026; «Год» — у globalbizwire.net и trendwatchers.net старые размещения пропадают.</li>
+          <li>videomakerhub.com → домен → «Взять в размещение» на вкладке «Площадка».</li>
+          <li>techpulse-daily.com → «+ Ещё размещение» → LinkHouse, он дешевле.</li>
+        </ol>
+        <p>Сегодня в примере — 18.10.2026. Цифры, кроме spacecoastdaily.com, — примеры.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="admin">
+  <header class="a-head gut">
+    <span class="a-logo">SEO-система</span>
+    <span class="a-prod">Продукт <span class="sel">Convertio</span></span>
+  </header>
+  <nav class="a-crumbs gut" aria-label="Крошки">Начало › <span id="crumb">Площадки</span></nav>
+  <div class="a-main gut">
+    <nav class="a-nav" aria-label="Меню">
+      <div class="a-module">Работа</div>
+      <button type="button" data-screen="sites">Площадки</button>
+      <span>Загрузки</span>
+      <button type="button" data-screen="deals">Размещения</button>
+      <span>Счета</span>
+      <span>Экономика</span>
+    </nav>
+    <section class="a-content" aria-labelledby="screen-title">
+      <h2 class="a-title" id="screen-title">Площадки</h2>
+      <form class="a-bar" id="search-form" role="search">
+        <div class="a-search">
+          <input class="input" id="q" type="search" placeholder="Домен или адрес" aria-label="Поиск по домену">
+          <button class="btn" type="submit">Найти</button>
+        </div>
+      </form>
+      <div class="a-actions" id="actions">
+        <label for="action">Действие:</label>
+        <select id="action">
+          <option value="">---------</option>
+          <option value="take">Взять в размещение</option>
+        </select>
+        <button class="btn" type="button" data-act="run">Выполнить</button>
+        <span class="muted" id="picked"></span>
+      </div>
+      <div id="filters"></div>
+      <div class="a-table-wrap" id="table-wrap"><table id="table"></table></div>
+      <p class="a-count num" id="count"></p>
+      <p class="a-note" id="screen-note"></p>
+    </section>
+  </div>
+</div>
+
+<aside class="panel" id="panel" role="dialog" aria-label="Площадка" hidden></aside>
+<div class="pop" id="pop" role="menu" hidden></div>
+<div class="modal" id="modal" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+'use strict';
+
+// ---------- Словарь ----------
+const ST = {
+  new: 'Новая', viewed: 'Просмотрено', in_work: 'В работе', ordered: 'Заявка отправлена',
+  writing: 'Написание статьи', placed: 'Размещено', discarded: 'Отбрасываю',
+  rejected: 'Отказ', blacklisted: 'Чёрный список',
+};
+const ACTIVE = new Set(['in_work', 'ordered', 'writing']);
+const NEGATIVE = new Set(['discarded', 'rejected', 'blacklisted']);
+// Решение по площадке без размещений и «больше не работаем» при размещениях.
+const DECISION_ROWS = [['new', 'viewed'], ['discarded', 'rejected', 'blacklisted']];
+const STOPS = ['discarded', 'rejected', 'blacklisted'];
+const DEAL_ROWS = [['in_work', 'ordered', 'writing', 'placed'], ['discarded', 'rejected', 'blacklisted']];
+const FILTERS = {
+  sites: ['new', 'viewed', 'in_work', 'ordered', 'writing', 'placed', 'discarded', 'rejected', 'blacklisted'],
+  deals: ['in_work', 'ordered', 'writing', 'placed', 'rejected'],
+};
+// Период — по дате нынешнего статуса размещения: готовый (дней назад) или свой,
+// с месяца и года по месяц и год.
+const PRESETS = [['m1', 'Месяц', 31], ['m3', '3 месяца', 92], ['y1', 'Год', 366], ['all', 'Всё время', null]];
+const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+const YEARS = [2024, 2025, 2026];
+const TODAY = '18.10.2026';
+const MANY = 3; // больше фишек за период — закрытые собираются по статусам
+const TABS = 4; // больше размещений — старые вкладки уходят в «Ещё ▾»
+
+const ICON = {
+  star: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+  open: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 2h5v5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  copy: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  take: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 1.5H4A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V5.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 7v5M5.5 9.5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  trash: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.2a1 1 0 0 0 1 .8h4.6a1 1 0 0 0 1-.8L12 4M6.6 6.5v5M9.4 6.5v5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  close: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+};
+
+// ---------- Пример данных ----------
+// changed — когда поставлен нынешний статус размещения (в системе — из истории статусов).
+function seed() {
+  const gbw = [
+    // опубликовано, заявка, продавец, цена в центах, анкор, куда ведёт
+    ['15.01.2025', '03.01.2025', 'Collaborator', 12000, 'mp4 to mp3', 'convertio.co/mp4-mp3/'],
+    ['12.03.2025', '28.02.2025', 'Collaborator', 12000, 'pdf to word', 'convertio.co/pdf-doc/'],
+    ['20.05.2025', '08.05.2025', 'LinkHouse', 13500, 'Convertio', 'convertio.co/'],
+    ['18.07.2025', '04.07.2025', 'Collaborator', 12500, 'mov to mp4', 'convertio.co/mov-mp4/'],
+    ['22.09.2025', '10.09.2025', 'Collaborator', 12500, 'png to jpg', 'convertio.co/png-jpg/'],
+    ['17.11.2025', '05.11.2025', 'LinkHouse', 14000, 'heic to jpg', 'convertio.co/heic-jpg/'],
+    ['26.01.2026', '14.01.2026', 'Collaborator', 14000, 'webm to mp4', 'convertio.co/webm-mp4/'],
+    ['30.03.2026', '18.03.2026', 'Collaborator', 15000, 'docx to pdf', 'convertio.co/docx-pdf/'],
+  ].map(([published, ordered, seller, cents, anchor, target], i) => ({
+    id: 201 + i, site: 3, status: 'placed', seller, type: 'публикация', cents, ordered, published, changed: published,
+    paid: cents, url: `https://globalbizwire.net/article-${i + 1}/`, links: [{ anchor, target }],
+  }));
+  return {
+    nextId: 700,
+    sites: [
+      { id: 1, domain: 'spacecoastdaily.com', dr: 72, traffic: 25530, geo: 'US', geoTraffic: 13250, decision: 'viewed', working: 11,
+        offers: [{ id: 11, seller: 'Collaborator', type: 'публикация', cents: 12650, date: '11.10.2026' }] },
+      { id: 2, domain: 'techpulse-daily.com', dr: 68, traffic: 41200, geo: 'US', geoTraffic: 22140, decision: 'viewed', working: 21,
+        offers: [
+          { id: 21, seller: 'Collaborator', type: 'публикация', cents: 9500, date: '02.10.2026' },
+          { id: 22, seller: 'LinkHouse', type: 'публикация', cents: 7000, date: '12.10.2026' },
+        ] },
+      { id: 3, domain: 'globalbizwire.net', dr: 66, traffic: 52800, geo: 'US', geoTraffic: 30400, decision: 'viewed', working: 31,
+        offers: [
+          { id: 31, seller: 'Collaborator', type: 'публикация', cents: 15000, date: '02.10.2026' },
+          { id: 32, seller: 'LinkHouse', type: 'публикация', cents: 16500, date: '25.09.2026' },
+        ] },
+      { id: 4, domain: 'edtechreview.net', dr: 63, traffic: 12900, geo: 'IN', geoTraffic: 5210, decision: 'viewed', working: 41,
+        offers: [{ id: 41, seller: 'Mira Outreach', type: 'публикация', cents: 8000, date: '30.09.2026' }] },
+      { id: 5, domain: 'smallbizdaily.org', dr: 61, traffic: 18750, geo: 'US', geoTraffic: 9930, decision: 'viewed', working: 51,
+        offers: [{ id: 51, seller: 'LinkHouse', type: 'публикация', cents: 11000, date: '25.09.2026' }] },
+      { id: 6, domain: 'videomakerhub.com', dr: 58, traffic: 30410, geo: 'GB', geoTraffic: 11870, decision: 'new', working: 61,
+        offers: [{ id: 61, seller: 'Collaborator', type: 'публикация', cents: 14000, date: '02.10.2026' }] },
+      { id: 7, domain: 'creatorsguide.io', dr: 55, traffic: 9620, geo: 'US', geoTraffic: 4480, decision: 'viewed', working: 71,
+        offers: [{ id: 71, seller: 'Collaborator', type: 'публикация', cents: 6000, date: '02.10.2026' }] },
+      { id: 10, domain: 'trendwatchers.net', dr: 52, traffic: 8840, geo: 'US', geoTraffic: 4120, decision: 'blacklisted', working: 101,
+        comment: 'В августе 2025 сняли нашу ссылку.',
+        offers: [{ id: 101, seller: 'LinkHouse', type: 'публикация', cents: 7500, date: '25.09.2026' }] },
+      { id: 8, domain: 'nomadnotes.co', dr: 49, traffic: 7350, geo: 'CA', geoTraffic: 2610, decision: 'viewed', working: 81,
+        offers: [{ id: 81, seller: 'Mira Outreach', type: 'публикация', cents: 5500, date: '30.09.2026' }] },
+      { id: 9, domain: 'marketbrief.net', dr: 44, traffic: 5120, geo: 'US', geoTraffic: 2950, decision: 'discarded', working: 91,
+        offers: [{ id: 91, seller: 'LinkHouse', type: 'публикация', cents: 4500, date: '25.09.2026' }] },
+    ],
+    placements: [
+      ...gbw,
+      { id: 209, site: 3, status: 'rejected', seller: 'LinkHouse', type: 'публикация', cents: 16500, ordered: '05.06.2026', published: '', changed: '12.06.2026', paid: null, url: '', links: [], note: 'Площадка ответила: в этом квартале мест нет.' },
+      { id: 210, site: 3, status: 'ordered', seller: 'Collaborator', type: 'публикация', cents: 15000, ordered: '06.10.2026', published: '', changed: '06.10.2026', paid: null, url: '', links: [{ anchor: 'jpg to pdf', target: 'convertio.co/jpg-pdf/' }] },
+      { id: 120, site: 5, status: 'placed', seller: 'LinkHouse', type: 'публикация', cents: 10500, ordered: '08.10.2025', published: '22.10.2025', changed: '22.10.2025', paid: 10500, url: 'https://smallbizdaily.org/tools-for-remote-teams/', links: [{ anchor: 'pdf to word', target: 'convertio.co/pdf-doc/' }] },
+      { id: 130, site: 10, status: 'placed', seller: 'LinkHouse', type: 'публикация', cents: 7000, ordered: '28.04.2025', published: '12.05.2025', changed: '12.05.2025', paid: 7000, url: 'https://trendwatchers.net/online-tools-2025/', links: [{ anchor: 'Convertio', target: 'convertio.co/' }] },
+      { id: 301, site: 2, status: 'placed', seller: 'Collaborator', type: 'публикация', cents: 9500, ordered: '02.03.2026', published: '14.03.2026', changed: '14.03.2026', paid: 9500, url: 'https://techpulse-daily.com/best-free-file-converters/', links: [{ anchor: 'mp4 to mp3', target: 'convertio.co/mp4-mp3/' }] },
+      { id: 350, site: 7, status: 'placed', seller: 'Collaborator', type: 'публикация', cents: 6000, ordered: '20.04.2026', published: '05.05.2026', changed: '05.05.2026', paid: 6000, url: 'https://creatorsguide.io/video-formats-explained/', links: [{ anchor: 'mov to mp4', target: 'convertio.co/mov-mp4/' }] },
+      { id: 512, site: 5, status: 'placed', seller: 'LinkHouse', type: 'публикация', cents: 11000, ordered: '20.08.2026', published: '02.09.2026', changed: '02.09.2026', paid: 11000, url: 'https://smallbizdaily.org/convert-files-online/', links: [{ anchor: 'Convertio', target: 'convertio.co/' }] },
+      { id: 560, site: 1, status: 'ordered', seller: 'Collaborator', type: 'публикация', cents: 12650, ordered: '09.10.2026', published: '', changed: '09.10.2026', paid: null, url: '', links: [{ anchor: 'Convertio', target: 'convertio.co/' }] },
+      { id: 566, site: 8, status: 'in_work', seller: 'Mira Outreach', type: 'публикация', cents: 5500, ordered: '', published: '', changed: '07.10.2026', paid: null, url: '', links: [] },
+      { id: 571, site: 7, status: 'rejected', seller: 'Collaborator', type: 'публикация', cents: 6000, ordered: '28.09.2026', published: '', changed: '30.09.2026', paid: null, url: '', links: [], note: 'Площадка ответила: второй статьи от нас не возьмёт.' },
+    ],
+  };
+}
+
+// Размещения других продуктов — в панели только для просмотра. Нет записи — у Clideo
+// площадка «Новая», размещений нет.
+const OTHER = {
+  2: { product: 'Clideo', status: 'placed', changed: '05.05.2026', seller: 'Collaborator', ordered: '22.04.2026', published: '05.05.2026', url: 'https://techpulse-daily.com/video-editing-tools/' },
+  3: { product: 'Clideo', status: 'ordered', changed: '02.10.2026', seller: 'LinkHouse', ordered: '02.10.2026', published: '', url: '' },
+  7: { product: 'Clideo', status: 'rejected', changed: '11.09.2026', seller: 'Collaborator', ordered: '01.09.2026', published: '', url: '' },
+};
+
+let state = null;
+const ui = { screen: 'sites', filter: { sites: null, deals: null }, period: 'all', q: '', checked: new Set() };
+let panel = null;
+let modal = null;
+let toastTimer = 0;
+
+// Когда поставлено решение по площадке (в системе — из истории статусов; у «Новой» —
+// когда площадка появилась).
+const DECIDED = { 1: '07.10.2026', 2: '07.10.2026', 3: '07.10.2026', 4: '12.10.2026', 5: '07.10.2026',
+  6: '02.10.2026', 7: '07.10.2026', 8: '05.10.2026', 9: '20.07.2026', 10: '25.08.2025' };
+
+function reset() {
+  state = seed();
+  for (const s of state.sites) { s.comment = s.comment || ''; s.decisionAt = DECIDED[s.id]; }
+  // «me» — тот, кто сейчас вошёл; первые статьи globalbizwire.net вёл коллега.
+  for (const p of state.placements) p.employee = p.id <= 204 ? 'Коллега' : 'me';
+}
+
+// ---------- Помощники ----------
+const $ = (sel) => document.querySelector(sel);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const site = (id) => state.sites.find((s) => s.id === id);
+const deal = (id) => state.placements.find((p) => p.id === id);
+const dealsOf = (sid) => state.placements.filter((p) => p.site === sid).sort((x, y) => x.id - y.id);
+const numOf = (p) => dealsOf(p.site).findIndex((x) => x.id === p.id) + 1;
+const short = (d) => (d ? `${d.slice(0, 6)}${d.slice(8, 10)}` : '');
+const eur = (c) => (c == null ? '—' : `€${(c / 100).toFixed(2).replace('.', ',')}`);
+const isUrl = (v) => /^https?:\/\//i.test(v || '');
+const norm = (v) => String(v || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
+const working = (s) => s.offers.find((o) => o.id === s.working);
+const current = (ds) => [...ds].reverse().find((p) => ACTIVE.has(p.status)) || ds[ds.length - 1];
+const tone = (status) => (status === 'placed' ? 'ok' : NEGATIVE.has(status) ? 'no' : 'live');
+const isStop = (s) => STOPS.includes(s.decision);
+
+function toDate(d) {
+  if (!d) return null;
+  const [dd, mm, yy] = d.split('.').map(Number);
+  return new Date(yy, mm - 1, dd);
+}
+const TODAY_D = toDate(TODAY);
+// Поставлен ли статус в выбранный период: дата статуса площадки или размещения.
+function inPeriod(date) {
+  if (ui.period === 'all') return true;
+  const d = toDate(date);
+  if (d == null) return false;
+  if (typeof ui.period === 'object') {
+    const { from, to } = ui.period;
+    return d >= new Date(from[1], from[0] - 1, 1) && d < new Date(to[1], to[0], 1);
+  }
+  return (TODAY_D - d) / 86400000 <= PRESETS.find(([key]) => key === ui.period)[2];
+}
+// Фишка в ячейке: закрытые — только за период, идущие видны всегда.
+const within = (p) => ACTIVE.has(p.status) || inPeriod(p.changed);
+function periodLabel() {
+  if (typeof ui.period === 'object') {
+    const mm = ([m, y]) => `${String(m).padStart(2, '0')}.${y}`;
+    return `${mm(ui.period.from)} — ${mm(ui.period.to)}`;
+  }
+  return PRESETS.find(([key]) => key === ui.period)[1].toLowerCase();
+}
+// Решение по площадке сменилось — его дата сегодня.
+function decide(s, decision) {
+  if (s.decision !== decision) { s.decision = decision; s.decisionAt = TODAY; }
+}
+function periodMenu() {
+  const own = typeof ui.period === 'object' ? ui.period : { from: [1, 2026], to: [10, 2026] };
+  const pick = (id, [m, y]) => `<select id="${id}-m" aria-label="Месяц">${MONTHS.map((name, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${name}</option>`).join('')}</select>`
+    + `<select id="${id}-y" aria-label="Год">${YEARS.map((year) => `<option ${year === y ? 'selected' : ''}>${year}</option>`).join('')}</select>`;
+  return '<div class="pop-title">Период — по дате статуса размещения</div>'
+    + PRESETS.map(([key, label]) => `<button class="pop-item${ui.period === key ? ' on' : ''}" type="button" role="menuitemradio" aria-checked="${ui.period === key}" data-act="period" data-period="${key}">${label}</button>`).join('')
+    + `<div class="pop-own${typeof ui.period === 'object' ? ' on' : ''}"><div class="pop-title">Свой</div>`
+    + `<div class="pop-row"><span>с</span>${pick('pf', own.from)}</div>`
+    + `<div class="pop-row"><span>по</span>${pick('pt', own.to)}</div>`
+    + '<button class="btn primary" type="button" data-act="period-own">Применить</button></div>';
+}
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+// ---------- Изменения ----------
+function setDealStatus(p, status) {
+  if (p.status === status) return;
+  p.status = status;
+  p.changed = TODAY;
+  if (status === 'ordered' && !p.ordered) p.ordered = TODAY;
+  if (status === 'placed' && !p.published) p.published = TODAY;
+}
+// Новое размещение сильнее прежнего «Отбрасываю» и «Отказа»; чёрный список не снимает.
+function createDeal(s, offer) {
+  const p = { id: state.nextId++, site: s.id, status: 'in_work', seller: offer.seller, type: offer.type, cents: offer.cents,
+    ordered: '', published: '', changed: TODAY, paid: null, url: '', links: [], employee: 'me' };
+  state.placements.push(p);
+  if (s.decision === 'discarded' || s.decision === 'rejected' || s.decision === 'new') decide(s, 'viewed');
+  return p;
+}
+function removeDeal(p) {
+  state.placements = state.placements.filter((x) => x.id !== p.id);
+}
+
+// ---------- Отбор ----------
+// Статус и период вместе: подходит площадка, у которой выбранный статус (или любой —
+// при «Все») поставлен в период — её собственный или статус любого её размещения.
+function siteMatches(s) {
+  if (ui.q && !s.domain.includes(ui.q)) return false;
+  const f = ui.filter.sites;
+  if (!f && ui.period === 'all') return true;
+  const ds = dealsOf(s.id);
+  const own = (!ds.length || isStop(s)) && (!f || s.decision === f) && inPeriod(s.decisionAt);
+  return own || ds.some((p) => (!f || p.status === f) && inPeriod(p.changed));
+}
+function dealRow(s) {
+  const ds = dealsOf(s.id);
+  if (!ds.length || (ui.q && !s.domain.includes(ui.q))) return null;
+  const f = ui.filter.deals;
+  const hits = ds.filter((p) => (!f || p.status === f) && inPeriod(p.changed));
+  if ((f || ui.period !== 'all') && !hits.length) return null;
+  return { s, ds, hits, cur: current(hits.length ? hits : ds) };
+}
+
+// ---------- Ячейки ----------
+function chip(p) {
+  const tip = `№${numOf(p)} · ${ST[p.status]} ${p.changed} · ${p.seller} · ${eur(p.paid ?? p.cents)}`;
+  return `<button class="chip ${tone(p.status)}" type="button" data-act="open-tab" data-site="${p.site}" data-id="${p.id}" title="${esc(tip)}">`
+    + `${ST[p.status]}<span class="c-date">${short(p.changed)}</span></button>`;
+}
+function groupChip(s, status, list) {
+  return `<button class="chip ${tone(status)}" type="button" data-act="group" data-id="${s.id}" data-status="${status}" aria-haspopup="menu" title="${ST[status]}: ${list.length}">`
+    + `${ST[status]} ×${list.length} ▾</button>`;
+}
+function statusCell(s) {
+  const ds = dealsOf(s.id);
+  if (!ds.length) {
+    return `<button class="slink" type="button" data-act="open-site" data-id="${s.id}" title="Решение по площадке">${ST[s.decision]}<span class="c-date">${short(s.decisionAt)}</span></button>`;
+  }
+  const inPeriod = ds.filter(within);
+  const closed = inPeriod.filter((p) => !ACTIVE.has(p.status));
+  const act = inPeriod.filter((p) => ACTIVE.has(p.status));
+  const parts = [];
+  if (inPeriod.length > MANY) {
+    const byStatus = new Map();
+    for (const p of closed) {
+      if (!byStatus.has(p.status)) byStatus.set(p.status, []);
+      byStatus.get(p.status).push(p);
+    }
+    for (const [status, list] of byStatus) parts.push(list.length > 1 ? groupChip(s, status, list) : chip(list[0]));
+  } else {
+    for (const p of closed) parts.push(chip(p));
+  }
+  for (const p of act) parts.push(chip(p));
+  if (isStop(s)) {
+    parts.push(`<button class="chip no" type="button" data-act="open-site" data-id="${s.id}" title="Больше не работаем">${ST[s.decision]}<span class="c-date">${short(s.decisionAt)}</span></button>`);
+  }
+  if (!parts.length) {
+    return `<button class="slink quiet" type="button" data-act="open-tab" data-site="${s.id}" data-id="${current(ds).id}" title="Размещения есть, но раньше периода">нет за период</button>`;
+  }
+  return `<span class="chips">${parts.join('')}</span>`;
+}
+function domainCell(s, screen) {
+  const ds = dealsOf(s.id);
+  const open = ds.length ? `data-act="open-tab" data-site="${s.id}" data-id="${current(ds).id}"` : `data-act="open-site" data-id="${s.id}"`;
+  const take = screen === 'sites' && !ds.length && s.decision !== 'blacklisted'
+    ? `<button class="icon-btn" type="button" data-act="ask-take" data-id="${s.id}" title="Взять в размещение" aria-label="Взять в размещение">${ICON.take}</button>` : '';
+  return `<span class="dom"><span class="star">${ICON.star}</span>`
+    + `<button class="slink" type="button" ${open} title="${ds.length ? 'Открыть размещение' : 'Открыть площадку'}">${s.domain}</button>`
+    + `<a class="icon-btn" href="https://${s.domain}" target="_blank" rel="noopener noreferrer" title="Открыть сайт" aria-label="Открыть сайт">${ICON.open}</a>`
+    + `<button class="icon-btn" type="button" data-act="copy" data-domain="${s.domain}" title="Скопировать домен" aria-label="Скопировать домен">${ICON.copy}</button>`
+    + `${take}</span>`;
+}
+
+// ---------- Экраны ----------
+function renderFilters() {
+  const key = ui.screen;
+  const f = ui.filter[key];
+  const statuses = [`<button class="fchip" type="button" data-act="filter" data-st="" aria-pressed="${!f}">Все</button>`]
+    .concat(FILTERS[key].map((st) => `<button class="fchip" type="button" data-act="filter" data-st="${st}" aria-pressed="${f === st}">${ST[st]}</button>`));
+  const period = `<button class="fchip period" type="button" data-act="period-menu" aria-haspopup="menu" aria-pressed="${ui.period !== 'all'}">Период: ${periodLabel()} ▾</button>`;
+  $('#filters').innerHTML = `<div class="a-filters" role="group" aria-label="Статус и период"><span class="f-label">Статус</span>${statuses.join('')}${period}</div>`
+    + '<p class="f-hint">Период — когда поставлен выбранный статус: у площадки без размещений — её, у размещения — его. Со «Все» — всё, что поставлено за период. В ячейке старые закрытые размещения прячутся, идущие видны всегда.</p>';
+}
+
+function renderSites() {
+  const rows = state.sites.filter(siteMatches).sort((x, y) => y.dr - x.dr);
+  const allOn = rows.length > 0 && rows.every((s) => ui.checked.has(s.id));
+  let html = '<thead><tr>'
+    + `<th class="cb"><input type="checkbox" id="check-all" aria-label="Отметить все" ${allOn ? 'checked' : ''}></th>`
+    + '<th>Площадка</th><th>Статус</th><th class="r">DR</th><th class="r">Трафик</th><th>Топ регион</th><th class="r">Цена</th><th class="r">Опубликовано</th><th>Другие продукты</th>'
+    + '</tr></thead><tbody>';
+  for (const s of rows) {
+    const on = ui.checked.has(s.id);
+    const placed = dealsOf(s.id).filter((p) => p.status === 'placed').length;
+    html += `<tr class="${on ? 'sel' : ''}">`
+      + `<td class="cb"><input type="checkbox" data-check="${s.id}" aria-label="Отметить ${s.domain}" ${on ? 'checked' : ''}></td>`
+      + `<td>${domainCell(s, 'sites')}</td><td>${statusCell(s)}</td>`
+      + `<td class="r num">${s.dr}</td><td class="r num">${s.traffic}</td><td class="num">${s.geo} ${s.geoTraffic}</td>`
+      + `<td class="r num">${eur(working(s).cents)}</td><td class="r num">${placed}</td>`
+      + `<td>${OTHER[s.id] ? `<button class="slink" type="button" data-act="other" data-id="${s.id}" title="Карточка размещения ${OTHER[s.id].product} — только просмотр">${OTHER[s.id].product}</button>` : ''}</td></tr>`;
+  }
+  if (!rows.length) html += '<tr><td colspan="9">Под фильтр не подошла ни одна площадка.</td></tr>';
+  $('#table').innerHTML = html + '</tbody>';
+  const total = state.sites.length;
+  $('#count').textContent = `${rows.length} ${plural(rows.length, 'площадка', 'площадки', 'площадок')}${rows.length !== total ? ` (${total} всего)` : ''}`;
+  const picked = ui.checked.size;
+  $('#picked').textContent = `Выбрано ${picked} ${plural(picked, 'объект', 'объекта', 'объектов')} из ${rows.length}`;
+  $('#screen-note').textContent = 'Домен площадки с размещениями открывает идущее размещение (иначе последнее), без размещений — вкладку «Площадка». «Опубликовано» — за всё время.';
+}
+
+function renderDeals() {
+  const rows = state.sites.map(dealRow).filter(Boolean).sort((a, b) => b.cur.id - a.cur.id);
+  let html = '<thead><tr><th>Площадка</th><th>Продавец</th><th>Статус</th><th class="r">DR</th><th class="r">Трафик</th><th>Топ регион</th><th>Тип размещения</th><th>Отправлена</th><th>Опубликована</th><th class="r">Заплачено</th></tr></thead><tbody>';
+  for (const { s, cur } of rows) {
+    html += `<tr><td>${domainCell(s, 'deals')}</td><td>${esc(cur.seller)}</td><td>${statusCell(s)}</td>`
+      + `<td class="r num">${s.dr}</td><td class="r num">${s.traffic}</td><td class="num">${s.geo} ${s.geoTraffic}</td>`
+      + `<td>${cur.type}</td><td class="num">${cur.ordered || '-'}</td><td class="num">${cur.published || '-'}</td><td class="r num">${cur.paid == null ? '-' : eur(cur.paid)}</td></tr>`;
+  }
+  if (!rows.length) html += '<tr><td colspan="10">За период под фильтр не подошло ни одно размещение.</td></tr>';
+  $('#table').innerHTML = html + '</tbody>';
+  const filtered = ui.filter.deals || ui.period !== 'all';
+  const total = rows.reduce((n, { ds, hits }) => n + (filtered ? hits.length : ds.length), 0);
+  $('#count').textContent = `${rows.length} ${plural(rows.length, 'площадка', 'площадки', 'площадок')} · ${total} ${plural(total, 'размещение', 'размещения', 'размещений')}${filtered ? ' под фильтр' : ''}`;
+  $('#screen-note').textContent = 'Строка — площадка, у которой за период есть размещения. Продавец, тип, даты и «Заплачено» — текущего: идущего, иначе последнего. Действия по отмеченным строкам — тоже над ним, остальные — во вкладках панели.';
+}
+
+function renderAdmin() {
+  const sites = ui.screen === 'sites';
+  $('#crumb').textContent = sites ? 'Площадки' : 'Размещения';
+  $('#screen-title').textContent = sites ? 'Площадки' : 'Размещения';
+  $('#actions').hidden = !sites;
+  for (const b of document.querySelectorAll('[data-screen]')) {
+    if (b.dataset.screen === ui.screen) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  }
+  renderFilters();
+  if (sites) renderSites(); else renderDeals();
+}
+
+// ---------- Панель площадки ----------
+function openPanel(siteId, tab, askNew = false) {
+  panel = { siteId, tab, askNew, newOffer: null, makeWorking: false, confirmDelete: null, draft: {} };
+  loadDraft();
+  hidePop();
+  renderPanel();
+}
+function loadDraft() {
+  const s = site(panel.siteId);
+  if (panel.tab === 'other') {
+    panel.draft = {};
+  } else if (panel.tab === 'site') {
+    const has = dealsOf(s.id).length > 0;
+    panel.draft = { decision: has ? (isStop(s) ? s.decision : null) : s.decision, comment: s.comment };
+  } else {
+    const p = deal(panel.tab);
+    const link = p.links[0] || {};
+    panel.draft = { status: p.status, url: p.url, anchor: link.anchor || '', target: link.target || '' };
+  }
+}
+function switchTab(tab) {
+  panel.tab = tab;
+  panel.confirmDelete = null;
+  loadDraft();
+  hidePop();
+  renderPanel();
+}
+function closePanel() {
+  panel = null;
+  hidePop();
+  renderPanel();
+}
+
+function visibleTabs(ds) {
+  if (ds.length <= TABS) return { shown: ds, hidden: [] };
+  const keep = new Set(ds.slice(-2).map((p) => p.id));
+  for (const p of ds) if (ACTIVE.has(p.status)) keep.add(p.id);
+  if (typeof panel.tab === 'number') keep.add(panel.tab);
+  return { shown: ds.filter((p) => keep.has(p.id)), hidden: ds.filter((p) => !keep.has(p.id)) };
+}
+function tabsHtml(s, ds) {
+  const { shown, hidden } = visibleTabs(ds);
+  const siteSub = ds.length ? `${ds.length} ${plural(ds.length, 'размещение', 'размещения', 'размещений')}` : ST[s.decision];
+  let html = '<nav class="p-tabs" role="tablist" aria-label="Площадка и её размещения">'
+    + `<button class="p-tab" type="button" role="tab" aria-selected="${panel.tab === 'site' || panel.tab === 'other'}" data-act="tab" data-tab="site"><b>Площадка</b><span>${siteSub}</span></button>`;
+  if (hidden.length) {
+    html += `<button class="p-tab more" type="button" data-act="more-tabs" aria-haspopup="menu"><b>Ещё ${hidden.length} ▾</b><span>№${numOf(hidden[0])}–№${numOf(hidden[hidden.length - 1])}</span></button>`;
+  }
+  for (const p of shown) {
+    const n = numOf(p);
+    html += `<div class="p-tab deal" role="presentation" aria-selected="${panel.tab === p.id}">`
+      + `<button class="p-tab-main" type="button" role="tab" aria-selected="${panel.tab === p.id}" data-act="tab" data-tab="${p.id}"><b>№${n} · ${esc(p.seller)}</b><span>${ST[p.status]} · ${short(p.changed)}</span></button>`
+      + `<button class="p-trash" type="button" data-act="ask-delete" data-id="${p.id}" title="Удалить размещение №${n}" aria-label="Удалить размещение №${n}">${ICON.trash}</button></div>`;
+  }
+  const blocked = s.decision === 'blacklisted';
+  return `${html}<button class="p-tab add" type="button" data-act="ask-new"${blocked ? ' disabled title="Площадка в чёрном списке"' : ''}>${ds.length ? '+ Ещё размещение' : '+ Взять в размещение'}</button></nav>`;
+}
+
+function newBoxHtml(s, ds) {
+  const work = working(s);
+  const chosen = panel.newOffer ?? work.id;
+  const offers = [...s.offers].sort((a, b) => (a.id === work.id ? -1 : b.id === work.id ? 1 : a.cents - b.cents));
+  const options = offers.map((o) => {
+    const tags = [o.id === work.id ? '<span class="t-ok">рабочая</span>' : '',
+      o.cents < work.cents ? `<span class="t-cheap">▼ дешевле на ${eur(work.cents - o.cents)}</span>` : ''].join('');
+    return `<label class="opt"><input type="radio" name="new-offer" value="${o.id}" ${o.id === chosen ? 'checked' : ''}>`
+      + `<span class="grow"><b>${esc(o.seller)}</b> · ${o.type} · ${eur(o.cents)} <span class="hint">прайс от ${o.date}</span></span>${tags}</label>`;
+  }).join('');
+  const act = ds.filter((p) => ACTIVE.has(p.status));
+  const placed = ds.filter((p) => p.status === 'placed');
+  const blocked = s.decision === 'blacklisted';
+  return '<div class="newbox" role="group" aria-label="Новое размещение">'
+    + `<div><b>Новое размещение Convertio</b> на ${s.domain} — будет №${ds.length + 1}, статус «В работе»</div>`
+    + `<div class="opts" role="radiogroup" aria-label="Через кого">${options}</div>`
+    + (chosen !== work.id ? `<label class="check"><input type="checkbox" id="make-working" ${panel.makeWorking ? 'checked' : ''}>Сделать эту цену рабочей для площадки</label>` : '')
+    + (act.length ? `<div class="hint">Пойдёт параллельно с ${act.map((p) => `№${numOf(p)} — «${ST[p.status]}»`).join(', ')}.</div>` : '')
+    + (placed.length ? `<div class="hint">Здесь уже опубликовано: ${placed.length}, последнее — ${placed[placed.length - 1].published}.</div>` : '')
+    + (blocked ? '<div class="warn">Площадка в чёрном списке. Чтобы завести размещение, снимите отметку на вкладке «Площадка».</div>' : '')
+    + `<div class="p-actions"><button class="btn primary" type="button" data-act="create" data-id="${s.id}"${blocked ? ' disabled' : ''}>Завести</button>`
+    + '<button class="btn" type="button" data-act="cancel-new">Отмена</button></div></div>';
+}
+
+function delBoxHtml(s, p) {
+  const n = numOf(p);
+  const gone = [p.links.length ? `${plural(p.links.length, 'ссылка', 'ссылки', 'ссылок')} ${p.links.map((l) => `«${esc(l.anchor)}» → ${esc(l.target)}`).join(', ')}` : '',
+    'история статусов', 'проверки индексации'].filter(Boolean).join(', ');
+  const others = dealsOf(s.id).length - 1;
+  return '<div class="delbox" role="group" aria-label="Удаление размещения">'
+    + `<div><b>Удалить размещение №${n}</b> на ${s.domain}?</div>`
+    + `<div class="hint">Вместе с ним уйдут: ${gone}.${p.paid != null ? ` Заплачено ${eur(p.paid)} уйдёт из «Экономики».` : ''}`
+    + `${others ? ' Остальные размещения останутся, номера сдвинутся.' : ` Это последнее размещение — у площадки снова будет статус «${ST[s.decision]}».`}</div>`
+    + `<div class="p-actions"><button class="btn danger" type="button" data-act="delete" data-id="${p.id}">Удалить</button>`
+    + '<button class="btn" type="button" data-act="cancel-delete">Отмена</button></div></div>';
+}
+
+function siteTabHtml(s, ds) {
+  const d = panel.draft;
+  const work = working(s);
+  const tiles = `<dl class="tiles"><div class="tile"><dt>DR</dt><dd class="num">${s.dr}</dd></div>`
+    + `<div class="tile"><dt>Трафик</dt><dd class="num">${s.traffic}</dd></div>`
+    + `<div class="tile"><dt>Топ регион</dt><dd class="num">${s.geo} ${s.geoTraffic}</dd></div>`
+    + `<div class="tile"><dt>Рабочая цена</dt><dd class="num">${eur(work.cents)}</dd></div></dl>`;
+  let status;
+  if (!ds.length) {
+    const rows = DECISION_ROWS.map((row) => `<div class="choice-row">${row.map((st) =>
+      `<button class="cbtn${STOPS.includes(st) ? ' stop' : ''}" type="button" data-act="draft-decision" data-st="${st}" aria-pressed="${d.decision === st}">${ST[st]}</button>`).join('')}</div>`).join('');
+    status = '<h3 class="p-h">Решение по площадке · Convertio</h3>'
+      + `<section class="p-group"><div class="choice" role="group" aria-label="Решение по площадке">${rows}</div>`
+      + (s.decision === 'blacklisted' ? ''
+        : `<div class="p-actions"><button class="btn primary" type="button" data-act="ask-new">Взять в размещение</button></div><div class="hint">Заведёт размещение №1 со статусом «В работе» — дальше статус ведёт оно.</div>`)
+      + '</section>';
+  } else {
+    const list = ds.slice().reverse().map((p) => `<li><button class="deal-row" type="button" data-act="tab" data-tab="${p.id}">`
+      + `<b>№${numOf(p)}</b><span class="chip ${tone(p.status)}">${ST[p.status]}<span class="c-date">${short(p.changed)}</span></span>`
+      + `<span class="grow">${esc(p.seller)} · ${eur(p.paid ?? p.cents)}</span></button></li>`).join('');
+    const stops = STOPS.map((st) => `<button class="cbtn stop" type="button" data-act="draft-stop" data-st="${st}" aria-pressed="${d.decision === st}">${ST[st]}</button>`).join('');
+    status = '<h3 class="p-h">Размещения Convertio</h3>'
+      + `<ul class="deals">${list}</ul>`
+      + '<div class="hint">Статус площадки — это статусы её размещений. Меняется во вкладке размещения.</div>'
+      + '<h3 class="p-h">Больше не работаем</h3>'
+      + `<section class="p-group"><div class="choice-row" role="group" aria-label="Больше не работаем">${stops}</div>`
+      + '<div class="hint">Видно в списках красной фишкой после размещений. Новое размещение снимает «Отбрасываю» и «Отказ», чёрный список — не снимает и не даёт завести.</div></section>';
+  }
+  const offers = [...s.offers].sort((a, b) => a.cents - b.cents).map((o) => {
+    const isWork = o.id === work.id;
+    return `<li><span class="grow"><b>${esc(o.seller)}</b> · ${o.type} · ${eur(o.cents)} <span class="hint">прайс от ${o.date}</span></span>`
+      + (isWork ? '<span class="t-ok">рабочая</span>' : `${o.cents < work.cents ? `<span class="t-cheap">▼ дешевле на ${eur(work.cents - o.cents)}</span>` : ''}`
+      + `<button class="btn" type="button" data-act="make-working" data-id="${o.id}">Сделать рабочей</button>`) + '</li>';
+  }).join('');
+  const o = OTHER[s.id];
+  const otherLine = o
+    ? `<b>${o.product}</b>: <span class="chip ${tone(o.status)}">${ST[o.status]}<span class="c-date">${short(o.changed)}</span></span>`
+      + (isUrl(o.url) ? ` · <a href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Открыть статью ↗</a>` : '')
+      + ` · <button class="slink" type="button" data-act="other" data-id="${s.id}">Карточка размещения</button>`
+    : '<b>Clideo</b>: Новая, размещений нет';
+  const others = `<div class="known">Другие продукты — только просмотр<ul><li>${otherLine}</li></ul>`
+    + '<div class="hint">Чтобы изменить, переключите продукт в шапке — так чужой продукт не поменяется случайно.</div></div>';
+  return tiles + status + others
+    + `<div class="p-row"><label class="lbl" for="d-comment">Комментарий</label><textarea class="input" id="d-comment" data-draft="comment" rows="2">${esc(d.comment)}</textarea></div>`
+    + '<h3 class="p-h">Цены продавцов</h3>'
+    + `<ul class="offers">${offers}</ul>`;
+}
+
+// Карточка размещения другого продукта: всё видно, ничего не меняется.
+function otherHtml(s) {
+  const o = OTHER[s.id];
+  return `<div class="known"><b>${o.product}</b> — карточка размещения, только просмотр. Чтобы изменить, переключите продукт в шапке.</div>`
+    + `<div class="p-row"><span class="lbl">Статус</span><span><span class="chip ${tone(o.status)}">${ST[o.status]}<span class="c-date">${short(o.changed)}</span></span></span></div>`
+    + `<div class="p-row"><span class="lbl">Через кого</span><span>${esc(o.seller)}</span></div>`
+    + `<div class="p-row"><span class="lbl">Заявка отправлена</span><span class="num">${o.ordered || '—'}</span></div>`
+    + `<div class="p-row"><span class="lbl">Опубликовано</span><span class="num">${o.published || '—'}</span></div>`
+    + `<div class="p-row"><span class="lbl">Адрес статьи</span><span>${isUrl(o.url) ? `<a href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">${esc(o.url)} ↗</a>` : '—'}</span></div>`
+    + '<div><button class="btn" type="button" data-act="tab" data-tab="site">← К площадке</button></div>';
+}
+
+function clashText(ds, p, target) {
+  if (!target) return '';
+  const hit = ds.filter((x) => x.id !== p.id).find((x) => x.links.some((l) => norm(l.target) === norm(target)));
+  return hit ? `${esc(target)} уже получает ссылку с этой площадки (№${numOf(hit)}). Вторая ссылка на ту же страницу почти ничего не добавит — лучше другая.` : '';
+}
+
+function dealTabHtml(s, ds, p) {
+  const d = panel.draft;
+  const work = working(s);
+  const date = d.status !== p.status ? `Статус поставится ${TODAY} — при сохранении` : `«${ST[p.status]}» с ${p.changed}`;
+  const buttons = DEAL_ROWS.map((row) => `<div class="choice-row">${row.map((st) =>
+    `<button class="cbtn" type="button" data-act="draft-status" data-st="${st}" aria-pressed="${d.status === st}">${ST[st]}</button>`).join('')}</div>`).join('');
+  const differs = work.seller !== p.seller || work.cents !== p.cents;
+  const others = ds.filter((x) => x.id !== p.id && ACTIVE.has(x.status));
+  const known = ds.filter((x) => x.id !== p.id).flatMap((x) => x.links.map((l) => ({ ...l, n: numOf(x) })));
+  const shownKnown = known.slice(-5);
+  const clash = clashText(ds, p, d.target);
+  return `<section class="p-group"><div class="choice" role="group" aria-label="Статус размещения">${buttons}</div>`
+    + `<div class="hint">${date}</div>`
+    + (others.length ? `<div class="hint">Параллельно идёт ${others.map((x) => `№${numOf(x)} — «${ST[x.status]}»`).join(', ')}.</div>` : '')
+    + (p.note ? `<div class="hint">${esc(p.note)}</div>` : '') + '</section>'
+    + '<h3 class="p-h">Заявка</h3>'
+    + `<div class="p-row"><span class="lbl">Через кого</span><span><b>${esc(p.seller)}</b> · ${p.type} · ${eur(p.cents)}</span></div>`
+    + (differs ? `<div class="hint">Рабочая цена площадки сейчас другая — ${esc(work.seller)}, ${eur(work.cents)}. Это размещение считается по своей.</div>` : '')
+    + `<div class="p-row"><span class="lbl">Сотрудник</span><span>${p.employee === 'me' ? 'Вы <span class="hint">— подставлено по входу</span>' : esc(p.employee)}</span></div>`
+    + `<div class="p-row"><span class="lbl">Заявка отправлена</span><span class="num">${p.ordered || '—'}</span></div>`
+    + `<div class="p-row"><span class="lbl">Заплачено</span><span class="num">${p.paid == null ? '—' : eur(p.paid)}</span></div>`
+    + (p.paid == null && ACTIVE.has(p.status) ? `<div class="hint">Пока «Заплачено» пусто, «Экономика» планирует ${eur(p.cents)} — цену этого размещения.</div>` : '')
+    + '<h3 class="p-h">Публикация</h3>'
+    + `<div class="p-row"><label class="lbl" for="d-url">Адрес статьи</label><input class="input" id="d-url" data-draft="url" value="${esc(d.url)}" placeholder="https://${s.domain}/…"></div>`
+    + `<div class="p-row"><span class="lbl">Опубликовано</span><span class="num">${p.published || '—'}</span></div>`
+    + (isUrl(p.url) ? `<div class="p-row"><span class="lbl"></span><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Открыть статью ↗</a></div>` : '')
+    + '<h3 class="p-h">Ссылка</h3>'
+    + (known.length ? `<div class="known">С этой площадки уже ведут на Convertio${known.length > shownKnown.length ? ` (последние ${shownKnown.length} из ${known.length})` : ''}:`
+      + `<ul>${shownKnown.map((l) => `<li>«${esc(l.anchor)}» → ${esc(l.target)} <span class="badge">№${l.n}</span></li>`).join('')}</ul></div>` : '')
+    + `<div class="p-row"><label class="lbl" for="d-anchor">Анкор</label><input class="input" id="d-anchor" data-draft="anchor" value="${esc(d.anchor)}" placeholder="например, mp4 to mp3"></div>`
+    + `<div class="p-row"><label class="lbl" for="d-target">Куда ведёт</label><input class="input" id="d-target" data-draft="target" value="${esc(d.target)}" placeholder="convertio.co/…"></div>`
+    + `<div class="warn" id="d-clash"${clash ? '' : ' hidden'}>${clash}</div>`;
+}
+
+function renderPanel() {
+  const el = $('#panel');
+  if (!panel) { el.hidden = true; el.innerHTML = ''; return; }
+  const s = site(panel.siteId);
+  const ds = dealsOf(s.id);
+  if (typeof panel.tab === 'number' && !deal(panel.tab)) { panel.tab = 'site'; loadDraft(); }
+  const head = `<header class="p-head"><div class="p-title"><a class="p-domain" href="https://${s.domain}" target="_blank" rel="noopener noreferrer">${s.domain}</a>`
+    + '<div class="p-sub">Convertio — рабочий продукт</div></div>'
+    + `<button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">${ICON.close}</button></header>`;
+  let body = panel.askNew ? newBoxHtml(s, ds) : '';
+  if (panel.tab === 'other') {
+    body = otherHtml(s);
+  } else if (panel.tab === 'site') {
+    body += siteTabHtml(s, ds);
+  } else {
+    const p = deal(panel.tab);
+    if (panel.confirmDelete === p.id) body = delBoxHtml(s, p) + body;
+    body += dealTabHtml(s, ds, p);
+  }
+  const scroll = el.querySelector('.p-body')?.scrollTop || 0;
+  const foot = panel.tab === 'other'
+    ? '<button class="btn" type="button" data-act="close">Закрыть</button>'
+    : '<button class="btn primary" type="button" data-act="save">Сохранить</button><button class="btn" type="button" data-act="close">Отмена</button>';
+  el.innerHTML = `${head}${tabsHtml(s, ds)}<div class="p-body">${body}</div><footer class="p-foot">${foot}</footer>`;
+  el.querySelector('.p-body').scrollTop = scroll;
+  el.setAttribute('aria-label', `Площадка ${s.domain}`);
+  el.hidden = false;
+}
+
+function save() {
+  const s = site(panel.siteId);
+  if (panel.tab === 'site') {
+    const has = dealsOf(s.id).length > 0;
+    decide(s, panel.draft.decision ?? (has ? 'viewed' : s.decision));
+    s.comment = panel.draft.comment;
+    toast(has ? (isStop(s) ? `Больше не работаем: ${ST[s.decision]}` : 'Сохранено') : `Решение по площадке: ${ST[s.decision]}`);
+  } else {
+    const p = deal(panel.tab);
+    const d = panel.draft;
+    setDealStatus(p, d.status);
+    p.url = d.url.trim();
+    p.links = d.anchor.trim() || d.target.trim() ? [{ anchor: d.anchor.trim(), target: d.target.trim() }] : [];
+    toast(`Сохранено: №${numOf(p)} — ${ST[p.status]}`);
+  }
+  loadDraft();
+  renderAdmin();
+  renderPanel();
+}
+
+// ---------- Всплывающий список ----------
+function showPop(anchor, html) {
+  const pop = $('#pop');
+  pop.innerHTML = html;
+  pop.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const left = Math.max(16, Math.min(r.left, window.innerWidth - w - 16));
+  const below = r.bottom + 6;
+  const top = below + h > window.innerHeight - 16 ? Math.max(16, r.top - h - 6) : below;
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+}
+function hidePop() {
+  const pop = $('#pop');
+  if (!pop.hidden) { pop.hidden = true; pop.innerHTML = ''; }
+}
+function popItem(p, act) {
+  const data = act === 'tab' ? `data-act="tab" data-tab="${p.id}"` : `data-act="open-tab" data-site="${p.site}" data-id="${p.id}"`;
+  return `<button class="pop-item" type="button" role="menuitem" ${data}><b>№${numOf(p)}</b><span class="${tone(p.status)}">${ST[p.status]}</span>`
+    + `<span>${p.changed}</span><span class="hint">${esc(p.seller)} · ${eur(p.paid ?? p.cents)}</span></button>`;
+}
+
+// ---------- Действие «Взять в размещение» ----------
+function openTakeModal() {
+  const ids = [...ui.checked];
+  if (!ids.length) { toast('Отметьте площадки в списке'); return; }
+  const fresh = [], existing = [], blocked = [];
+  for (const id of ids) {
+    if (site(id).decision === 'blacklisted') blocked.push(id);
+    else if (dealsOf(id).length) existing.push(id);
+    else fresh.push(id);
+  }
+  modal = { fresh, existing, blocked, again: new Set() };
+  renderModal();
+}
+function renderModal() {
+  const el = $('#modal');
+  if (!modal) { el.hidden = true; el.innerHTML = ''; return; }
+  const name = (id) => site(id).domain;
+  const go = modal.fresh.length + modal.again.size;
+  const line = (p) => `№${numOf(p)} · ${ST[p.status]} ${p.changed}`;
+  let html = '<div class="m-card" role="dialog" aria-modal="true" aria-labelledby="m-title"><h2 id="m-title">Взять в размещение · Convertio</h2>'
+    + '<p class="hint">Через рабочую цену каждой площадки, сотрудник — вы. Другого продавца — в панели площадки, «+ Ещё размещение».</p>';
+  if (modal.fresh.length) {
+    html += `<section><h3>Заведём размещение (${modal.fresh.length})</h3><ul>${modal.fresh.map((id) => `<li>${name(id)} <span class="hint">${esc(working(site(id)).seller)} · ${eur(working(site(id)).cents)}</span></li>`).join('')}</ul></section>`;
+  }
+  if (modal.existing.length) {
+    html += `<section><h3>Размещения уже есть (${modal.existing.length})</h3><p class="hint">Ещё одно — только явно; может идти параллельно с идущим.</p><ul>`
+      + modal.existing.map((id) => `<li><label><input type="checkbox" data-again="${id}" ${modal.again.has(id) ? 'checked' : ''}><span>${name(id)} <span class="hint">${line(current(dealsOf(id)))}</span></span></label></li>`).join('')
+      + '</ul></section>';
+  }
+  if (modal.blocked.length) {
+    html += `<section><h3>Пропустим — чёрный список (${modal.blocked.length})</h3><ul>${modal.blocked.map((id) => `<li>${name(id)}</li>`).join('')}</ul></section>`;
+  }
+  html += `<div class="p-actions"><button class="btn primary" type="button" data-act="take-run"${go ? '' : ' disabled'}>Завести (${go})</button>`
+    + '<button class="btn" type="button" data-act="modal-close">Отмена</button></div></div>';
+  el.innerHTML = html;
+  el.hidden = false;
+}
+function runTake() {
+  let created = 0, again = 0;
+  for (const id of modal.fresh) { createDeal(site(id), working(site(id))); created += 1; }
+  for (const id of modal.again) { createDeal(site(id), working(site(id))); again += 1; }
+  const skipped = modal.existing.length - again + modal.blocked.length;
+  modal = null;
+  ui.checked.clear();
+  renderModal();
+  renderAdmin();
+  renderPanel();
+  toast([`Взято в размещение: ${created}`, again ? `ещё одно: ${again}` : '', skipped ? `пропущено: ${skipped}` : ''].filter(Boolean).join(' · '));
+}
+
+// ---------- Общее ----------
+function toast(text) {
+  const el = $('#toast');
+  el.textContent = text;
+  el.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('on'), 2600);
+}
+function themeNow() {
+  const set = document.documentElement.dataset.theme;
+  if (set === 'light' || set === 'dark') return set;
+  return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+function renderTheme() {
+  $('#theme-btn').textContent = themeNow() === 'dark' ? 'Светлая' : 'Тёмная';
+}
+
+document.addEventListener('click', (e) => {
+  const inPop = e.target.closest('#pop');
+  const nav = e.target.closest('[data-screen]');
+  if (nav) { ui.screen = nav.dataset.screen; hidePop(); renderAdmin(); return; }
+  const b = e.target.closest('[data-act]');
+  if (!b) {
+    if (!inPop) hidePop();
+    if (e.target === $('#modal')) { modal = null; renderModal(); }
+    return;
+  }
+  const act = b.dataset.act;
+  if (!['group', 'more-tabs', 'period-menu', 'period-own'].includes(act)) hidePop();
+  const id = Number(b.dataset.id);
+  switch (act) {
+    case 'open-site': openPanel(id, 'site'); break;
+    case 'open-tab': openPanel(Number(b.dataset.site), id); break;
+    case 'ask-take': openPanel(id, 'site', true); break;
+    case 'other': openPanel(id, 'other'); break;
+    case 'tab': switchTab(b.dataset.tab === 'site' ? 'site' : Number(b.dataset.tab)); break;
+    case 'close': closePanel(); break;
+    case 'group': {
+      const status = b.dataset.status;
+      const list = dealsOf(id).filter(within).filter((p) => p.status === status).reverse();
+      showPop(b, `<div class="pop-title">${site(id).domain} · ${ST[status]}</div>${list.map((p) => popItem(p, 'open')).join('')}`);
+      break;
+    }
+    case 'more-tabs': {
+      const { hidden } = visibleTabs(dealsOf(panel.siteId));
+      showPop(b, `<div class="pop-title">Ранние размещения</div>${[...hidden].reverse().map((p) => popItem(p, 'tab')).join('')}`);
+      break;
+    }
+    case 'copy': {
+      const domain = b.dataset.domain;
+      Promise.resolve()
+        .then(() => navigator.clipboard.writeText(domain))
+        .then(() => toast(`Скопировано: ${domain}`), () => toast(`Не удалось скопировать: ${domain}`));
+      break;
+    }
+    case 'ask-new':
+      panel.askNew = true; panel.newOffer = null; panel.makeWorking = false; panel.confirmDelete = null;
+      renderPanel();
+      $('#panel .p-body').scrollTop = 0;
+      break;
+    case 'cancel-new': panel.askNew = false; renderPanel(); break;
+    case 'create': {
+      const s = site(id);
+      const work = working(s);
+      const offer = s.offers.find((o) => o.id === (panel.newOffer ?? work.id));
+      const p = createDeal(s, offer);
+      const moved = panel.makeWorking && offer.id !== work.id;
+      if (moved) s.working = offer.id;
+      openPanel(s.id, p.id);
+      renderAdmin();
+      toast(`Заведено размещение №${numOf(p)} через ${offer.seller}${moved ? ' · цена стала рабочей' : ''}`);
+      break;
+    }
+    case 'ask-delete':
+      if (panel.tab !== id) { panel.tab = id; loadDraft(); }
+      panel.confirmDelete = id; panel.askNew = false;
+      renderPanel();
+      $('#panel .p-body').scrollTop = 0;
+      break;
+    case 'cancel-delete': panel.confirmDelete = null; renderPanel(); break;
+    case 'delete': {
+      const p = deal(id);
+      const n = numOf(p);
+      removeDeal(p);
+      const rest = dealsOf(panel.siteId);
+      panel.confirmDelete = null;
+      switchTab(rest.length ? current(rest).id : 'site');
+      renderAdmin();
+      toast(`Размещение №${n} удалено`);
+      break;
+    }
+    case 'make-working': {
+      const s = site(panel.siteId);
+      s.working = id;
+      renderPanel();
+      renderAdmin();
+      toast(`Рабочая цена: ${working(s).seller}, ${eur(working(s).cents)}`);
+      break;
+    }
+    case 'draft-status': panel.draft.status = b.dataset.st; renderPanel(); break;
+    case 'draft-decision': panel.draft.decision = b.dataset.st; renderPanel(); break;
+    case 'draft-stop': panel.draft.decision = panel.draft.decision === b.dataset.st ? null : b.dataset.st; renderPanel(); break;
+    case 'save': save(); break;
+    case 'filter': ui.filter[ui.screen] = b.dataset.st || null; renderAdmin(); break;
+    case 'period': ui.period = b.dataset.period; renderAdmin(); break;
+    case 'period-menu': showPop(b, periodMenu()); break;
+    case 'period-own': {
+      const read = (id) => [Number($(`#${id}-m`).value), Number($(`#${id}-y`).value)];
+      let from = read('pf'), to = read('pt');
+      if (from[1] * 12 + from[0] > to[1] * 12 + to[0]) [from, to] = [to, from];
+      ui.period = { from, to };
+      hidePop();
+      renderAdmin();
+      break;
+    }
+    case 'run':
+      if ($('#action').value !== 'take') { toast('Выберите действие'); break; }
+      openTakeModal();
+      break;
+    case 'take-run': runTake(); break;
+    case 'modal-close': modal = null; renderModal(); break;
+    case 'reset':
+      reset();
+      ui.checked.clear(); ui.filter.sites = null; ui.filter.deals = null; ui.period = 'all'; ui.q = '';
+      $('#q').value = '';
+      panel = null; modal = null;
+      hidePop(); renderModal(); renderAdmin(); renderPanel();
+      toast('Пример сброшен');
+      break;
+    case 'theme':
+      document.documentElement.dataset.theme = themeNow() === 'dark' ? 'light' : 'dark';
+      renderTheme();
+      break;
+    default: break;
+  }
+});
+
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.matches('[data-check]')) {
+    const id = Number(t.dataset.check);
+    if (t.checked) ui.checked.add(id); else ui.checked.delete(id);
+    renderSites();
+  } else if (t.id === 'check-all') {
+    for (const s of state.sites.filter(siteMatches)) { if (t.checked) ui.checked.add(s.id); else ui.checked.delete(s.id); }
+    renderSites();
+  } else if (t.matches('[data-again]')) {
+    const id = Number(t.dataset.again);
+    if (t.checked) modal.again.add(id); else modal.again.delete(id);
+    renderModal();
+  } else if (t.name === 'new-offer') {
+    panel.newOffer = Number(t.value);
+    panel.makeWorking = false;
+    renderPanel();
+  } else if (t.id === 'make-working') {
+    panel.makeWorking = t.checked;
+  }
+});
+
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (!panel || !t.matches('[data-draft]')) return;
+  panel.draft[t.dataset.draft] = t.value;
+  if (t.dataset.draft === 'target' && panel.tab !== 'site') {
+    const p = deal(panel.tab);
+    const text = clashText(dealsOf(p.site), p, t.value.trim());
+    const box = $('#d-clash');
+    box.innerHTML = text;
+    box.hidden = !text;
+  }
+});
+
+$('#search-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  ui.q = norm($('#q').value);
+  renderAdmin();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('#pop').hidden) hidePop();
+  else if (modal) { modal = null; renderModal(); } else if (panel) closePanel();
+});
+window.addEventListener('scroll', hidePop, { passive: true });
+window.addEventListener('resize', hidePop);
+$('#table-wrap').addEventListener('scroll', hidePop, { passive: true });
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', renderTheme);
+
+reset();
+renderAdmin();
+renderTheme();
+})();
+</script>

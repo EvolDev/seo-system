@@ -82,10 +82,12 @@ TEMPLATES = [
             # {% asset %} — адрес нашей статики с версией (config/assets.py).
             # {% export_tools cl %} — окно выгрузки над списком (config/export_tags.py).
             # {% screen_help %} — кнопка «?» со справкой по экрану (config/user_docs.py).
+            # {% status_bar cl %} — статус и «Период ▾» над списком (ADR-073).
             "libraries": {
                 "seo_assets": "config.assets",
                 "seo_export": "config.export_tags",
                 "seo_docs": "config.user_docs",
+                "seo_status": "apps.placements.status_tags",
             },
         },
     },

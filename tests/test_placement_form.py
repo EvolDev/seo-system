@@ -175,8 +175,9 @@ class TestPanelLayout:
         # Продукт — рабочий, из шапки: в заголовке карточки его нет (E1-19).
         assert '<h2 class="seo-panel-title">example.com</h2>' in page
         assert 'name="site"' not in page and 'name="product"' not in page
+        # Карточка площадки — вкладка «Площадка» над размещениями (ADR-073).
         card = reverse("admin:sites_site_card", args=[placement.site_id])
-        assert f'<a href="{card}" data-panel>Карточка площадки</a>' in page
+        assert f'<a class="seo-ptab" href="{card}" data-panel><b>Площадка</b>' in page
 
     def test_full_page_keeps_site_and_product(
         self, admin_client: Client, placement: Placement
@@ -222,9 +223,13 @@ class TestList:
     def test_status_and_day_columns(self, admin_client: Client, placement: Placement) -> None:
         response = admin_client.get(reverse("admin:placements_placement_changelist"))
         page = response.content.decode()
-        # data-seo-field — статус в строке меняется сразу после записи в панели.
-        link = f'<a href="{_url(placement)}" title="Сменить статус" data-seo-field="status">'
-        assert f"{link}В работе</a>" in page
+        # Статус — фишкой размещения (ADR-073): открывает его панелью; после
+        # записи в панели строка обновляется целиком.
+        chip = (
+            f'<a class="seo-st seo-st-live" href="{_url(placement)}" data-panel="{_url(placement)}"'
+        )
+        assert chip in page
+        assert ">В работе<span" in page
         assert "01.10.2026" in page
         assert "15:30" not in page
 

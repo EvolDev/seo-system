@@ -1,7 +1,8 @@
 """Статусы площадки (E1-12, ADR-047): порядок и смена по размещениям.
 
-Порядок — в окне «Решение по площадке», в фильтре «Статус» и в сортировке по
-колонке «статус» в «Площадках». Смена по размещениям — `apps.sites.statuses`
+Порядок — в окне «Решение по площадке», в кнопках статуса над «Площадками» и
+в сортировке по колонке «статус». Свой статус площадки — только без размещений
+(ADR-073): статусы работы ведут размещения. Смена по размещениям — `apps.sites.statuses`
 и `Placement.save()`: только вперёд по лесенке, новый факт сильнее прежнего
 отказа и аудита, «Чёрный список» не трогается никогда. Как то же правило
 работает в импорте таблицы — `test_import_apply.py`.
@@ -15,6 +16,7 @@ from django.contrib.admin.views.main import ORDER_VAR, ChangeList
 from django.test import Client
 from django.urls import reverse
 
+from apps.placements import status_chips
 from apps.placements.models import Placement, PlacementStatus
 from apps.sites import statuses
 from apps.sites.models import Product, ProductSite, Site, SiteStatus
@@ -74,21 +76,42 @@ class TestOrder:
         page = admin_client.get(url, headers=PARTIAL).content.decode()
         buttons = re.search(r'<div class="seo-choice".*?</div></div>', page, re.S)
         assert buttons is not None
-        assert re.findall(r"<span>([^<]*)</span>", buttons.group()) == AGREED
-        # Два ряда: путь площадки в работу и отказы.
+        # Размещений нет — свой статус площадки (ADR-073), два ряда: решение и
+        # «больше не работаем». В работу берут кнопкой «Взять в размещение».
         rows = re.findall(r'<div class="seo-choice-row">(.*?)</div>', buttons.group(), re.S)
         assert [re.findall(r"<span>([^<]*)</span>", row) for row in rows] == [
             AGREED[:2],
-            AGREED[2:6],
             AGREED[6:],
         ]
+        assert "Взять в размещение" in page
+
+    def test_decision_panel_with_placements(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        _place(site, convertio, PlacementStatus.ORDERED)
+        url = reverse("admin:sites_productsite_decision", args=[_row(site, convertio).pk])
+        page = admin_client.get(url, headers=PARTIAL).content.decode()
+        buttons = re.search(r'<div class="seo-choice".*?</div></div>', page, re.S)
+        assert buttons is not None
+        # Статус ведут размещения: «работаем» и «больше не работаем».
+        rows = re.findall(r'<div class="seo-choice-row">(.*?)</div>', buttons.group(), re.S)
+        assert [re.findall(r"<span>([^<]*)</span>", row) for row in rows] == [
+            ["Работаем — по размещениям"],
+            AGREED[6:],
+        ]
+        assert "Заявка отправлена" in page  # фишка размещения
+        assert "Взять в размещение" not in page
 
     def test_status_filter(self, admin_client: Client, site: Site) -> None:
+        # Статус — кнопками над списком (ADR-073), в том же порядке.
         response = admin_client.get(SITES_URL, {"list": "all"})
         changelist: ChangeList = response.context["cl"]
-        [spec] = [s for s in changelist.filter_specs if getattr(s, "field_path", "") == "status"]
-        choices = [str(choice["display"]) for choice in spec.choices(changelist)]
-        assert choices[1:] == AGREED
+        [spec] = [
+            s for s in changelist.filter_specs if isinstance(s, status_chips.StatusPeriodFilter)
+        ]
+        choices = [choice["label"] for choice in spec.status_choices(changelist)]
+        assert choices == ["Все", *AGREED]
+        assert 'class="seo-stbar"' in response.content.decode()
 
     def test_sort_by_status_column(self, admin_client: Client, convertio: Product) -> None:
         for index, status in enumerate(reversed(SiteStatus)):
@@ -136,14 +159,56 @@ class TestBulkStatus:
             SITES_URL,
             {
                 "action": "set_status_action",
-                "status": SiteStatus.IN_WORK,
+                "status": SiteStatus.VIEWED,
                 "_selected_action": [str(pk) for pk in rows],
             },
             follow=True,
         )
-        assert "Статус «В работе» поставлен: 2" in response.content.decode()
-        assert _row(site, convertio).status == SiteStatus.IN_WORK
-        assert _row(other, convertio).status == SiteStatus.IN_WORK
+        assert "Статус «Просмотрено» поставлен: 2" in response.content.decode()
+        assert _row(site, convertio).status == SiteStatus.VIEWED
+        assert _row(other, convertio).status == SiteStatus.VIEWED
+
+    def test_work_statuses_are_not_offered(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        # Статусы работы ведут размещения (ADR-073): в работу — «Взять в размещение».
+        # Такого статуса нет среди вариантов — действие не выполняется.
+        admin_client.post(
+            SITES_URL,
+            {
+                "action": "set_status_action",
+                "status": SiteStatus.PLACED,
+                "_selected_action": [str(_row(site, convertio).pk)],
+            },
+            follow=True,
+        )
+        assert _row(site, convertio).status == SiteStatus.NEW
+        page = admin_client.get(SITES_URL, {"list": "all"}).content.decode()
+        select = re.search(r'<select name="status".*?</select>', page, re.S)
+        assert select is not None
+        assert re.findall(r'<option value="([^"]+)"', select.group()) == [
+            "new",
+            "viewed",
+            "discarded",
+            "rejected",
+            "blacklisted",
+        ]
+
+    def test_placements_lead_the_status(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        _place(site, convertio, PlacementStatus.ORDERED)
+        other = Site.objects.create(domain="second.com")
+        rows = [str(_row(site, convertio).pk), str(_row(other, convertio).pk)]
+        data = {"action": "set_status_action", "_selected_action": rows}
+        response = admin_client.post(SITES_URL, {**data, "status": SiteStatus.VIEWED}, follow=True)
+        text = response.content.decode()
+        assert "Статус «Просмотрено» поставлен: 1. Пропущено, статус ведут размещения: 1." in text
+        assert _row(site, convertio).status == SiteStatus.ORDERED
+        # «Больше не работаем» — и площадке с размещениями.
+        admin_client.post(SITES_URL, {**data, "status": SiteStatus.DISCARDED}, follow=True)
+        assert _row(site, convertio).status == SiteStatus.DISCARDED
+        assert _row(other, convertio).status == SiteStatus.DISCARDED
 
     def test_without_status_nothing_happens(
         self, admin_client: Client, site: Site, convertio: Product

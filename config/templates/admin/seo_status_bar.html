@@ -1,0 +1,25 @@
+{% comment %}
+Быстрые фильтры над списком (ADR-073): статус кнопками и «Период ▾» — месяц,
+3 месяца, год, всё время или свой, с месяца по месяц. Период — по дате, когда
+поставлен статус. Ссылки и форма — того же списка: подгрузка без перезагрузки
+(seo/soft-nav.js), остальные фильтры остаются.
+{% endcomment %}{% if spec %}
+<div class="seo-stbar" role="group" aria-label="Статус и период">
+  <span class="seo-stbar-label">Статус</span>
+  {% for choice in statuses %}<a class="seo-stbar-chip{% if choice.selected %} seo-stbar-on{% endif %}" href="{{ choice.url }}"{% if choice.selected %} aria-current="true"{% endif %}>{{ choice.label }}</a>{% endfor %}
+  <details class="seo-stbar-period{% if period.active %} seo-stbar-set{% endif %}" data-seo-menu>
+    <summary title="По дате, когда поставлен статус">Период: {{ period.label|lower }} ▾</summary>
+    <div class="seo-stbar-menu">
+      <div class="seo-stbar-hint">По дате, когда поставлен статус</div>
+      {% for choice in periods %}<a class="seo-stbar-item{% if choice.selected %} seo-stbar-on{% endif %}" href="{{ choice.url }}">{{ choice.label }}</a>{% endfor %}
+      <form method="get" class="seo-stbar-own">
+        {% for name, value in kept %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+        <div class="seo-stbar-hint">Свой — с месяца по месяц</div>
+        <label>с <input type="month" name="{{ spec.from_param }}" value="{{ from_value }}" min="2024-01" max="{{ max_month }}"></label>
+        <label>по <input type="month" name="{{ spec.to_param }}" value="{{ to_value }}" min="2024-01" max="{{ max_month }}"></label>
+        <button type="submit" class="seo-btn seo-btn-small">Применить</button>
+      </form>
+    </div>
+  </details>
+</div>
+{% endif %}

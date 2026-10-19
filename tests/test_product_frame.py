@@ -187,14 +187,23 @@ class TestDoor:
     def test_site_with_our_placement_opens_its_card(
         self, admin_client: Client, both: dict[str, Any]
     ) -> None:
+        # В «Площадках» домен открывает карточку площадки и при размещении
+        # (пользователь, 19.10.2026); размещение — фишкой в «статусе», значка
+        # «взять» нет.
         page = admin_client.get(SITES, {"list": "all", "q": "our.com"}).content.decode()
+        card = reverse("admin:sites_site_card", args=[both["our_only"].site_id])
+        assert f'href="{card}" data-panel title="Карточка площадки">our.com</a>' in page
         url = reverse("admin:placements_placement_change", args=[both["our_only"].pk])
-        assert f'href="{url}" data-panel title="Карточка размещения"' in page
+        assert f'class="seo-st seo-st-live" href="{url}"' in page
+        assert 'title="Взять в размещение"' not in page
 
-    def test_placement_row_offers_removal(self, admin_client: Client, both: dict[str, Any]) -> None:
+    def test_placement_row_has_no_removal(self, admin_client: Client, both: dict[str, Any]) -> None:
+        # Удаляют на вкладке размещения в панели (ADR-073): у площадки бывает
+        # несколько размещений, корзина в строке не говорит, какое из них.
         page = admin_client.get(PLACEMENTS).content.decode()
         url = reverse("admin:placements_placement_delete", args=[both["our_only"].pk])
-        assert f'href="{url}" title="Убрать из размещений"' in page
+        assert url not in page
+        assert "Убрать из размещений" not in page
 
     def test_placement_row_opens_the_record(
         self, admin_client: Client, both: dict[str, Any]
@@ -233,14 +242,32 @@ class TestDoor:
 
 
 class TestTakePlacement:
-    """Массовое «Взять в размещение» в «Площадках» (E1-20)."""
+    """Массовое «Взять в размещение» в «Площадках» (E1-20, ADR-073)."""
 
     def _rows(self, client: Client) -> list[str]:
         rows = _rows(client, SITES, list="all")
         return [str(row.pk) for row in rows]
 
+    def _take(self, client: Client, rows: list[str], **extra: Any) -> str:
+        data = {"action": "take_placement_action", "_selected_action": rows, "post": "yes"}
+        response = client.post(SITES + "?list=all", {**data, **extra}, follow=True)
+        return str(response.content.decode())
+
+    def test_window_first(self, admin_client: Client, both: dict[str, Any]) -> None:
+        # Сначала окно: что заведём и где размещения уже есть — ничего не записано.
+        before = Placement.objects.count()
+        response = admin_client.post(
+            SITES + "?list=all",
+            {"action": "take_placement_action", "_selected_action": self._rows(admin_client)},
+        )
+        page = response.content.decode()
+        assert "Заведём размещение — 1" in page
+        assert "Размещения уже есть — 2" in page
+        assert 'name="again"' in page and 'name="post" value="yes"' in page
+        assert Placement.objects.count() == before
+
     def test_creates_for_sites_without_our_placement(
-        self, admin_client: Client, both: dict[str, Any], convertio: Product
+        self, admin_client: Client, admin_user: User, both: dict[str, Any], convertio: Product
     ) -> None:
         seller = Seller.objects.create(name="Working seller")
         price = SitePrice.objects.create(
@@ -251,39 +278,45 @@ class TestTakePlacement:
         )
         both["theirs"].price = price
         both["theirs"].save(update_fields=["price"])
-        response = admin_client.post(
-            SITES + "?list=all",
-            {"action": "take_placement_action", "_selected_action": self._rows(admin_client)},
-            follow=True,
-        )
-        page = response.content.decode()
+        page = self._take(admin_client, self._rows(admin_client))
         # Своё размещение было у both.com и our.com, новое — только у their.com.
         assert "Взято в размещение: 1" in page
-        assert "Пропущено, размещение уже есть: 2" in page
+        assert "пропущено, размещение уже есть: 2" in page
         fresh = Placement.objects.get(site=both["theirs"], product=convertio)
         assert fresh.status == PlacementStatus.IN_WORK
         assert (fresh.seller_id, fresh.placement_type) == (seller.pk, "link_insertion")
+        # Цена, по которой взяли, и сотрудник — тот, кто вошёл (ADR-073).
+        assert (fresh.price_id, fresh.employee_id) == (price.pk, admin_user.pk)
+
+    def test_again_only_where_ticked(
+        self, admin_client: Client, both: dict[str, Any], convertio: Product
+    ) -> None:
+        # Ещё одно — только у отмеченной площадки, параллельно с идущим.
+        self._take(admin_client, self._rows(admin_client), again=[str(both["ours"].pk)])
+        assert Placement.objects.filter(site=both["ours"], product=convertio).count() == 2
+        assert Placement.objects.filter(site=both["shared"], product=convertio).count() == 1
+
+    def test_blacklist_is_skipped(
+        self, admin_client: Client, both: dict[str, Any], convertio: Product
+    ) -> None:
+        ProductSite.objects.filter(site=both["theirs"], product=convertio).update(
+            status=PlacementStatus.BLACKLISTED
+        )
+        page = self._take(admin_client, self._rows(admin_client))
+        assert "пропущено, чёрный список: 1" in page
+        assert not Placement.objects.filter(site=both["theirs"], product=convertio).exists()
 
     def test_site_status_follows_the_placement(
         self, admin_client: Client, both: dict[str, Any], convertio: Product
     ) -> None:
-        admin_client.post(
-            SITES + "?list=all",
-            {"action": "take_placement_action", "_selected_action": self._rows(admin_client)},
-            follow=True,
-        )
+        self._take(admin_client, self._rows(admin_client))
         # Статус площадки идёт за размещением — общий словарь (ADR-062).
         decision = ProductSite.objects.get(site=both["theirs"], product=convertio)
         assert decision.status == PlacementStatus.IN_WORK
 
     def test_nothing_new_is_said_plainly(self, admin_client: Client, both: dict[str, Any]) -> None:
         rows = [str(row.pk) for row in _rows(admin_client, SITES, list="all", q="our.com")]
-        response = admin_client.post(
-            SITES + "?list=all",
-            {"action": "take_placement_action", "_selected_action": rows},
-            follow=True,
-        )
-        assert "Взято в размещение: 0" in response.content.decode()
+        assert "Взято в размещение: 0" in self._take(admin_client, rows)
 
 
 class TestCounter:

@@ -373,7 +373,7 @@ def test_query_count(
     offer: OfferFactory,
     django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
-    """Критерий приёмки: страница — не больше 15 запросов при любом числе строк.
+    """Критерий приёмки: страница — не больше 17 запросов при любом числе строк.
 
     С E1-07 — ещё и с продавцами, предложениями, заметками и их фильтрами.
     С E1-10 — с выбранным регионом и его «от/до»: список регионов — 11-й
@@ -382,7 +382,9 @@ def test_query_count(
     пользователя — 13-й (список продуктов — общий у шапки и фильтра).
     С ADR-060 — счётчики площадок у продавцов в фильтре: 14-й, один на всех
     продавцов. С E1-19 — размещения площадок страницы (колонка «другие продукты»
-    и дверь в карточку): 15-й, один на страницу.
+    и дверь в карточку): 15-й, один на страницу. С ADR-073 — статус фишками:
+    размещения рабочего продукта с датами статусов — 16-й, решения по
+    площадкам с датами — 17-й.
     """
     site_list = SiteList.objects.create(name="Сентябрь")
     seller = Seller.objects.create(name="LinkHub Media", currency="USD")
@@ -415,7 +417,7 @@ def test_query_count(
     # Тема Admin Interface при первом открытии заводит свою строку и кладёт её
     # в кеш; в работающем приложении она там уже есть, считаем без неё.
     admin_client.get(URL)
-    with django_assert_max_num_queries(15):
+    with django_assert_max_num_queries(17):
         response = admin_client.get(URL, params)
     assert response.status_code == 200
     assert len(response.context["cl"].result_list) == 50

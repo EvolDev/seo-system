@@ -17,6 +17,12 @@
 Счета (E1-14, ADR-055): действие «Счёт на отмеченные» открывает форму нового
 счёта с ними (`invoice_admin.py`), фильтр и колонка «счёт». «Заплачено»
 размещения в счёте — из счёта: в форме оно текстом со ссылкой на счёт.
+
+Повторные размещения (ADR-073): над формой — вкладки площадки «Площадка · №1 ·
+№2 · + Ещё размещение» (`repeat.tabs`); новое размещение берёт предложение
+продавца выбором «Через кого», сотрудник — тот, кто вошёл. Удаляют размещение
+красной корзиной на его вкладке, по одному: «Удалить выбранные» в списке нет.
+Размещение другого продукта, чем рабочий в шапке, — только просмотр.
 """
 
 from collections.abc import Iterator, Sequence
@@ -32,8 +38,8 @@ from django.contrib.admin.utils import display_for_value
 from django.contrib.admin.views.main import ChangeList
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db.models import Count, Exists, OuterRef, QuerySet
-from django.db.models.functions import Coalesce, TruncMonth
+from django.db.models import Count, Exists, OuterRef, QuerySet, Subquery
+from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import URLPattern, path, reverse
@@ -45,7 +51,13 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.keywords import anchor_views
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
 from apps.placements import export as placement_export
-from apps.placements import export_designer_view, invoices, other_products
+from apps.placements import (
+    export_designer_view,
+    invoices,
+    other_products,
+    repeat,
+    status_chips,
+)
 from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLinkFormSet
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import (
@@ -56,10 +68,19 @@ from apps.placements.models import (
     PlacementLink,
 )
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
-from apps.sites import countries, rating
-from apps.sites.display import domain_tools_html, rating_html, remove_placement_html
-from apps.sites.models import Product, Seller, Site, SiteLatest, StatusSource, WorkStatus
-from apps.sites.offers import money
+from apps.sites import countries, rating, statuses
+from apps.sites.display import domain_tools_html, rating_html
+from apps.sites.models import (
+    Product,
+    Seller,
+    Site,
+    SiteLatest,
+    SiteOffer,
+    SitePrice,
+    StatusSource,
+    WorkStatus,
+)
+from apps.sites.offers import describe, money, set_working_price
 from apps.sites.status_history import placement_history
 from apps.workspace.products import FrameProductFilter, working_product_id
 from config import export
@@ -215,6 +236,22 @@ class PlacementLinkInline(StackedInline):
         # У нового размещения сразу два слота: ссылок в статье одна-две.
         return 2 if obj is None else 0
 
+    # Ссылки размещения другого продукта — только просмотр, как и само размещение.
+    def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return own_product(request, obj) and super().has_add_permission(request, obj)
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return own_product(request, obj) and super().has_change_permission(request, obj)
+
+
+def own_product(request: HttpRequest, obj: Any = None) -> bool:
+    """Размещение рабочего продукта из шапки — его можно менять (ADR-073).
+
+    Чужой продукт — только просмотр: менять его — переключив продукт в шапке,
+    чтобы не задеть случайно (просьба пользователя 18.10.2026).
+    """
+    return obj is None or obj.product_id == working_product_id(request)
+
 
 def _initial_product(context: dict[str, Any]) -> int | None:
     """Продукт новой формы размещения — начальное значение поля (рабочий продукт)."""
@@ -259,25 +296,48 @@ class StatusActionForm(helpers.ActionForm):
 
 
 class PlacementChangeList(PerPageChangeList):
-    """Список размещений, который заодно достаёт другие продукты строк страницы.
+    """Список размещений: одна строка на площадку, фишки и другие продукты строк.
 
-    Одним запросом на страницу, как предложения цен в «Площадках»: колонка
-    «другие продукты» берёт готовое.
+    Строка — площадка (ADR-073): из размещений, что прошли фильтры, — текущее
+    (идущее, иначе последнее); колонки — его, остальные размещения — фишками в
+    «статусе» и вкладками в панели. Одна строка на площадку — только у страницы:
+    действие над отмеченными берёт отмеченные размещения как есть, «Выбрать все»
+    — строки списка (`PlacementAdmin.response_action`). Выгрузка — не этот класс:
+    она по каждому размещению.
+
+    Одним запросом на страницу, как предложения цен в «Площадках»: колонки
+    «другие продукты» и «статус» берут готовое.
     """
 
     def get_results(self, request: HttpRequest) -> None:
         # «N всего» считается по этому запросу: он должен быть в той же рамке,
-        # что и строки, иначе счётчик говорит про оба продукта (E1-20).
+        # что и строки, иначе счётчик говорит про оба продукта (E1-20), — и по
+        # площадкам, как строки (ADR-073).
         working = working_product_id(request)
-        self.root_queryset = self.root_queryset.filter(product_id=working)
+        framed = self.root_queryset.filter(product_id=working)
+        self.root_queryset = repeat.one_per_site(framed)
+        self.queryset = repeat.one_per_site(self.queryset)
         super().get_results(request)
+        # Действие над отмеченными строит выборку заново от root_queryset: там
+        # размещения как есть, а не по одному на площадку.
+        self.root_queryset = framed
         found = other_products.by_site(row.site_id for row in self.result_list)
+        cells = status_chips.cells(
+            (row.site_id for row in self.result_list), working, status_chips.period_of(self)
+        )
+        # Цены строки — предложения размещения (ADR-073): номера пришли в выборке.
+        offers = SitePrice.objects.in_bulk(
+            {row.deal_offer_id for row in self.result_list if row.deal_offer_id is not None}
+        )
         for row in self.result_list:
             row.page_products = found.get(row.site_id, [])
+            row.page_cell = cells.get(row.site_id)
+            row.page_offer = offers.get(row.deal_offer_id)
 
 
 class PlacementSellerFilter(MultiChoiceFilter):
-    """Тот же выбор галочками, что у площадок; продавец совпадает с колонкой."""
+    """Тот же выбор галочками, что у площадок; продавец совпадает с колонкой —
+    продавец самого размещения, а не рабочей цены площадки (ADR-073)."""
 
     title = "продавец"
     parameter_name = "seller"
@@ -292,7 +352,7 @@ class PlacementSellerFilter(MultiChoiceFilter):
     def narrow(self, queryset: Any, values: list[str]) -> Any:
         if not all(value.isdigit() for value in values):
             return queryset.none()
-        return queryset.filter(display_seller_id__in=[int(value) for value in values])
+        return queryset.filter(seller_id__in=[int(value) for value in values])
 
     def choices(self, changelist: Any) -> Iterator[Any]:
         if self._counted is None:
@@ -309,10 +369,10 @@ class PlacementSellerFilter(MultiChoiceFilter):
                 )
             self._counted = dict(
                 rows.order_by()
-                .filter(display_seller_id__isnull=False)
-                .values("display_seller_id")
+                .filter(seller_id__isnull=False)
+                .values("seller_id")
                 .annotate(total=Count("pk", distinct=True))
-                .values_list("display_seller_id", "total")
+                .values_list("seller_id", "total")
             )
         picked = set(self.values())
         items = super().choices(changelist)
@@ -340,7 +400,7 @@ class PlacementAdmin(RecordAdmin):
     form = PlacementForm
     list_display = (
         "site_link",
-        "working_seller_cell",
+        "seller_cell",
         "status_link",
         "dr_cell",
         "traffic_cell",
@@ -365,7 +425,8 @@ class PlacementAdmin(RecordAdmin):
         FrameProductFilter,
         PlacementSellerFilter,
         PublishedMonthFilter,
-        "status",
+        # Статус и «Период ▾» — полосой над списком (ADR-073).
+        status_chips.PlacementStatusFilter,
         InvoiceFilter,
         "placement_type",
         "link_type",
@@ -389,6 +450,7 @@ class PlacementAdmin(RecordAdmin):
         "status_date",
         "extra_data",
         "paid_from_invoice",
+        "offer_info",
     )
     fieldsets = (
         (None, {"fields": ("site", "product")}),
@@ -402,6 +464,7 @@ class PlacementAdmin(RecordAdmin):
                 "fields": (
                     "placement_type",
                     "seller",
+                    "offer_info",
                     "employee",
                     "collaborator_order_id",
                     "ordered_at",
@@ -459,11 +522,14 @@ class PlacementAdmin(RecordAdmin):
                 Css("seo/offers.css"),
                 Css("seo/invoices.css"),
                 Css("seo/anchors.css"),
+                Css("seo/placement-tabs.css"),
             )
         }
 
     def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, Any]:
         initial = super().get_changeform_initial_data(request)
+        # Сотрудник — тот, кто заводит (ADR-073): не выбирать себя каждый раз.
+        initial.setdefault("employee", request.user.pk)
         try:
             site_id = int(initial.get("site", ""))
         except (TypeError, ValueError):
@@ -476,14 +542,55 @@ class PlacementAdmin(RecordAdmin):
                 initial.setdefault("link_type", site.price.link_type)
         return initial
 
+    def formfield_for_foreignkey(
+        self, db_field: Any, request: HttpRequest, **kwargs: Any
+    ) -> "forms.ModelChoiceField[Any] | None":
+        if db_field.name == "product":
+            # Завести и перенести размещение можно только в рабочем продукте шапки.
+            working = working_product_id(request)
+            kwargs["queryset"] = (
+                Product.objects.filter(pk=working)
+                if working is not None
+                else Product.objects.none()
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    # ---------- Чужой продукт — только просмотр (ADR-073) ----------
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return own_product(request, obj) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return own_product(request, obj) and super().has_delete_permission(request, obj)
+
+    def get_actions(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
+        # Удаляют по одному — корзиной на вкладке размещения, с подтверждением:
+        # отмеченная строка не говорит, какое из размещений площадки удалить.
+        actions = super().get_actions(request, *args, **kwargs)
+        actions.pop("delete_selected", None)
+        return actions
+
+    def response_action(
+        self, request: HttpRequest, queryset: QuerySet[Any], *args: Any, **kwargs: Any
+    ) -> HttpResponse | None:
+        # «Выбрать все N» — строки списка, по одной на площадку (ADR-073): старые
+        # размещения тех же площадок действие не задевает. Отмеченные — как есть.
+        if request.POST.get("select_across") == "1":
+            queryset = repeat.one_per_site(queryset)
+        return super().response_action(request, queryset, *args, **kwargs)
+
     def get_queryset(self, request: HttpRequest) -> QuerySet[Placement]:
         # Колонка «заплачено»: из счёта ли сумма и оплачен ли он — без запроса на строку.
         queryset: QuerySet[Placement] = (
             super().get_queryset(request).select_related(*self.list_select_related)
         )
         queryset = queryset.annotate(
-            display_seller_id=Coalesce("site__price__seller_id", "seller_id"),
-            display_seller_name=Coalesce("site__price__seller__name", "seller__name"),
+            # Предложение размещения (ADR-073): продавец и цены строки — его, а не
+            # рабочей цены площадки; сортировка цен — по нему же.
+            deal_offer_id=repeat.offer_id(),
+            deal_placement_cents=_deal_price("placement_cents"),
+            deal_announce_cents=_deal_price("announce_cents"),
+            deal_writing_cents=_deal_price("writing_cents"),
             invoice_issued=_in_invoice(InvoiceStatus.ISSUED),
             invoice_paid=_in_invoice(InvoiceStatus.PAID),
         )
@@ -662,9 +769,10 @@ class PlacementAdmin(RecordAdmin):
 
         Ссылка ведёт на запись этого же списка, поэтому панель открывает её сама
         (`seo/panel.js`), а Ctrl — отдельной страницей. Своя ссылка в ячейке
-        нужна из-за значков: вкладывать их в обёртку Django нельзя.
+        нужна из-за значков: вкладывать их в обёртку Django нельзя. Корзины в
+        строке нет (ADR-073): у площадки бывает несколько размещений, удаляют
+        нужное — на его вкладке в панели.
         """
-        remove = remove_placement_html(reverse("admin:placements_placement_delete", args=[obj.pk]))
         stars = rating_html(
             reverse("admin:sites_site_rate", args=[obj.site_id]),
             getattr(obj, "rating_avg", None),
@@ -676,7 +784,7 @@ class PlacementAdmin(RecordAdmin):
             stars,
             reverse("admin:placements_placement_change", args=[obj.pk]),
             obj.site.domain,
-            domain_tools_html(obj.site.domain, remove),
+            domain_tools_html(obj.site.domain),
         )
 
     @admin.display(description="другие продукты")
@@ -706,10 +814,17 @@ class PlacementAdmin(RecordAdmin):
             # Прочие данные из файла размещений — перед «Служебным», только если есть.
             fieldsets.insert(len(fieldsets) - 1, (FROM_FILE, {"fields": ("extra_data",)}))
         if obj is None:
-            return [
-                (name, {**options, "fields": _without(options["fields"], "status_history")})
-                for name, options in fieldsets
-            ]
+            # Новое размещение на площадке с ценами (ADR-073): «Через кого» вместо
+            # продавца, услуги и типа ссылки — их даёт выбранное предложение.
+            offers = _offer_site(request) is not None
+            result: list[Any] = []
+            for name, options in fieldsets:
+                kept: tuple[Any, ...] = _without(options["fields"], "status_history", "offer_info")
+                if name == REQUEST and offers:
+                    picked = _without(kept, "placement_type", "seller", "link_type")
+                    kept = ("offer", "make_working", *picked)
+                result.append((name, {**options, "fields": kept}))
+            return result
         if not self.in_panel(request):
             return fieldsets
         # Панель: площадка и продукт — в заголовке; кнопка проверки — в «Проверках»
@@ -750,16 +865,103 @@ class PlacementAdmin(RecordAdmin):
             context["anchor_dialog"] = anchor_views.dialog_context(product)
             context["anchor_product"] = product
         if obj is not None:
-            # Чужие продукты — ссылками в шапке панели: в карточке только наш (E1-19).
+            # Чужие продукты — ссылками в шапке панели, только просмотр (E1-19,
+            # ADR-073); карточка площадки — вкладка «Площадка».
             found = other_products.by_site([obj.site_id]).get(obj.site_id, [])
             context["panel_links"] = [
-                ("Карточка площадки", reverse("admin:sites_site_card", args=[obj.site_id]), True),
-                *(
-                    (f"Размещение {name}", other_products.card_url(pk), True)
-                    for name, pk in other_products.others(found, obj.product_id)
-                ),
+                (f"Размещение {name}", other_products.card_url(pk), True)
+                for name, pk in other_products.others(found, obj.product_id)
             ]
+        target = _tabs_target(request, obj)
+        if target is not None:
+            site_id, product_id = target
+            own = product_id == working_product_id(request)
+            context["panel_tabs"] = repeat.tabs(
+                site_id,
+                product_id,
+                obj.pk if obj is not None else "new",
+                can_add=own and self.has_add_permission(request),
+                can_delete=own and self.has_delete_permission(request),
+            )
         return super().render_change_form(request, context, add, change, form_url, obj)
+
+    def get_form(
+        self, request: HttpRequest, obj: Any = None, change: bool = False, **kwargs: Any
+    ) -> Any:
+        form = super().get_form(request, obj, change, **kwargs)
+        if obj is None and _offer_site(request) is not None:
+            # Класс формы свой на каждый запрос (modelform_factory) — метка только у него.
+            form.offer_shown = True  # type: ignore[attr-defined]
+        if obj is None and self.in_panel(request) and _tabs_target(request, None) is not None:
+            # Новое размещение из вкладок площадки: площадка и продукт уже заданы —
+            # в панели они не поля, а заголовок.
+            for name in ("site", "product"):
+                if name in form.base_fields:
+                    form.base_fields[name].widget = forms.HiddenInput()
+        return form
+
+    def panel_add_title(self, request: HttpRequest) -> str:
+        site_id = _int(request.GET.get("site"))
+        site = Site.all_objects.filter(pk=site_id).first() if site_id is not None else None
+        if site is None:
+            return super().panel_add_title(request)
+        return f"{site.domain} — новое размещение"
+
+    def save_model(self, request: HttpRequest, obj: Placement, form: Any, change: bool) -> None:
+        if change and {"seller", "placement_type"} & set(form.changed_data):
+            # Продавца или услугу сменили руками (ADR-073) — предложение размещения
+            # (цены строки и план «Экономики») — текущее у нового продавца.
+            obj.price = repeat.current_offer(obj.site_id, obj.seller_id, obj.placement_type)
+        super().save_model(request, obj, form, change)
+        if not change:
+            # Завёл человек — «Отбрасываю» и «Отказ» площадки снимаются (ADR-073).
+            statuses.reopen(obj.site_id, obj.product_id, placement_id=obj.pk)
+        offer = obj.price
+        if not change and offer is not None and form.cleaned_data.get("make_working"):
+            # «Сделать эту цену рабочей» — та же смена, что в карточке площадки:
+            # с заметкой в истории.
+            set_working_price(offer, author=request.user)
+
+    def response_add(
+        self, request: HttpRequest, obj: Any, post_url_continue: str | None = None
+    ) -> HttpResponse:
+        if self.in_panel(request) and _tabs_target(request, None) is not None:
+            # Завели из вкладок площадки — панель сразу показывает новое размещение.
+            next_url = reverse("admin:placements_placement_change", args=[obj.pk])
+            return self._panel_saved(request, obj, "добавлено", next=next_url)
+        return super().response_add(request, obj, post_url_continue)
+
+    @admin.display(description="предложение продавца")
+    def offer_info(self, obj: Placement) -> SafeString | str:
+        """Через какое предложение взяли (ADR-073) и чем оно отличается от рабочей цены."""
+        if obj.pk is None:
+            return "—"
+        offer = obj.price or repeat.offers_of([obj]).get(obj.pk)
+        if offer is None:
+            return (
+                "нет — у продавца размещения нет цены на эту услугу: «Экономика»"
+                " посчитает по «Заплачено», когда его впишете"
+            )
+        text = format_html(
+            '{} <span class="seo-sub">прайс от {}</span>',
+            describe(offer),
+            f"{timezone.localtime(offer.checked_at):%d.%m.%Y}",
+        )
+        if obj.price is None:
+            # Размещение до ADR-073: предложение не запоминалось — цена его
+            # продавца на дату заведения.
+            text = format_html(
+                '{}<div class="seo-sub">Цена продавца размещения на день, когда его завели.</div>',
+                text,
+            )
+        if obj.site.price_id == offer.pk:
+            return text
+        return format_html(
+            '{}<div class="seo-sub">Рабочая цена площадки сейчас другая — размещение'
+            " остаётся с этим продавцом и ценой; план «Экономики» по ним, пока нет"
+            " «Заплачено». Сменить продавца — полем «Продавец».</div>",
+            text,
+        )
 
     def change_view(
         self,
@@ -780,6 +982,10 @@ class PlacementAdmin(RecordAdmin):
 
     @admin.display(description="статус", ordering="status")
     def status_link(self, obj: Placement) -> SafeString:
+        # Фишки размещений площадки (ADR-073): каждая открывает своё размещение.
+        cell: status_chips.Cell | None = getattr(obj, "page_cell", None)
+        if cell is not None and cell.chips:
+            return status_chips.cell_html(cell)
         # Щелчок — панель с формой размещения, статус в ней первым (seo/panel.js);
         # с Ctrl и без скрипта — полная страница.
         url = reverse("admin:placements_placement_change", args=[obj.pk])
@@ -883,6 +1089,9 @@ class PlacementAdmin(RecordAdmin):
             self.message_user(request, "Выберите статус рядом с действием.", messages.WARNING)
             return
         changed = 0
+        # Только рабочий продукт шапки (ADR-073): чужие размещения не трогаем.
+        working = working_product_id(request)
+        queryset = queryset.filter(product_id=working) if working is not None else queryset.none()
         with stamped(source=StatusSource.FORM):
             for placement in queryset.exclude(status=status):
                 placement.status = WorkStatus(status)
@@ -926,10 +1135,15 @@ class PlacementAdmin(RecordAdmin):
         )
         self.message_user(request, f"Снова проверяется по расписанию: {count}.")
 
-    @admin.display(description="продавец", ordering="display_seller_name")
-    def working_seller_cell(self, obj: Placement) -> SafeString | str:
-        price = obj.site.price
-        seller = price.seller if price is not None else obj.seller
+    @admin.display(description="продавец", ordering="seller__name")
+    def seller_cell(self, obj: Placement) -> SafeString | str:
+        """Продавец размещения — свой, зафиксирован при заведении (ADR-073).
+
+        Смена рабочей цены площадки его не меняет — менять руками в карточке
+        размещения. Рабочая цена сейчас у другого продавца — подсказкой под именем.
+        """
+        seller = obj.seller
+        working = obj.site.price
         if seller is None:
             return ""
         link = format_html(
@@ -937,8 +1151,13 @@ class PlacementAdmin(RecordAdmin):
             reverse("admin:sites_seller_change", args=[seller.pk]),
             seller.name,
         )
-        if price is None:
-            return format_html('{}<div class="seo-sub">рабочая цена не выбрана</div>', link)
+        if working is not None and working.seller_id != seller.pk:
+            return format_html(
+                '{}<div class="seo-sub" title="Рабочая цена площадки сейчас у другого'
+                ' продавца; продавец размещения от этого не меняется">рабочая цена — {}</div>',
+                link,
+                working.seller.name,
+            )
         return link
 
     @admin.display(description="DR", ordering="site__latest__dr")
@@ -963,19 +1182,19 @@ class PlacementAdmin(RecordAdmin):
             "" if row.top_geo_traffic is None else row.top_geo_traffic,
         )
 
-    @admin.display(description="цена публикации", ordering="site__price__placement_cents")
+    @admin.display(description="цена публикации", ordering="deal_placement_cents")
     def publication_price_cell(self, obj: Placement) -> str:
-        price = obj.site.price
+        price = _deal_offer(obj)
         return money(price.placement_cents, price.currency) if price is not None else ""
 
-    @admin.display(description="цена анонса", ordering="site__price__announce_cents")
+    @admin.display(description="цена анонса", ordering="deal_announce_cents")
     def announce_price_cell(self, obj: Placement) -> str:
-        price = obj.site.price
+        price = _deal_offer(obj)
         return money(price.announce_cents, price.currency) if price is not None else ""
 
-    @admin.display(description="цена написания", ordering="site__price__writing_cents")
+    @admin.display(description="цена написания", ordering="deal_writing_cents")
     def writing_price_cell(self, obj: Placement) -> str:
-        price = obj.site.price
+        price = _deal_offer(obj)
         return money(price.writing_cents, price.currency) if price is not None else ""
 
     @admin.display(description="тип ссылки", ordering="link_type", empty_value="")
@@ -1094,8 +1313,49 @@ def _export_name(request: HttpRequest) -> str:
     return " ".join(parts)
 
 
-def _without(fields: Sequence[Any], name: str) -> tuple[Any, ...]:
-    return tuple(field for field in fields if field != name)
+def _without(fields: Sequence[Any], *names: str) -> tuple[Any, ...]:
+    return tuple(field for field in fields if field not in names)
+
+
+def _int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _deal_price(field: str) -> Subquery:
+    """Цена из предложения размещения (`repeat.offer_id`) — для сортировки колонок цены."""
+    return Subquery(SitePrice.objects.filter(pk=OuterRef("deal_offer_id")).values(field)[:1])
+
+
+def _deal_offer(obj: Placement) -> SitePrice | None:
+    """Предложение строки — размещения (ADR-073). Нет — цены пустые: цену чужого
+    продавца (рабочую цену площадки) не показываем."""
+    offer: SitePrice | None = getattr(obj, "page_offer", None)
+    return offer
+
+
+def _tabs_target(request: HttpRequest, obj: Placement | None) -> tuple[int, int] | None:
+    """Площадка и продукт вкладок: у записи — её, у новой — из адреса (?site=&product=)."""
+    if obj is not None:
+        return obj.site_id, obj.product_id
+    site, product = _int(request.GET.get("site")), _int(request.GET.get("product"))
+    return (site, product) if site is not None and product is not None else None
+
+
+def _offer_site(request: HttpRequest) -> int | None:
+    """Площадка новой формы, если у неё есть цены, — тогда в форме «Через кого»."""
+    # Только адрес формы: на открытии и на записи он один и тот же — поля те же.
+    site_id = _int(request.GET.get("site"))
+    if site_id is None:
+        return None
+    if (
+        SiteOffer.objects.filter(site_id=site_id).exists()
+        or Site.all_objects.filter(pk=site_id, price__isnull=False).exists()
+    ):
+        return site_id
+    return None
 
 
 def _when(moment: Any) -> str:

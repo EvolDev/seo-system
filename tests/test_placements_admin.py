@@ -206,7 +206,9 @@ def test_delete_page_deletes(admin_client: Client, site: Site, convertio: Produc
     assert Site.objects.filter(pk=site.pk).exists()
 
 
-class TestWorkingPriceColumns:
+class TestOfferColumns:
+    """Продавец и цены строки — предложения размещения, а не рабочей цены (ADR-073)."""
+
     def test_columns_use_working_price_and_current_metrics(
         self, admin_client: Client, site: Site, convertio: Product, django_assert_num_queries: Any
     ) -> None:
@@ -235,7 +237,7 @@ class TestWorkingPriceColumns:
         start = columns.index("site_link")
         assert columns[start : start + 6] == [
             "site_link",
-            "working_seller_cell",
+            "seller_cell",
             "status_link",
             "dr_cell",
             "traffic_cell",
@@ -250,20 +252,61 @@ class TestWorkingPriceColumns:
         row = next(iter(changelist.result_list))
         admin = changelist.model_admin
         # Все семь колонок читаются из одной выборки, без запросов на каждую строку.
+        # Продавец — свой у размещения; рабочая цена у другого — подсказкой.
+        # Цены — его продавца; у него их нет — пусто: чужую цену не показываем.
         with django_assert_num_queries(0):
-            seller_html = admin.working_seller_cell(row)
-            assert reverse("admin:sites_seller_change", args=[working.pk]) in seller_html
+            seller_html = admin.seller_cell(row)
+            assert reverse("admin:sites_seller_change", args=[historical.pk]) in seller_html
             assert "data-panel" in seller_html
-            assert ">Working seller</a>" in seller_html
+            assert ">Placement seller</a>" in seller_html
+            assert "рабочая цена — Working seller" in seller_html
             assert admin.dr_cell(row) == 59
             assert admin.traffic_cell(row) == 22961
             assert "US 13921" in admin.top_geo_cell(row)
-            assert admin.publication_price_cell(row) == "$123"
-            assert admin.announce_price_cell(row) == "$0"
-            assert admin.writing_price_cell(row) == "$45"
+            assert admin.publication_price_cell(row) == ""
+            assert admin.announce_price_cell(row) == ""
+            assert admin.writing_price_cell(row) == ""
             assert admin.paid_cell(row) == "€50"
+        # Продавца у размещения нет — цены рабочей цены площадки.
+        Placement.objects.update(seller=None)
+        row = next(
+            iter(
+                admin_client.get(reverse("admin:placements_placement_changelist"))
+                .context["cl"]
+                .result_list
+            )
+        )
+        assert admin.publication_price_cell(row) == "$123"
+        assert admin.announce_price_cell(row) == "$0"
+        assert admin.writing_price_cell(row) == "$45"
 
-    def test_without_working_price_shows_placement_seller_with_note(
+    def test_own_offer_wins_over_working_price(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        # Opentools.ai, 18.10.2026: размещение через одного продавца, рабочая цена
+        # потом у другого — строка остаётся с продавцом и ценой размещения.
+        own = Seller.objects.create(name="keterinapatra")
+        offer = SitePrice.objects.create(
+            site=site, seller=own, placement_cents=23000, writing_cents=2000, currency="USD"
+        )
+        Placement.objects.create(
+            site=site, product=convertio, seller=own, placement_type=offer.placement_type
+        )
+        other = SitePrice.objects.create(
+            site=site, seller=Seller.objects.create(name="Collaborator 2"), placement_cents=23800
+        )
+        site.price = other
+        site.save(update_fields=["price"])
+        response = admin_client.get(reverse("admin:placements_placement_changelist"))
+        row = next(iter(response.context["cl"].result_list))
+        admin = response.context["cl"].model_admin
+        assert row.deal_offer_id == offer.pk
+        assert ">keterinapatra</a>" in admin.seller_cell(row)
+        assert "рабочая цена — Collaborator 2" in admin.seller_cell(row)
+        assert admin.publication_price_cell(row) == "$230"
+        assert admin.writing_price_cell(row) == "$20"
+
+    def test_without_working_price_shows_placement_seller(
         self, admin_client: Client, site: Site, convertio: Product
     ) -> None:
         seller = Seller.objects.create(name="Placement seller")
@@ -271,9 +314,9 @@ class TestWorkingPriceColumns:
         response = admin_client.get(reverse("admin:placements_placement_changelist"))
         row = next(iter(response.context["cl"].result_list))
         admin = response.context["cl"].model_admin
-        seller_html = admin.working_seller_cell(row)
+        seller_html = admin.seller_cell(row)
         assert ">Placement seller</a>" in seller_html
-        assert "рабочая цена не выбрана" in seller_html
+        assert "рабочая цена" not in seller_html
         assert reverse("admin:sites_seller_change", args=[seller.pk]) in seller_html
         assert admin.publication_price_cell(row) == ""
         assert admin.announce_price_cell(row) == ""
@@ -295,19 +338,23 @@ class TestPlacementPrefillAndSellerFilter:
         site.save(update_fields=["price"])
         page = admin_client.get(ADD_URL, {"site": str(site.pk), "product": str(convertio.pk)})
         form = page.context["adminform"].form
-        assert str(form["seller"].value()) == str(seller.pk)
-        assert form["placement_type"].value() == "link_insertion"
+        # У площадки с ценами — «Через кого», рабочая выбрана заранее (ADR-073):
+        # продавца и услугу даёт предложение, своих полей у них в форме нет.
+        assert form["offer"].value() == price.pk
+        assert "seller" not in form.fields and "placement_type" not in form.fields
         assert form["status"].value() == "in_work"
         assert form["price_paid_cents"].value() is None
+        # Площадка без цен — продавец и услуга полями, из адреса.
+        bare = Site.objects.create(domain="bare.example")
         other = Seller.objects.create(name="Explicit seller")
         page = admin_client.get(
-            ADD_URL, {"site": str(site.pk), "seller": str(other.pk), "placement_type": "guest_post"}
+            ADD_URL, {"site": str(bare.pk), "seller": str(other.pk), "placement_type": "guest_post"}
         )
         form = page.context["adminform"].form
         assert str(form["seller"].value()) == str(other.pk)
         assert form["placement_type"].value() == "guest_post"
 
-    def test_filter_matches_working_or_placement_seller(
+    def test_filter_matches_placement_seller(
         self, admin_client: Client, site: Site, convertio: Product
     ) -> None:
         working = Seller.objects.create(name="Working seller")
@@ -320,11 +367,13 @@ class TestPlacementPrefillAndSellerFilter:
             site=Site.objects.create(domain="no-price.com"), product=convertio, seller=historical
         )
         url = reverse("admin:placements_placement_changelist")
-        for seller, expected in [(working, {first.pk}), (historical, {second.pk})]:
-            page = admin_client.get(url, {"seller": str(seller.pk)})
-            assert page.status_code == 200
-            assert {row.pk for row in page.context["cl"].result_list} == expected
-            assert f"{seller.name} (1)" in page.content.decode()
+        # Продавец размещения, а не рабочей цены площадки (ADR-073).
+        page = admin_client.get(url, {"seller": str(historical.pk)})
+        assert page.status_code == 200
+        assert {row.pk for row in page.context["cl"].result_list} == {first.pk, second.pk}
+        assert f"{historical.name} (2)" in page.content.decode()
+        page = admin_client.get(url, {"seller": str(working.pk)})
+        assert not list(page.context["cl"].result_list)
         page = admin_client.get(f"{url}?seller={working.pk}&seller={historical.pk}")
         assert {row.pk for row in page.context["cl"].result_list} == {first.pk, second.pk}
         assert not list(admin_client.get(url, {"seller": "-"}).context["cl"].result_list)

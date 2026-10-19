@@ -20,4 +20,6 @@ panel_full_url (полная страница); panel_title_url — заголо
     {% screen_help %}
     <button type="button" class="seo-panel-close" data-panel-close aria-label="Закрыть панель" title="Закрыть (Esc)">✕</button>
   </div>
+  {# Вкладки площадки (ADR-073): «Площадка · №1 · №2 · + Ещё размещение». #}
+  {% if panel_tabs %}{% include "admin/placements/placement/tabs.html" with tabs=panel_tabs %}{% endif %}
 </header>

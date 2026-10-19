@@ -25,6 +25,7 @@ from django.contrib.admin.views.main import PAGE_VAR, ChangeList
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.urls import reverse
 from django.utils.text import capfirst
 
 from config import deletion
@@ -372,6 +373,10 @@ class ModelAdmin(_ModelAdmin):
         """Заголовок панели — запись; у размещения, например, «площадка · продукт»."""
         return str(obj)
 
+    def panel_add_title(self, request: HttpRequest) -> str:
+        """Заголовок панели новой записи: «Размещение — новая запись»."""
+        return f"{capfirst(str(self.model._meta.verbose_name))} — новая запись"
+
     def render_change_form(
         self,
         request: HttpRequest,
@@ -387,7 +392,7 @@ class ModelAdmin(_ModelAdmin):
             name = capfirst(str(self.model._meta.verbose_name))
             context.update(
                 {
-                    "panel_title": f"{name} — новая запись" if add else self.panel_title(obj),
+                    "panel_title": self.panel_add_title(request) if add else self.panel_title(obj),
                     "panel_sub": "" if add else name,
                     # Тот же адрес без заголовка — полная страница формы.
                     "panel_full_url": request.get_full_path(),
@@ -410,11 +415,12 @@ class ModelAdmin(_ModelAdmin):
             return self._panel_saved(request, obj, "сохранено")
         return super().response_change(request, obj)
 
-    def _panel_saved(self, request: HttpRequest, obj: Any, done: str) -> JsonResponse:
+    def _panel_saved(self, request: HttpRequest, obj: Any, done: str, **extra: Any) -> JsonResponse:
         """Записано из панели: подпись для сообщения вместо перехода на список.
 
         Сообщения, которые положил код записи (`message_user`), — в ответ:
         иначе они всплыли бы на следующем экране, к которому не относятся.
+        `next` в `extra` — адрес, который панель откроет после записи.
         """
         name = capfirst(str(self.model._meta.verbose_name))
         notes = [str(note) for note in messages.get_messages(request)]
@@ -424,8 +430,31 @@ class ModelAdmin(_ModelAdmin):
                 "pk": obj.pk,
                 "message": f"{name} «{self.panel_title(obj)}» — {done}.",
                 "notes": notes,
+                **extra,
             }
         )
+
+    def response_delete(self, request: HttpRequest, obj_display: str, obj_id: Any) -> HttpResponse:
+        # Удалили из панели (корзина на вкладке размещения, ADR-073): панель
+        # закроется и перечитает список — строки удалённой записи там больше нет.
+        if self.in_panel(request):
+            name = capfirst(str(self.model._meta.verbose_name))
+            return JsonResponse(
+                {"saved": True, "deleted": True, "message": f"{name} «{obj_display}» — удалено."}
+            )
+        return super().response_delete(request, obj_display, obj_id)
+
+    def delete_view(
+        self, request: HttpRequest, object_id: str, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        extra = dict(extra_context or {})
+        if self.in_panel(request):
+            # «Отмена» в панели — назад к записи, а не шаг назад по истории страницы.
+            opts = self.model._meta
+            extra["panel_cancel_url"] = reverse(
+                f"admin:{opts.app_label}_{opts.model_name}_change", args=[object_id]
+            )
+        return super().delete_view(request, object_id, extra)
 
 
 class TabularInline(_TabularInline):

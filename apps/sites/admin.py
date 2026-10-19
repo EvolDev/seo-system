@@ -11,7 +11,7 @@ ADR-043; правила смены цены — `apps/sites/offers.py`. Серо
 
 import datetime as dt
 import math
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from collections.abc import Set as AbstractSet
 from contextlib import suppress
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -44,7 +44,7 @@ from apps.content.admin import (
 )
 from apps.content.domain_settings import gray_terms, gray_zones
 from apps.content.models import DomainSetting
-from apps.placements import invoices, other_products
+from apps.placements import invoices, other_products, repeat, status_chips
 from apps.placements.models import Invoice, InvoiceStatus, Placement
 from apps.sites import ahrefs_domains, ahrefs_links, countries, gray_scan, offers, rating, sellers
 from apps.sites import export as site_export
@@ -55,7 +55,6 @@ from apps.sites.display import (
     delta_html,
     delta_text,
     domain_tools_html,
-    placement_card_html,
     price_html,
     rating_html,
     rating_title,
@@ -386,9 +385,20 @@ class SiteAdmin(RecordAdmin):
             return HttpResponse(status=403)
         partial = is_partial(request)
         gray = _gray_context(site, gray_form)
+        working = working_product_id(request)
         context = {
             **self.admin_site.each_context(request),
-            **_card_context(site, working_product_id(request), request.user),
+            **_card_context(site, working, request.user),
+            # Вкладки «Площадка · №1 · №2 · + Ещё размещение» (ADR-073).
+            "site_tabs": repeat.tabs(
+                site.pk,
+                working,
+                "site",
+                can_add=request.user.has_perm("placements.add_placement"),
+                can_delete=request.user.has_perm("placements.delete_placement"),
+            )
+            if working is not None
+            else None,
             "gray": gray,
             "price_form": price_form,
             "price_offer_id": price_form.data.get("offer") if price_form is not None else None,
@@ -598,6 +608,13 @@ def _card_context(
     withdrawn_at = latest.withdrawn_at if latest is not None else None
     status_history = site_history(site.pk)
     articles = other_products.articles_by_product(site.pk)
+    # Статус у продукта с размещениями — их фишки (ADR-073), за всё время.
+    chips = status_chips.product_cells(site.pk)
+    # Размещение каждого продукта на площадке — у чужих продуктов ссылкой «только
+    # просмотр» (ADR-073): статью и карточку видно, менять — переключив продукт.
+    placement_of = {
+        product_id: pk for product_id, _, pk in other_products.by_site([site.pk]).get(site.pk, [])
+    }
     # Ссылается ли площадка на продукт — по его выгрузке Ahrefs (ADR-051).
     refs = {ref.product_id: ref for ref in ProductRefDomain.objects.filter(domain=site.domain)}
     notes = note_rows(site.notes.select_related("author", "product").order_by("-created_at", "-pk"))
@@ -621,6 +638,17 @@ def _card_context(
                 "history": status_history.get(row.pk, []),
                 "articles": articles.get(row.product_id, []),
                 "ref": refs.get(row.product_id),
+                # Решение меняют только у рабочего продукта шапки (ADR-073).
+                "editable": row.product_id == working_product,
+                "chips": status_chips.cell_html(chips[row.product_id])
+                if row.product_id in chips and chips[row.product_id].placements
+                else "",
+                "decision_label": decision_label(
+                    row.status, row.product_id in chips and chips[row.product_id].placements > 0
+                ),
+                "placement_url": other_products.card_url(placement_of[row.product_id])
+                if row.product_id in placement_of
+                else "",
             }
             for row in rows
         ],
@@ -865,13 +893,45 @@ def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
 # С какого статуса начинается новая строка кнопок: «не взяли» · путь в работу · отказы.
 # Девять кнопок в один ряд делают панель шире экрана.
 SITE_STATUS_ROWS = (WorkStatus.IN_WORK, WorkStatus.DISCARDED)
+# Свой статус площадки (ADR-073) — пока размещений продукта нет. В работу берут
+# «Взять в размещение», дальше статус ведут размещения.
+OWN_STATUSES = (WorkStatus.NEW, WorkStatus.VIEWED, *status_chips.STOPS)
+WORKING_LABEL = "Работаем — по размещениям"
+
+
+def decision_choices(status: str, placements: Sequence[Placement]) -> list[tuple[str, str]]:
+    """Кнопки решения по площадке у продукта (ADR-073).
+
+    Размещений нет — свой статус: Новая, Просмотрено и «больше не работаем».
+    Размещения есть — статус идёт за ними: «Работаем — по размещениям» и
+    «больше не работаем»; «работаем» после «больше не работаем» ставит статус
+    по размещениям (`repeat.implied_status`). Нынешний статус, которого среди
+    кнопок нет (старые данные: «В работе» без размещений), остаётся кнопкой —
+    правка одного комментария его не меняет.
+    """
+    stops = [(str(choice), str(choice.label)) for choice in status_chips.STOPS]
+    if placements:
+        work = status if status not in status_chips.STOPS else repeat.implied_status(placements)
+        return [(str(work), WORKING_LABEL), *stops]
+    own = [(str(choice), str(choice.label)) for choice in (WorkStatus.NEW, WorkStatus.VIEWED)]
+    if status and status not in OWN_STATUSES:
+        own.append((status, str(WorkStatus(status).label)))
+    return [*own, *stops]
+
+
+def decision_label(status: str, placements: bool) -> str:
+    """Кнопка решения в карточке площадки: по размещениям — «больше не работаем»."""
+    if not placements:
+        return "Сменить статус"
+    return "Сменить решение" if status in status_chips.STOPS else "Больше не работаем…"
 
 
 class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
     """Решение по площадке: статус кнопками по порядку и комментарий.
 
-    Панель «Решение по площадке» в «Площадках»; у полной формы решения те же
-    кнопки (`ProductSiteAdmin.formfield_for_dbfield`).
+    Панель «Решение по площадке» в «Площадках» и полная форма решения
+    (`ProductSiteAdmin.form`). Кнопки — по размещениям продукта на площадке
+    (`decision_choices`, ADR-073).
     """
 
     class Meta:
@@ -882,6 +942,15 @@ class DecisionForm(forms.ModelForm):  # type: ignore[type-arg]
             "comment": forms.Textarea(attrs={"rows": 3}),
         }
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        row = self.instance
+        self.placements = repeat.of_site(row.site_id, row.product_id) if row.pk is not None else []
+        if "status" in self.fields:
+            self.fields["status"].choices = decision_choices(  # type: ignore[attr-defined]
+                row.status, self.placements
+            )
+
 
 @admin.register(ProductSite)
 class ProductSiteAdmin(RecordAdmin):
@@ -891,6 +960,7 @@ class ProductSiteAdmin(RecordAdmin):
     seo/panel.js, E9-11); полная форма — здесь, с теми же кнопками статуса.
     """
 
+    form = DecisionForm
     list_display = ("site", "product", "status", "imported_undecided", "updated_at")
     list_filter = (WorkingProductFilter, "status", "imported_undecided")
     search_fields = ("site__domain",)
@@ -899,6 +969,13 @@ class ProductSiteAdmin(RecordAdmin):
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        # Решение другого продукта — только просмотр (ADR-073): меняют, переключив
+        # продукт в шапке, — чтобы не задеть его случайно.
+        if obj is not None and obj.product_id != working_product_id(request):
+            return False
+        return super().has_change_permission(request, obj)
 
     def formfield_for_dbfield(
         self, db_field: "models.Field[Any, Any]", request: HttpRequest, **kwargs: Any
@@ -940,13 +1017,31 @@ class ProductSiteAdmin(RecordAdmin):
             _note_rejection(request, row, form.changed_data)
             label = f"{row.site.domain} · {row.product.name} — {row.get_status_display()}"
             return JsonResponse({"saved": True, "message": label})
+        # Решение — часть вкладки «Площадка» (ADR-073): те же вкладки сверху; при
+        # размещениях — их фишки, без них — «Взять в размещение».
+        cell = status_chips.product_cells(row.site_id).get(row.product_id)
+        may_take = (
+            not form.placements
+            and row.status != WorkStatus.BLACKLISTED
+            and request.user.has_perm("placements.add_placement")
+        )
         context = {
             "form": form,
             "row": row,
             "action_url": reverse("admin:sites_productsite_decision", args=[row.pk]),
             "panel_title": f"{row.site.domain} · {row.product.name}",
             "panel_sub": "Решение по площадке",
-            "panel_links": [("Карточка площадки", card_url(row.site_id), True)],
+            "panel_tabs": repeat.tabs(
+                row.site_id,
+                row.product_id,
+                "site",
+                can_add=request.user.has_perm("placements.add_placement"),
+                can_delete=request.user.has_perm("placements.delete_placement"),
+            ),
+            "placement_chips": status_chips.cell_html(cell)
+            if cell is not None and cell.placements
+            else "",
+            "take_url": other_products.add_url(row.site_id, row.product_id) if may_take else "",
             "panel_full_url": change_url,
             "panel_can_save": True,
         }
@@ -2086,8 +2181,9 @@ class SellerActionForm(helpers.ActionForm):
         empty_label="продавец…",
         widget=forms.Select(attrs={"data-search": "Найти продавца…"}),
     )
+    # Свой статус площадки (ADR-073): статусы работы ведут размещения.
     status = forms.ChoiceField(
-        choices=[("", "статус…"), *WorkStatus.choices],
+        choices=[("", "статус…"), *((str(s), str(s.label)) for s in OWN_STATUSES)],
         required=False,
         label="статус",
     )
@@ -2118,9 +2214,17 @@ class OffersChangeList(PerPageChangeList):
         super().get_results(request)
         by_site = offers.current_offers(row.site_id for row in self.result_list)
         placed = other_products.by_site(row.site_id for row in self.result_list)
+        # Колонка «статус» — фишки размещений рабочего продукта за период
+        # (ADR-073), без размещений — решение с датой: два запроса на страницу.
+        cells = status_chips.cells(
+            (row.site_id for row in self.result_list),
+            working_product_id(request),
+            status_chips.period_of(self),
+        )
         for row in self.result_list:
             row.page_offers = by_site.get(row.site_id, [])
             row.page_products = placed.get(row.site_id, [])
+            row.page_cell = cells.get(row.site_id)
         # «Домены для Ahrefs» выбранного списка — ссылка над таблицей, без лишнего запроса.
         self.ahrefs_url = None
         for spec in self.filter_specs:
@@ -2166,7 +2270,8 @@ class ProductSiteLatestAdmin(RecordAdmin):
         WorkedFilter,
         RefsFilter,
         SaleFilter,
-        "status",
+        # Статус и «Период ▾» — полосой над списком, по размещениям (ADR-073).
+        status_chips.SiteStatusFilter,
         OffersFilter,
         SellerFilter,
         WorkingLinkTypeFilter,
@@ -2201,7 +2306,12 @@ class ProductSiteLatestAdmin(RecordAdmin):
     class Media:
         js = (Js("seo/country-picker.js"), Js("seo/action-fields.js"))
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
-            "all": (Css("seo/offers.css"), Css("seo/gray.css"), Css("flags/sprite-hq.css"))
+            "all": (
+                Css("seo/offers.css"),
+                Css("seo/gray.css"),
+                Css("flags/sprite-hq.css"),
+                Css("seo/placement-tabs.css"),
+            )
         }
 
     def has_add_permission(self, request: HttpRequest) -> bool:
@@ -2307,39 +2417,50 @@ class ProductSiteLatestAdmin(RecordAdmin):
 
     @admin.display(description="домен", ordering="domain")
     def domain_link(self, obj: ProductSiteLatest) -> SafeString:
-        # Карточка открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
-        # скрипта — отдельной страницей. Рядом — открыть сайт, скопировать домен
-        # и размещение рабочего продукта: его карточка или пустая форма (E1-20).
+        # Запись открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
+        # скрипта — отдельной страницей. Рядом — открыть сайт, скопировать домен.
         found: list[other_products.Row] = getattr(obj, "page_products", [])
         placement = other_products.own(found, obj.product_id)
-        tool = (
-            placement_card_html(other_products.card_url(placement))
-            if placement is not None
-            else take_placement_html(other_products.add_url(obj.site_id, obj.product_id))
-        )
+        # Домен открывает карточку площадки — и при размещениях (пользователь
+        # 19.10.2026: в «Площадках» сначала площадка); размещения — фишками в
+        # «статусе» и вкладками в панели. Без размещений рядом — «Взять в
+        # размещение», у чёрного списка — нет: размещение не завести.
+        url, title = card_url(obj.site_id), "Карточка площадки"
+        tool: SafeString | str = ""
+        if placement is None and obj.status != WorkStatus.BLACKLISTED:
+            tool = take_placement_html(other_products.add_url(obj.site_id, obj.product_id))
         return format_html(
-            '{}<a href="{}" data-panel title="Карточка площадки">{}</a>{}',
+            '{}<a href="{}" data-panel title="{}">{}</a>{}',
             rating_html(
                 reverse("admin:sites_site_rate", args=[obj.site_id]),
                 obj.rating_avg,
                 obj.rating_count,
                 getattr(obj, rating.MINE, None),
             ),
-            card_url(obj.site_id),
+            url,
+            title,
             obj.domain,
             domain_tools_html(obj.domain, tool),
         )
 
     @admin.display(description="статус", ordering="status")
     def status_link(self, obj: ProductSiteLatest) -> SafeString:
-        # Решение открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
-        # скрипта — полной формой.
-        # data-seo-field — после записи в панели статус меняется здесь сразу.
+        """Фишки размещений рабочего продукта (ADR-073), без них — решение с датой.
+
+        Решение открывается панелью справа (seo/panel.js, E9-11), с Ctrl и без
+        скрипта — полной формой; data-seo-field — после записи в панели статус
+        меняется здесь сразу.
+        """
+        cell: status_chips.Cell | None = getattr(obj, "page_cell", None)
+        if cell is not None and cell.placements:
+            return status_chips.cell_html(cell)
+        when = status_chips.decided_html(cell.decided if cell is not None else None)
         return format_html(
-            '<a href="{}" data-panel="{}" title="Сменить статус" data-seo-field="status">{}</a>',
+            '<a href="{}" data-panel="{}" title="Сменить статус" data-seo-field="status">{}</a>{}',
             reverse("admin:sites_productsite_change", args=[obj.pk]),
             reverse("admin:sites_productsite_decision", args=[obj.pk]),
             obj.get_status_display(),
+            when,
         )
 
     @admin.display(description="DR", ordering="dr")
@@ -2508,37 +2629,62 @@ class ProductSiteLatestAdmin(RecordAdmin):
     @admin.action(description="Взять в размещение", permissions=["take_placement"])
     def take_placement_action(
         self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
-    ) -> None:
-        """Заводит размещения рабочего продукта отмеченным площадкам (E1-20).
+    ) -> HttpResponse | None:
+        """Заводит размещения рабочего продукта отмеченным площадкам (E1-20, ADR-073).
 
-        Статус новой записи — «В работе» (решение пользователя 07.10.2026); за
-        ним идёт статус площадки, это делает `Placement.save()` (ADR-062). У кого
-        размещение рабочего продукта уже есть, того пропускаем.
+        Сначала окно: каким площадкам заведём размещение, где размещения уже есть
+        (ещё одно — только галочкой, может идти параллельно с идущим) и кого
+        пропустим — чёрный список. «Завести» — второй запрос с `post`: размещения
+        «В работе» от рабочей цены, сотрудник — тот, кто вошёл; статус площадки
+        двигает `Placement.save()` (ADR-062).
         """
         working = working_product_id(request)
         if working is None:
             self.message_user(request, "Сначала выберите продукт в шапке.", messages.WARNING)
-            return
+            return None
         sites = list(dict.fromkeys(queryset.values_list("site_id", flat=True)))
-        have = set(
-            Placement.objects.filter(site_id__in=sites, product_id=working).values_list(
-                "site_id", flat=True
-            )
+        if request.POST.get("post") != "yes":
+            return self._take_confirmation(request, queryset, sites, working)
+        again = {int(value) for value in request.POST.getlist("again") if value.isdigit()}
+        result = repeat.take(sites, working, again=again, employee=request.user)
+        parts = [f"Взято в размещение: {len(result.created)}"]
+        if result.again:
+            parts.append(f"ещё одно: {len(result.again)}")
+        if result.skipped:
+            parts.append(f"пропущено, размещение уже есть: {result.skipped}")
+        if result.blacklisted:
+            parts.append(f"пропущено, чёрный список: {result.blacklisted}")
+        done = result.created or result.again
+        self.message_user(
+            request, " · ".join(parts) + ".", messages.SUCCESS if done else messages.WARNING
         )
-        fresh = [site_id for site_id in sites if site_id not in have]
-        with stamped(source=StatusSource.FORM):
-            for site in Site.all_objects.filter(pk__in=fresh).select_related("price"):
-                price = site.price
-                Placement.objects.create(
-                    site=site,
-                    product_id=working,
-                    seller_id=price.seller_id if price is not None else None,
-                    placement_type=price.placement_type if price is not None else None,
-                )
-        text = f"Взято в размещение: {len(fresh)}."
-        if have:
-            text += f" Пропущено, размещение уже есть: {len(have)}."
-        self.message_user(request, text, messages.SUCCESS if fresh else messages.WARNING)
+        return None
+
+    def _take_confirmation(
+        self,
+        request: HttpRequest,
+        queryset: models.QuerySet[ProductSiteLatest],
+        sites: list[int],
+        working: int,
+    ) -> HttpResponse:
+        """Окно «Взять в размещение»: три группы площадок, ещё одно — галочками."""
+        found = repeat.candidates(sites, working)
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Взять в размещение",
+            "opts": self.model._meta,
+            "product": Product.objects.filter(pk=working).first(),
+            "fresh": [c for c in found if not c.blacklisted and not c.count],
+            "existing": [c for c in found if not c.blacklisted and c.count],
+            "blocked": [c for c in found if c.blacklisted],
+            "selected": [str(pk) for pk in queryset.values_list("pk", flat=True)],
+            "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+            # «Отмена» — тот же список с теми же фильтрами.
+            "back_url": request.get_full_path(),
+        }
+        return TemplateResponse(
+            request, "admin/sites/productsitelatest/take_placement.html", context
+        )
 
     def has_take_placement_permission(self, request: HttpRequest) -> bool:
         return bool(request.user.has_perm("placements.add_placement"))
@@ -2550,24 +2696,49 @@ class ProductSiteLatestAdmin(RecordAdmin):
         """Статус отмеченным строкам — выбором рядом с действием (ADR-062).
 
         Статус у площадки свой на каждый продукт, поэтому меняем строки
-        «продукт × площадка» того продукта, который открыт на экране.
+        «продукт × площадка» того продукта, который открыт на экране. Только
+        свой статус площадки (ADR-073): «Новая» и «Просмотрено» — площадкам без
+        размещений, у остальных статус ведут размещения; «больше не работаем» —
+        любым.
         """
         status = request.POST.get("status") or ""
-        if status not in WorkStatus.values:
+        if status not in OWN_STATUSES:
             self.message_user(request, "Выберите статус рядом с действием.", messages.WARNING)
             return
-        rows = list(queryset.values_list("site_id", "product_id"))
-        with stamped(source=StatusSource.FORM):
-            changed = 0
-            for product_id in {product for _, product in rows}:
-                sites = [site for site, product in rows if product == product_id]
-                changed += (
-                    ProductSite.objects.filter(site_id__in=sites, product_id=product_id)
-                    .exclude(status=status)
-                    .update(status=status, updated_at=timezone.now())
+        # Только рабочий продукт шапки (ADR-073): статус чужого продукта меняют,
+        # переключив продукт, — чтобы не задеть его случайно.
+        working = working_product_id(request)
+        if working is None:
+            self.message_user(request, "Сначала выберите продукт в шапке.", messages.WARNING)
+            return
+        other = queryset.exclude(product_id=working).count()
+        if other:
+            self.message_user(
+                request,
+                f"Пропущено строк другого продукта: {other} — переключите продукт в шапке.",
+                messages.WARNING,
+            )
+        sites = list(queryset.filter(product_id=working).values_list("site_id", flat=True))
+        busy: set[int] = set()
+        if status not in status_chips.STOPS:
+            busy = set(
+                Placement.objects.filter(site_id__in=sites, product_id=working).values_list(
+                    "site_id", flat=True
                 )
+            )
+        with stamped(source=StatusSource.FORM):
+            changed = (
+                ProductSite.objects.filter(
+                    site_id__in=[site for site in sites if site not in busy], product_id=working
+                )
+                .exclude(status=status)
+                .update(status=status, updated_at=timezone.now())
+            )
         label = WorkStatus(status).label
-        self.message_user(request, f"Статус «{label}» поставлен: {changed}.", messages.SUCCESS)
+        message = f"Статус «{label}» поставлен: {changed}."
+        if busy:
+            message += f" Пропущено, статус ведут размещения: {len(busy)}."
+        self.message_user(request, message, messages.SUCCESS)
 
     def has_change_status_permission(self, request: HttpRequest) -> bool:
         # Строка списка — представление; статус меняется у «продукт × площадка».

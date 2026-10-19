@@ -16,7 +16,10 @@
 «Просмотрено».
 
 Правила — только для системы: размещения (`Placement.save()`), импорта
-таблицы, аудита (E4). Человек в окне статуса ставит любой статус.
+таблицы, аудита (E4). Человек ставит площадке свой статус — Новая,
+Просмотрено, Отбрасываю, Отказ, Чёрный список; статусы работы ведут её
+размещения (ADR-073). Размещение, заведённое человеком, снимает «Отбрасываю»
+и «Отказ» (`reopen`): взял площадку в работу — значит, снова работаем.
 """
 
 from django.db import transaction
@@ -73,4 +76,22 @@ def advance(
         changed = ProductSite.objects.filter(
             site_id=site_id, product_id=product_id, status__in=replaceable(target, fact=True)
         ).update(status=target, imported_undecided=False, updated_at=timezone.now())
+    return changed > 0
+
+
+def reopen(site_id: int, product_id: int, *, placement_id: int) -> bool:
+    """Человек завёл размещение: «Отбрасываю» и «Отказ» площадки → «В работе» (ADR-073).
+
+    Только для размещений, заведённых человеком: форма «+ Ещё размещение» и
+    «Взять в размещение» для отмеченных. Импорт таблицы так не делает — там
+    правила `advance`. Чёрный список не снимается: с ним размещение не завести.
+    True — статус сменился; в истории — «по размещению» `placement_id`.
+    """
+    with (
+        transaction.atomic(),
+        stamped(source=StatusSource.PLACEMENT, placement_id=placement_id),
+    ):
+        changed = ProductSite.objects.filter(
+            site_id=site_id, product_id=product_id, status__in=OVERRIDDEN_BY_FACT
+        ).update(status=WorkStatus.IN_WORK, imported_undecided=False, updated_at=timezone.now())
     return changed > 0

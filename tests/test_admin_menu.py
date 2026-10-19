@@ -189,16 +189,23 @@ def test_status_fields_stay_dropdowns(admin_client: Client) -> None:
     response = admin_client.get(reverse("admin:sites_productsite_change", args=[row.pk]))
     status = response.context["adminform"].form.fields["status"]
     # С E9-11 — кнопками по порядку (config/forms.py); это тоже выбор из списка.
+    # Размещений нет — свой статус площадки (ADR-073).
     assert isinstance(status.widget, ChoiceButtons)
-    assert [value for value, _ in status.choices] == [value for value, _ in SiteStatus.choices]
+    assert [value for value, _ in status.choices] == [
+        SiteStatus.NEW,
+        SiteStatus.VIEWED,
+        SiteStatus.DISCARDED,
+        SiteStatus.REJECTED,
+        SiteStatus.BLACKLISTED,
+    ]
 
     response = admin_client.post(
         reverse("admin:sites_productsite_change", args=[row.pk]),
-        {"status": SiteStatus.IN_WORK, "comment": "", "content_profile": "null"},
+        {"status": SiteStatus.VIEWED, "comment": "", "content_profile": "null"},
     )
     assert response.status_code == 302
     row.refresh_from_db()
-    assert row.status == SiteStatus.IN_WORK
+    assert row.status == SiteStatus.VIEWED
 
     placement = admin_client.get(reverse("admin:placements_placement_add"))
     assert isinstance(placement.context["adminform"].form.fields["status"].widget, ChoiceButtons)

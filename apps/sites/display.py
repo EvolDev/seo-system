@@ -146,26 +146,13 @@ _COPY_ICON = mark_safe(
 )
 
 
-# Значки размещения (E1-20): «взять в размещение» — лист со знаком плюс,
-# «карточка размещения» — лист с текстом, «убрать из размещений» — корзина.
+# Значок «взять в размещение» (E1-20) — лист со знаком плюс. Когда размещение
+# есть, домен открывает его, а удаляют размещение на его вкладке (ADR-073).
 _PLACE_ICON = mark_safe(
     '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none"'
     ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
     '<path d="M14 3v5h5M12 11v6M9 14h6"/></svg>'
-)
-_PLACEMENT_ICON = mark_safe(
-    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none"'
-    ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
-    '<path d="M14 3v5h5M9 13h6M9 17h4"/></svg>'
-)
-_REMOVE_ICON = mark_safe(
-    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none"'
-    ' stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M4 7h16M10 11v6M14 11v6"/>'
-    '<path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'
-    "</svg>"
 )
 
 
@@ -284,26 +271,6 @@ def take_placement_html(url: str) -> SafeString:
         ' aria-label="Взять в размещение">{}</a>',
         url,
         _PLACE_ICON,
-    )
-
-
-def placement_card_html(url: str) -> SafeString:
-    """Значок «карточка размещения» — когда размещение рабочего продукта уже есть."""
-    return format_html(
-        '<a class="seo-icon-btn" href="{}" data-panel title="Карточка размещения"'
-        ' aria-label="Карточка размещения">{}</a>',
-        url,
-        _PLACEMENT_ICON,
-    )
-
-
-def remove_placement_html(url: str) -> SafeString:
-    """Значок «убрать из размещений»: страница подтверждения удаления (ADR-060)."""
-    return format_html(
-        '<a class="seo-icon-btn" href="{}" title="Убрать из размещений"'
-        ' aria-label="Убрать из размещений">{}</a>',
-        url,
-        _REMOVE_ICON,
     )
 
 

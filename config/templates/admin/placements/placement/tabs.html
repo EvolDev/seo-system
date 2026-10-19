@@ -1,0 +1,24 @@
+{% comment %}
+Вкладки площадки (ADR-073) — в шапке панели размещения и карточки площадки, на
+полной странице — над формой. «Площадка» — карточка площадки; дальше размещения
+продукта на ней по порядку заведения: «№2 · Collaborator», под ним статус и
+когда его поставили; «Ещё N ▾» — ранние, когда их много; «+ Ещё размещение» —
+новое (форма с выбором «Через кого»). Красная корзина на вкладке — удаление
+этого размещения с подтверждением, что уйдёт вместе с ним.
+Все вкладки — ссылки с data-panel: открываются в той же панели (seo/panel.js).
+Контекст: tabs — apps.placements.repeat.Tabs.
+{% endcomment %}
+<nav class="seo-ptabs" aria-label="Площадка и её размещения">
+  <a class="seo-ptab{% if tabs.site_selected %} seo-ptab-on{% endif %}" href="{{ tabs.site_url }}" data-panel{% if tabs.site_selected %} aria-current="page"{% endif %}><b>Площадка</b><span>{{ tabs.site_sub }}</span></a>
+  {% if tabs.hidden %}<details class="seo-ptab seo-ptab-more" data-seo-menu>
+    <summary title="Ранние размещения"><b>Ещё {{ tabs.hidden|length }} ▾</b><span>{{ tabs.hidden_range }}</span></summary>
+    <ul class="seo-ptab-menu">{% for tab in tabs.hidden %}
+      <li><a href="{{ tab.url }}" data-panel><b>№{{ tab.number }}</b> <span class="seo-ptab-{{ tab.tone }}">{{ tab.status }}</span>{% if tab.when %} · {{ tab.when|date:"d.m.y" }}{% endif %} <span class="seo-sub">{{ tab.seller }}</span></a></li>{% endfor %}
+    </ul>
+  </details>{% endif %}
+  {% for tab in tabs.shown %}<span class="seo-ptab seo-ptab-deal{% if tab.selected %} seo-ptab-on{% endif %}">
+    <a href="{{ tab.url }}" data-panel{% if tab.selected %} aria-current="page"{% endif %}><b>№{{ tab.number }} · {{ tab.seller }}</b><span><i class="seo-ptab-{{ tab.tone }}">{{ tab.status }}</i>{% if tab.when %} · {{ tab.when|date:"d.m.y" }}{% endif %}</span></a>
+    {% if tab.delete_url %}<a class="seo-ptab-trash" href="{{ tab.delete_url }}" data-panel title="Удалить размещение №{{ tab.number }}" aria-label="Удалить размещение №{{ tab.number }}"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></a>{% endif %}
+  </span>{% endfor %}
+  {% if tabs.add_url %}<a class="seo-ptab seo-ptab-add{% if tabs.add_selected %} seo-ptab-on{% endif %}" href="{{ tabs.add_url }}" data-panel>{{ tabs.add_label }}</a>{% elif tabs.blocked %}<span class="seo-ptab seo-ptab-add seo-ptab-off" title="{{ tabs.blocked }}">{{ tabs.add_label }}</span>{% endif %}
+</nav>

@@ -3,16 +3,35 @@
 порядку и комментарий. Панель и отправку ведёт seo/panel.js; стили и
 скрипт кнопок — media формы, первыми: панель подгрузит их до показа.
 Полная форма — «Открыть полностью».
-{% endcomment %}{{ form.media }}
+
+Повторные размещения (ADR-073): сверху вкладки площадки. Размещения есть —
+их фишки и только «работаем» или «больше не работаем»; нет — свой статус и
+«Взять в размещение» (форма нового размещения в той же панели).
+{% endcomment %}{% load seo_assets %}{{ form.media }}
+<link rel="stylesheet" href="{% asset 'seo/placement-tabs.css' %}">
 {% include "admin/panel_head.html" %}
 <form method="post" action="{{ action_url }}" class="seo-decision-form" data-decision-form>
   {% csrf_token %}
   {% if form.non_field_errors %}<div class="errornote">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+  {% if placement_chips %}
   <div class="seo-decision-row">
-    <div class="seo-decision-label" id="decision-status-label">Статус</div>
+    <div class="seo-decision-label">Размещения</div>
+    <div>{{ placement_chips }}</div>
+    <div class="help">Статус площадки — это статусы её размещений: меняется во вкладке размещения.</div>
+  </div>
+  {% endif %}
+  <div class="seo-decision-row">
+    <div class="seo-decision-label" id="decision-status-label">{% if placement_chips %}Решение{% else %}Статус{% endif %}</div>
     <div aria-labelledby="decision-status-label">{{ form.status }}</div>
     {{ form.status.errors }}
+    {% if placement_chips %}<div class="help">«Больше не работаем» видно в списках красной фишкой после размещений. Новое размещение снимает «Отбрасываю» и «Отказ»; чёрный список не снимает и не даёт завести.</div>{% endif %}
   </div>
+  {% if take_url %}
+  <div class="seo-decision-row">
+    <div><a class="seo-btn" href="{{ take_url }}" data-panel>Взять в размещение</a></div>
+    <div class="help">Заведёт размещение №1 со статусом «В работе» — дальше статус площадки ведёт оно.</div>
+  </div>
+  {% endif %}
   <div class="seo-decision-row">
     <label class="seo-decision-label" for="{{ form.comment.id_for_label }}">Комментарий</label>
     {{ form.comment }}

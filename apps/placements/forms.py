@@ -12,6 +12,11 @@
 вариантов; выбор подставляет ставку в пустую «Цену копирайтера»
 (seo/copywriter-pick.js), без скрипта — при сохранении (`clean`).
 
+Новое размещение на площадке (ADR-073): «Через кого» — текущие предложения
+продавцов площадки, рабочая цена выбрана заранее; продавец, услуга, тип ссылки
+и само предложение берутся из выбранного. «Сделать эту цену рабочей» — по
+желанию. Площадку из чёрного списка продукта форма не берёт.
+
 Ссылка размещения (E3-05, ADR-059, ADR-069): анкор — одно поле с поиском по
 анкорам продукта (seo/anchors.js), «куда ведёт» подставляется из анкора и
 правится; текст на сайте — свой (разбавленный анкор) или текст анкора, вид
@@ -29,7 +34,7 @@ from django.utils import timezone
 from apps.content.models import Copywriter
 from apps.keywords import matching
 from apps.keywords.models import NAKED_TYPES, AnchorType, Keyword
-from apps.placements import invoices
+from apps.placements import invoices, repeat
 from apps.placements.models import (
     Invoice,
     InvoiceItem,
@@ -38,7 +43,8 @@ from apps.placements.models import (
     PlacementLink,
     PlacementStatus,
 )
-from apps.sites.offers import CURRENCIES
+from apps.sites.models import Site, SiteOffer, SitePrice
+from apps.sites.offers import CURRENCIES, money
 from config.forms import ChoiceButtons, DayField, DayFieldsForm, DayInput, MoneyField
 
 # Какую дату ставит кнопка статуса, если поле пустое.
@@ -77,10 +83,29 @@ class PlacementForm(DayFieldsForm):
         help_text="За статью; при выборе копирайтера — его ставка.",
     )
     copywriter_currency = forms.ChoiceField(label="Валюта", required=False)
+    # Новое размещение на площадке (ADR-073): через какое предложение продавца.
+    # Варианты — у площадки из формы; нет предложений — поля нет в форме.
+    offer = forms.TypedChoiceField(
+        label="Через кого",
+        coerce=int,
+        required=False,
+        empty_value=None,
+        widget=forms.RadioSelect(attrs={"class": "seo-offer-pick"}),
+        help_text="Рабочая цена выбрана заранее; можно взять другого продавца.",
+    )
+    make_working = forms.BooleanField(
+        label="Сделать эту цену рабочей для площадки",
+        required=False,
+        help_text="Иначе рабочая цена площадки остаётся прежней.",
+    )
+    # «Через кого» на экране: форма из вкладок площадки (адрес с ?site=) —
+    # ставит админка. В обычной «Добавить» поля нет, продавец и услуга — полями.
+    offer_shown = False
 
     class Meta:
         model = Placement
-        fields = "__all__"
+        # Предложение ставит выбор «Через кого», а не список всех цен базы.
+        exclude = ("price",)
         widgets: ClassVar[dict[str, forms.Widget]] = {
             "status": ChoiceButtons(
                 rows=(PlacementStatus.IN_WORK, PlacementStatus.DISCARDED), fills=STATUS_FILLS
@@ -111,11 +136,48 @@ class PlacementForm(DayFieldsForm):
                     str(pk): (rate, currency)
                     for pk, rate, currency in choices.values_list("pk", "rate_cents", "currency")
                 }
+        self.offers: dict[int, SitePrice] = {}
+        if self.instance.pk is None and self.offer_shown:
+            self._offer_choices()
+
+    def _offer_choices(self) -> None:
+        """Предложения площадки для «Через кого»: рабочая — первой и выбрана заранее."""
+        site_id = _int(self.data.get("site")) if self.is_bound else _int(self.initial.get("site"))
+        if site_id is None:
+            return
+        site = Site.all_objects.select_related("price").filter(pk=site_id).first()
+        if site is None:
+            return
+        # Цена услуги в евро — для порядка и пометки «дешевле рабочей».
+        eur: dict[int, int | None] = dict(
+            SiteOffer.objects.filter(site_id=site.pk).values_list("pk", "placement_eur_cents")
+        )
+        working = site.price_id
+        ids = list(eur)
+        if working is not None and working not in eur:
+            # Рабочая — не последний снимок продавца (заявка держит прежнюю цену).
+            ids.append(working)
+        prices = SitePrice.objects.select_related("seller").in_bulk(ids)
+        ordered = sorted(
+            prices, key=lambda pk: (pk != working, eur.get(pk) is None, eur.get(pk) or 0)
+        )
+        work_eur = eur.get(working) if working is not None else None
+        choices = [
+            (pk, _offer_label(prices[pk], pk == working, work_eur, eur.get(pk))) for pk in ordered
+        ]
+        self.offers = {pk: prices[pk] for pk in ordered}
+        field = self.fields["offer"]
+        assert isinstance(field, forms.TypedChoiceField)
+        field.choices = choices
+        if working in self.offers:
+            field.initial = working
 
     def clean(self) -> dict[str, Any] | None:
         cleaned = super().clean()
         if cleaned is None:
             return None
+        if self.instance.pk is None:
+            self._clean_new(cleaned)
         copywriter = cleaned.get("copywriter")
         if copywriter is not None and cleaned.get("copywriter_cents") is None:
             # Цена не вписана — ставка копирайтера; без скрипта в браузере тоже.
@@ -129,6 +191,25 @@ class PlacementForm(DayFieldsForm):
             cleaned["copywriter_currency"] = copywriter.currency if copywriter else "EUR"
         return cleaned
 
+    def _clean_new(self, cleaned: dict[str, Any]) -> None:
+        """Новое размещение: не на площадке из чёрного списка; предложение — в запись."""
+        site, product = cleaned.get("site"), cleaned.get("product")
+        if site is not None and product is not None:
+            reason = repeat.blocked_reason(site.pk, product.pk)
+            if reason:
+                self.add_error(None, reason)
+        offer = self.offers.get(cleaned.get("offer") or 0)
+        if offer is None:
+            if self.offer_shown and self.offers:
+                self.add_error("offer", "Выберите, через кого заводим размещение.")
+            return
+        # Продавец, услуга и тип ссылки — из предложения: в форме их тогда нет.
+        self.instance.price = offer
+        self.instance.seller_id = offer.seller_id
+        self.instance.placement_type = offer.placement_type
+        if "link_type" not in self.fields:
+            self.instance.link_type = offer.link_type
+
     def clean_copywriter_currency(self) -> str | None:
         value: str = self.cleaned_data.get("copywriter_currency") or ""
         return value or None
@@ -141,6 +222,28 @@ class PlacementForm(DayFieldsForm):
     def clean_currency(self) -> str | None:
         value: str = self.cleaned_data.get("currency") or ""
         return value or None
+
+
+def _int(value: Any) -> int | None:
+    value = getattr(value, "pk", value)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _offer_label(price: SitePrice, working: bool, work_eur: int | None, eur: int | None) -> str:
+    """«Collaborator · публикация · €126.50 · прайс от 11.10.2026 — рабочая»."""
+    text = (
+        f"{price.seller.name} · {price.get_placement_type_display()} · "
+        f"{money(price.placement_cents, price.currency)} · "
+        f"прайс от {timezone.localtime(price.checked_at):%d.%m.%Y}"
+    )
+    if working:
+        return f"{text} — рабочая"
+    if work_eur is not None and eur is not None and eur < work_eur:
+        return f"{text} — ▼ дешевле рабочей на {money(work_eur - eur, 'EUR')}"
+    return text
 
 
 def _currency_choices(

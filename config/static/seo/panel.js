@@ -66,6 +66,9 @@
   var revealTimer = 0;
   // Что сделать после записи вместо закрытия (вопрос при ↑/↓ или переходе).
   var afterSave = null;
+  // Из панели завели новую запись (вкладка «+ Ещё размещение», ADR-073): её
+  // строки в списке ещё нет — при закрытии панели список перечитать целиком.
+  var added = false;
 
   function seoNav() {
     return window.seoNav && window.seoNav.enabled ? window.seoNav : null;
@@ -321,6 +324,20 @@
     }
     var next = afterSave;
     afterSave = null;
+    if (data.deleted) {
+      // Запись удалена (корзина на вкладке размещения): её строки больше нет —
+      // закрыть панель и перечитать список.
+      close({ force: true });
+      if (nav) nav.reload();
+      return;
+    }
+    if (was && was.add && data.next && was.row && was.row.isConnected) {
+      // Завели из вкладок площадки — новое размещение сразу в той же панели;
+      // список перечитаем, когда панель закроют.
+      added = true;
+      open(was.opener, data.next, true);
+      return;
+    }
     // Выбор кнопками (статус) — в строку сразу, не дожидаясь ответа списка.
     var instant = was && !was.add && was.row && was.row.isConnected
       && patchRow(was.row, choicesOf(mainForm()));
@@ -392,12 +409,14 @@
     snapshot = null;
     if (!options.unload) {
       styles.forEach(function (link) { link.remove(); });
-      if (changed) refreshRow(was);
+      if (added && seoNav()) seoNav().reload();
+      else if (changed) refreshRow(was);
       var back = was && was.row && was.row.isConnected ? linkIn(was.row, was.column) : null;
       if (back) back.focus({ preventScroll: true });
     }
     styles = [];
     changed = false;
+    added = false;
   }
 
   // ---------- Правки и вопрос о них ----------
@@ -669,6 +688,10 @@
     if (!row.isConnected) return;
     toastMessages(doc);
     var fresh = findRow(doc, was.key);
+    // Строка по номеру (_seo_row) в ответе одна — она и есть, даже если ссылки,
+    // которой открыли панель, в ней больше нет: сняли «больше не работаем» —
+    // пропала красная фишка, по которой открывали решение (ADR-073).
+    if (!fresh && single) fresh = onlyRow(doc);
     var stale = single ? response.headers.get("X-Seo-Row-Match") === "0" : !fresh;
     if (stale) {
       row.classList.add("seo-row-stale");
@@ -699,6 +722,11 @@
       }
     }
     return null;
+  }
+
+  function onlyRow(doc) {
+    var rows = doc.querySelectorAll("#result_list tbody tr");
+    return rows.length === 1 ? rows[0] : null;
   }
 
   function flash(row) {

@@ -331,7 +331,9 @@ class TestInPlace:
     def test_list_row_button_only_with_url(
         self, admin_client: Client, placement: Placement
     ) -> None:
-        no_url = Placement.objects.create(site=placement.site, product=placement.product)
+        # Другая площадка: строка списка — одна на площадку (ADR-073).
+        other = Site.objects.create(domain="other.com")
+        no_url = Placement.objects.create(site=other, product=placement.product)
         page = admin_client.get(CHANGELIST).content.decode()
         assert f'data-placement="{placement.pk}" data-name="example.com"' in page
         assert f'data-check-url="{BATCH}"' in page

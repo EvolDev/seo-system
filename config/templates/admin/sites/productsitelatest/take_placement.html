@@ -1,0 +1,53 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+«Взять в размещение» для отмеченных площадок (E1-20, ADR-073): что заведём, где
+размещения уже есть — ещё одно только галочкой (может идти параллельно с
+идущим) — и кого пропустим. «Завести» отправляет то же действие с post=yes.
+{% endcomment %}
+{% load l10n seo_assets %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% asset 'seo/placement-tabs.css' %}">{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Начало</a>
+  › <a href="{% url 'admin:sites_productsitelatest_changelist' %}">Площадки</a>
+  › Взять в размещение
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="seo-take">
+  <p>Размещения {{ product.name }} — «В работе», через рабочую цену площадки, сотрудник — вы.
+    Другого продавца можно выбрать в панели площадки, «+ Ещё размещение».</p>
+  <form method="post">{% csrf_token %}
+    {% for pk in selected %}<input type="hidden" name="{{ action_checkbox_name }}" value="{{ pk }}">{% endfor %}
+    <input type="hidden" name="action" value="take_placement_action">
+    <input type="hidden" name="post" value="yes">
+
+    {% if fresh %}
+    <h2 class="seo-take-h">Заведём размещение — {{ fresh|length }}</h2>
+    <ul class="seo-take-list">{% for item in fresh %}<li>{{ item.domain }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    {% if existing %}
+    <h2 class="seo-take-h">Размещения уже есть — {{ existing|length }}</h2>
+    <p class="seo-sub">Ещё одно — только явно: отметьте, где завести. Может идти параллельно с идущим.</p>
+    <ul class="seo-take-list">{% for item in existing %}
+      <li><label><input type="checkbox" name="again" value="{{ item.site_id|unlocalize }}">
+        {{ item.domain }} <span class="seo-sub">— размещений: {{ item.count }}, сейчас {{ item.current.get_status_display|lower }}{% if item.current_when %} с {{ item.current_when|date:"d.m.Y" }}{% endif %}{% if item.current.seller %} · {{ item.current.seller.name }}{% endif %}</span></label></li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if blocked %}
+    <h2 class="seo-take-h">Пропустим — чёрный список у {{ product.name }}: {{ blocked|length }}</h2>
+    <ul class="seo-take-list">{% for item in blocked %}<li>{{ item.domain }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <p class="seo-take-actions">
+      <button type="submit" class="seo-btn seo-btn-primary">Завести</button>
+      <a href="{{ back_url }}" class="seo-btn">Отмена</a>
+    </p>
+  </form>
+</div>
+{% endblock %}

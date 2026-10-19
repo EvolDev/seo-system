@@ -5,9 +5,16 @@
   «Заплачено» в евро по курсу ЕЦБ, месяц — по дате «Опубликовано»;
 - запланировано — «В работе», «Заявка отправлена», «Написание статьи».
   Сумма — «Заплачено», если там уже не ноль (договорённая, из счёта), иначе
-  сколько заплатим площадке по рабочей цене (`expected_spend_cents` из
-  `v_product_site_latest` — одна точка правды, ADR-043). Месяц — по дате
-  отправки заявки, без неё — текущий: «собираемся потратить сейчас»;
+  сколько заплатим площадке: по предложению размещения (ADR-073, как
+  `repeat.offer_id`) — через которое его взяли, а у размещений до ADR-073 —
+  по цене его продавца на ту же услугу на день заведения. Смена рабочей цены
+  площадки план не трогает. У продавца размещения цены нет — суммы нет, пока не
+  впишут «Заплачено» (цену чужого продавца не подставляем); продавца у
+  размещения нет — по рабочей цене площадки. Формула у
+  предложения та же, что у `expected_spend_cents` в `v_product_site_latest`
+  (ADR-043); что они не разошлись, проверяет тест.
+  Месяц — по дате отправки заявки, без неё — текущий:
+  «собираемся потратить сейчас»;
 - бюджет — настройка `MONTHLY_BUDGET` на каждый месяц, остаток не переносится;
 - копирайт — цена статьи нашему копирайтеру (ADR-072): в тот же месяц, что и
   размещение, отдельно от бюджета — платим за него не мы.
@@ -30,24 +37,50 @@ from apps.placements.models import PlacementStatus
 PLANNED = (PlacementStatus.IN_WORK, PlacementStatus.ORDERED, PlacementStatus.WRITING)
 SPENT = PlacementStatus.PLACED
 
-# Ожидаемая сумма плана — из представления, но только у нужных площадок: условие
-# «site_id = ANY(массив)» план Postgres доводит до индекса, соединение с
-# представлением — нет (было 2 с против 0,2 с на рабочей базе).
 _ROWS_SQL = """
 WITH rows AS MATERIALIZED (
     SELECT p.id, p.site_id, p.product_id, p.status::text AS status, p.seller_id,
            p.employee_id, p.ordered_at, p.published_at, p.price_paid_cents,
            coalesce(p.currency, 'EUR') AS currency, p.copywriter_id, p.copywriter_cents,
-           coalesce(p.copywriter_currency, 'EUR') AS copywriter_currency
+           coalesce(p.copywriter_currency, 'EUR') AS copywriter_currency, p.price_id,
+           p.placement_type, p.created_at
     FROM placements p
     WHERE p.status IN ('in_work', 'ordered', 'writing', 'placed')
       AND (%(product)s::bigint IS NULL OR p.product_id = %(product)s::bigint)
 ),
-expected AS MATERIALIZED (
-    SELECT v.site_id, v.product_id, v.expected_spend_cents
-    FROM v_product_site_latest v
-    WHERE v.site_id = ANY(ARRAY(SELECT r.site_id FROM rows r WHERE r.status <> 'placed'))
-      AND v.product_id = ANY(ARRAY(SELECT r.product_id FROM rows r WHERE r.status <> 'placed'))
+-- План по предложению размещения (ADR-073, `repeat.offer_id`): запомненное, а у
+-- размещений до ADR-073 — снимок цены их продавца на ту же услугу, действовавший
+-- в день заведения (не было — первый после); нет — суммы нет; продавца нет —
+-- рабочая цена площадки. Формула
+-- expected_spend_cents из v_product_site_latest: размещение + анонс, написание —
+-- если пишет площадка (не дороже порога PRICE_REFERENCE продукта); порога нет —
+-- суммы нет.
+own AS MATERIALIZED (
+    SELECT r.id,
+           round((o.placement_cents + coalesce(o.announce_cents, 0))
+                 / eur_rate(o.currency))::integer
+             + CASE WHEN w.writing_cents IS NULL THEN NULL
+                    WHEN round(o.writing_cents / eur_rate(o.currency))::integer <= w.writing_cents
+                    THEN round(o.writing_cents / eur_rate(o.currency))::integer
+                    ELSE 0 END AS cents
+    FROM rows r
+    JOIN site_prices o ON o.id = coalesce(r.price_id, (
+        SELECT x.id FROM site_prices x
+        WHERE x.site_id = r.site_id AND x.seller_id = r.seller_id
+          AND x.placement_type = r.placement_type AND NOT x.withdrawn
+        ORDER BY x.checked_at <= r.created_at DESC,
+                 CASE WHEN x.checked_at <= r.created_at THEN x.checked_at END DESC NULLS LAST,
+                 CASE WHEN x.checked_at <= r.created_at THEN x.id END DESC NULLS LAST,
+                 x.checked_at, x.id
+        LIMIT 1),
+        CASE WHEN r.seller_id IS NULL
+             THEN (SELECT s.price_id FROM sites s WHERE s.id = r.site_id) END)
+    LEFT JOIN LATERAL (SELECT (x.value->>'writing_eur')::integer * 100 AS writing_cents
+                       FROM domain_settings x
+                       WHERE x.key = 'PRICE_REFERENCE'
+                         AND (x.product_id = r.product_id OR x.product_id IS NULL)
+                       ORDER BY x.product_id NULLS LAST LIMIT 1) w ON true
+    WHERE r.status <> 'placed'
 )
 SELECT r.id, r.site_id, s.domain, pr.name, r.status, se.name,
        coalesce(nullif(u.first_name, ''), u.username),
@@ -59,7 +92,7 @@ SELECT r.id, r.site_id, s.domain, pr.name, r.status, se.name,
        END AS month,
        CASE WHEN r.status = 'placed' OR r.price_paid_cents > 0
             THEN round(r.price_paid_cents / eur_rate(r.currency))::bigint
-            ELSE e.expected_spend_cents
+            ELSE o.cents
        END AS eur_cents,
        r.status = 'placed' OR r.price_paid_cents > 0 AS from_paid,
        r.price_paid_cents, r.currency,
@@ -71,7 +104,7 @@ JOIN products pr ON pr.id = r.product_id
 LEFT JOIN sellers se ON se.id = r.seller_id
 LEFT JOIN auth_user u ON u.id = r.employee_id
 LEFT JOIN copywriters cw ON cw.id = r.copywriter_id
-LEFT JOIN expected e ON e.site_id = r.site_id AND e.product_id = r.product_id
+LEFT JOIN own o ON o.id = r.id
 ORDER BY r.id
 """
 
@@ -90,8 +123,8 @@ class Row:
     ordered_at: dt.datetime | None
     published_at: dt.datetime | None
     month: dt.date | None  # первое число; у размещённого без даты публикации — нет
-    eur_cents: int | None  # нет — сумму не посчитать: нет «Заплачено» или рабочей цены
-    from_paid: bool  # сумма из «Заплачено», иначе — по рабочей цене площадки
+    eur_cents: int | None  # нет — сумму не посчитать: нет «Заплачено» и цены
+    from_paid: bool  # сумма из «Заплачено», иначе — по цене размещения или рабочей
     paid_cents: int | None
     currency: str
     copywriter: str = ""  # пусто — копирайтер не назначен
@@ -202,7 +235,7 @@ class Report:
     by_seller: list[Group]
     by_copywriter: list[Group]  # spent — копирайт размещённых, planned — в работе
     employees: list[str]  # колонки «размещено» по сотрудникам, в порядке убывания
-    no_price: int  # в плане без суммы: нет рабочей цены или порога написания
+    no_price: int  # в плане без суммы: нет цены у продавца размещения или порога написания
     no_order_date: int  # в плане без даты отправки — посчитаны текущим месяцем
     no_paid: int  # размещено без «Заплачено»
     no_published: int  # размещено без даты публикации — ни в один месяц не попали

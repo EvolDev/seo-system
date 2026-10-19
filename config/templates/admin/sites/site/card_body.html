@@ -16,7 +16,8 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
 <link rel="stylesheet" href="{% asset 'seo/status-history.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/gray.css' %}">
 <link rel="stylesheet" href="{% asset 'flags/sprite-hq.css' %}">
-<link rel="stylesheet" href="{% asset 'seo/site-card.css' %}">{% endif %}
+<link rel="stylesheet" href="{% asset 'seo/site-card.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/placement-tabs.css' %}">{% endif %}
 <div class="seo-card" data-site-card data-sections-url="{% url 'admin:card_sections' %}">
 <header class="seo-panel-head seo-card-head">
   <div class="seo-card-titlerow">
@@ -29,6 +30,8 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
       {% if panel %}<button type="button" class="seo-panel-close" data-panel-close aria-label="Закрыть панель" title="Закрыть (Esc)">✕</button>{% endif %}
     </div>
   </div>
+  {# Вкладки площадки (ADR-073): «Площадка» — эта карточка, дальше размещения рабочего продукта. #}
+  {% if site_tabs %}{% include "admin/placements/placement/tabs.html" with tabs=site_tabs %}{% endif %}
 
   <dl class="seo-card-facts">
     <div class="seo-card-fact"><dt>DR</dt><dd>{% if latest and latest.dr is not None %}{{ latest.dr|unlocalize }}{{ metrics_mark }}{% else %}—{% endif %}</dd></div>
@@ -43,19 +46,22 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
   {% with main=statuses.0 %}
   <div class="seo-card-decision">
     <span class="seo-card-product">{{ main.row.product.name }}</span>
-    <span class="seo-card-status seo-tone-{{ main.tone }}">{{ main.row.get_status_display }}</span>
+    {# Размещения есть — статус площадки по ним: фишки, каждая — своя вкладка (ADR-073). #}
+    {% if main.chips %}{{ main.chips }}{% else %}<span class="seo-card-status seo-tone-{{ main.tone }}">{{ main.row.get_status_display }}</span>{% endif %}
     {% include "admin/sites/site/card_placement_articles.html" with status=main %}
     {% if main.row.comment %}<span class="seo-card-reason">{{ main.row.comment }}</span>{% endif %}
-    {% if can_change %}<a class="seo-btn seo-btn-small" href="{{ main.change_url }}" data-panel="{{ main.decision_url }}" title="Решение по площадке у {{ main.row.product.name }}">Сменить статус</a>{% endif %}
+    {% if can_change and main.editable %}<a class="seo-btn seo-btn-small" href="{{ main.change_url }}" data-panel="{{ main.decision_url }}" title="Решение по площадке у {{ main.row.product.name }}">{{ main.decision_label }}</a>{% endif %}
     {% include "admin/sites/site/card_status_extra.html" with status=main %}
   </div>
   {% endwith %}
   {% if statuses|length > 1 %}
   <div class="seo-card-others">
     {% for status in statuses|slice:"1:" %}
-    <div class="seo-card-other">{{ status.row.product.name }}: <b>{{ status.row.get_status_display }}</b>
+    {# Другой продукт — только просмотр (ADR-073): статья и карточка размещения открываются, #}
+    {# а менять — переключив продукт в шапке, чтобы не задеть его случайно. #}
+    <div class="seo-card-other">{{ status.row.product.name }}: {% if status.chips %}{{ status.chips }}{% else %}<b>{{ status.row.get_status_display }}</b>{% endif %}
       {% include "admin/sites/site/card_placement_articles.html" %}
-      {% if status.row.comment %} — {{ status.row.comment }}{% endif %}{% if can_change %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% endif %}
+      {% if status.row.comment %} — {{ status.row.comment }}{% endif %}{% if status.placement_url %} · <a href="{{ status.placement_url }}" data-panel title="Карточка размещения {{ status.row.product.name }} — только просмотр">карточка размещения</a>{% endif %}{% if can_change and status.editable %} · <a href="{{ status.change_url }}" data-panel="{{ status.decision_url }}" title="Решение по площадке у {{ status.row.product.name }}">сменить</a>{% else %} <span class="seo-sub">· только просмотр</span>{% endif %}
       {% include "admin/sites/site/card_status_extra.html" %}</div>
     {% endfor %}
   </div>

@@ -1,5 +1,5 @@
 {% extends "admin/change_list.html" %}
-{% load i18n saved_filters %}
+{% load i18n saved_filters seo_status %}
 {% comment %}
 Хлебные крошки без уровня приложения Django (E9-08): меню собрано по работе
 человека (config/admin_site.py), и «Начало › Площадки › Площадки» только путало.
@@ -21,6 +21,9 @@
 {% endblock %}
 
 {% block filters %}{% saved_filters_column cl block.super %}{% endblock %}
+
+{# Быстрые фильтры над списком — статус и «Период ▾» (ADR-073); у списков без них пусто. #}
+{% block date_hierarchy %}{{ block.super }}{% status_bar cl %}{% endblock %}
 
 {% block pagination %}
 <div class="seo-pagination">

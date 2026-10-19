@@ -1,0 +1,282 @@
+/* Вкладки площадки: «Площадка · №1 · №2 · + Ещё размещение» (ADR-073).
+   В шапке панели размещения и карточки площадки (под заголовком), на полной
+   странице — над формой. Цвета — от расцветки (admin-palettes.css): выбранная
+   вкладка — акцентом, статус размещения — тоном (offers.css: --seo-down —
+   размещено, --seo-up — закрыто без статьи), корзина — цветом ошибки. */
+
+.seo-ptabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+/* В шапке панели — отдельной строкой под заголовком и ссылками. */
+.seo-panel-head:has(.seo-ptabs) { flex-wrap: wrap; row-gap: 10px; }
+.seo-panel-head .seo-ptabs { flex-basis: 100%; margin: 0; }
+
+.seo-ptab {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--body-fg, #333);
+  font-size: 0.8125rem;
+  line-height: 1.3;
+}
+body.admin-interface a.seo-ptab,
+body.admin-interface a.seo-ptab:link,
+body.admin-interface a.seo-ptab:visited,
+.seo-ptab > a,
+.seo-ptab > a:link,
+.seo-ptab > a:visited,
+.seo-ptab summary {
+  display: flex;
+  flex-direction: column;
+  padding: 5px 11px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.seo-ptab b { font-weight: 600; white-space: nowrap; }
+.seo-ptab span,
+.seo-ptab span i { font-size: 0.75rem; font-style: normal; color: var(--body-quiet-color, #666); white-space: nowrap; }
+.seo-ptab:hover { border-color: var(--seo-accent, #2a65a8); }
+.seo-ptab-on {
+  border-color: var(--seo-accent, #2a65a8);
+  background: var(--selected-row, #e8f2ff);
+}
+
+/* Тон статуса: идёт — акцентом, размещено — зелёным, закрыто без статьи — красным. */
+.seo-ptab span i.seo-ptab-live,
+.seo-ptab-menu .seo-ptab-live { color: var(--seo-accent-text, #2a65a8); }
+.seo-ptab span i.seo-ptab-ok,
+.seo-ptab-menu .seo-ptab-ok { color: var(--seo-down, #17803a); }
+.seo-ptab span i.seo-ptab-no,
+.seo-ptab-menu .seo-ptab-no { color: var(--seo-up, #c4302b); }
+
+/* Вкладка размещения — две части: сама вкладка и корзина справа. */
+.seo-ptab-deal { flex-direction: row; align-items: stretch; }
+.seo-ptab-deal > a:first-child { padding-right: 6px; }
+body.admin-interface a.seo-ptab-trash,
+body.admin-interface a.seo-ptab-trash:link,
+body.admin-interface a.seo-ptab-trash:visited {
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  border-left: 1px solid var(--hairline-color, #e5e5e5);
+  border-radius: 0 10px 10px 0;
+  color: var(--error-fg, #c4302b);
+}
+body.admin-interface a.seo-ptab-trash:hover,
+body.admin-interface a.seo-ptab-trash:focus-visible {
+  background: var(--message-error-bg, #fbe9e8);
+  color: var(--error-fg, #c4302b);
+}
+
+body.admin-interface a.seo-ptab-add,
+body.admin-interface a.seo-ptab-add:link,
+body.admin-interface a.seo-ptab-add:visited {
+  border-style: dashed;
+  color: var(--seo-accent-text, #2a65a8);
+  font-weight: 600;
+  justify-content: center;
+}
+.seo-ptab-off {
+  justify-content: center;
+  padding: 5px 11px;
+  border-style: dashed;
+  color: var(--body-quiet-color, #666);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* «Ещё N ▾» — ранние размещения выпадающим списком. */
+.seo-ptab-more { position: relative; }
+.seo-ptab-more summary { list-style: none; }
+.seo-ptab-more summary::-webkit-details-marker { display: none; }
+.seo-ptab-more { border-style: dashed; }
+.seo-ptab-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+  max-height: 60vh;
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 10px;
+  background: var(--body-bg, #fff);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.seo-ptab-menu li { margin: 0; padding: 0; list-style: none; }
+.seo-ptab-menu a,
+.seo-ptab-menu a:link,
+.seo-ptab-menu a:visited {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--body-fg, #333);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.seo-ptab-menu a:hover { background: var(--darkened-bg, #f5f5f5); }
+
+/* Фишки статусов в колонке «статус» (ADR-073, этап 2): полное название и дата,
+   фишка открывает своё размещение панелью; закрытых много — «Размещено ×8». */
+.seo-st-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+body.admin-interface a.seo-st,
+body.admin-interface a.seo-st:link,
+body.admin-interface a.seo-st:visited {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 9px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 999px;
+  color: var(--seo-accent-text, #2a65a8);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  text-decoration: none;
+}
+body.admin-interface a.seo-st:hover { border-color: var(--seo-accent, #2a65a8); }
+body.admin-interface a.seo-st.seo-st-live { border-color: var(--seo-accent-text, #2a65a8); }
+body.admin-interface a.seo-st.seo-st-ok {
+  border-color: transparent;
+  background: var(--seo-down-bg, #e3f3e8);
+  color: var(--seo-down, #17803a);
+}
+body.admin-interface a.seo-st.seo-st-no {
+  border-color: transparent;
+  background: var(--seo-up-bg, #fbe9e8);
+  color: var(--seo-up, #c4302b);
+}
+.seo-st-when { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.seo-decided { margin-left: 6px; color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+body.admin-interface a.seo-st-none { color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+
+/* Быстрые фильтры над списком: статус кнопками и «Период ▾». */
+.seo-stbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+.seo-stbar-label {
+  margin-right: 4px;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+body.admin-interface a.seo-stbar-chip,
+body.admin-interface a.seo-stbar-chip:link,
+body.admin-interface a.seo-stbar-chip:visited,
+.seo-stbar-period summary {
+  padding: 3px 10px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 999px;
+  color: var(--body-fg, #333);
+  font-size: 0.8125rem;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+body.admin-interface a.seo-stbar-chip:hover,
+.seo-stbar-period summary:hover { border-color: var(--seo-accent, #2a65a8); }
+body.admin-interface a.seo-stbar-chip.seo-stbar-on {
+  border-color: var(--seo-accent, #2a65a8);
+  background: var(--seo-accent, #2a65a8);
+  color: var(--seo-on-accent, #fff);
+}
+.seo-stbar-period { position: relative; margin-left: 8px; }
+.seo-stbar-period summary {
+  list-style: none;
+  border-style: dashed;
+  color: var(--seo-accent-text, #2a65a8);
+}
+.seo-stbar-period summary::-webkit-details-marker { display: none; }
+.seo-stbar-period.seo-stbar-set summary { border-style: solid; border-color: var(--seo-accent-text, #2a65a8); }
+.seo-stbar-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 260px;
+  padding: 6px;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 10px;
+  background: var(--body-bg, #fff);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.seo-stbar-hint {
+  padding: 4px 8px;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+body.admin-interface a.seo-stbar-item,
+body.admin-interface a.seo-stbar-item:link,
+body.admin-interface a.seo-stbar-item:visited {
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--body-fg, #333);
+  text-decoration: none;
+}
+body.admin-interface a.seo-stbar-item:hover { background: var(--darkened-bg, #f5f5f5); }
+body.admin-interface a.seo-stbar-item.seo-stbar-on { color: var(--seo-accent-text, #2a65a8); font-weight: 600; }
+.seo-stbar-own {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 4px 8px 6px;
+  border-top: 1px solid var(--hairline-color, #e5e5e5);
+}
+.seo-stbar-own .seo-stbar-hint { padding: 4px 0 0; }
+.seo-stbar-own label { display: flex; gap: 8px; align-items: center; font-weight: normal; }
+.seo-stbar-own input[type="month"] { padding: 3px 6px; }
+.seo-stbar-own button { align-self: flex-start; }
+
+/* Окно «Взять в размещение» для отмеченных площадок. */
+.seo-take { max-width: 60em; }
+.seo-take-h { margin: 18px 0 6px; font-size: 0.9375rem; font-weight: 600; }
+.seo-take-list { margin: 0 0 8px; padding-left: 20px; }
+.seo-take-list li { margin: 4px 0; }
+.seo-take-list label { display: inline-flex; gap: 8px; align-items: baseline; font-weight: normal; }
+.seo-take-actions { display: flex; gap: 8px; margin-top: 18px; }
+
+/* «Через кого» в форме нового размещения — варианты столбиком, строкой целиком:
+   подписи формы админки шириной 160px ломали бы вариант по словам. */
+.field-offer #id_offer {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 26em;
+}
+body.admin-interface .field-offer #id_offer label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  font-weight: normal;
+  white-space: normal;
+}
+@media (max-width: 640px) {
+  .field-offer #id_offer { min-width: 0; }
+}

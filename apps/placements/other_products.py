@@ -16,12 +16,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
 
-from django.db.models import F
+from django.db.models import Case, F, Value, When
 from django.urls import reverse
 from django.utils.html import format_html_join
 from django.utils.safestring import SafeString
 
 from apps.placements.models import Placement
+from apps.placements.repeat import ACTIVE
 
 # Площадка → её размещения: продукт, его название, самое свежее размещение.
 Row = tuple[int, str, int]
@@ -60,19 +61,24 @@ def articles_by_product(site_id: int) -> dict[int, list[Article]]:
 
 
 def by_site(site_ids: Iterable[int]) -> BySite:
-    """Размещения площадок страницы: по одному на продукт, продукты по алфавиту."""
+    """Размещения площадок страницы: по одному на продукт, продукты по алфавиту.
+
+    Одно на продукт — текущее (ADR-073), как `repeat.current`: идущее, иначе
+    последнее заведённое. Его открывает и домен в списке, и строка «Размещений».
+    """
     wanted = sorted(set(site_ids))
     if not wanted:
         return {}
     rows = (
         Placement.objects.filter(site_id__in=wanted)
-        .order_by("site_id", "product__name", F("published_at").desc(nulls_last=True), "-pk")
+        .annotate(idle=Case(When(status__in=ACTIVE, then=Value(0)), default=Value(1)))
+        .order_by("site_id", "product__name", "idle", "-pk")
         .values_list("site_id", "product_id", "product__name", "pk")
     )
     found: BySite = {}
     for site_id, product_id, name, placement_id in rows:
         products = found.setdefault(site_id, [])
-        # У продукта на площадке бывает несколько статей — берём первую, свежую.
+        # У продукта на площадке бывает несколько размещений — берём текущее.
         if products and products[-1][0] == product_id:
             continue
         products.append((product_id, name, placement_id))

@@ -32,7 +32,8 @@
 {# над колонкой фильтров списков (E9-10, ADR-050); окно выгрузки в Excel #}
 {# над списками (E1-06, ADR-053); значки «открыть сайт» и «скопировать» у #}
 {# домена (E2-06); оценка площадки звёздочкой (E1-21, ADR-064); меню «?» — #}
-{# справка по экрану (E9-07, ADR-056). #}
+{# справка по экрану (E9-07, ADR-056); выпадающие меню закрываются щелчком #}
+{# мимо (ADR-073). #}
 <script src="{% asset 'seo/soft-nav.js' %}" defer></script>
 <script src="{% asset 'seo/panel.js' %}" defer></script>
 <script src="{% asset 'seo/saved-filters.js' %}" defer></script>
@@ -43,6 +44,7 @@
 <script src="{% asset 'seo/picker.js' %}" defer></script>
 <script src="{% asset 'seo/help.js' %}" defer></script>
 <script src="{% asset 'seo/product-switch.js' %}" defer></script>
+<script src="{% asset 'seo/menus.js' %}" defer></script>
 <script>
   // Расцветку ставим до первой отрисовки, иначе страница мигнёт чужими цветами.
   // Выбор помнит браузер; в первый раз — по настройке системы (светлая / тёмная).
