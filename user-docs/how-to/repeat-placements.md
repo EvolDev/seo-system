@@ -4,7 +4,7 @@ description: Второе и следующие размещения проду�
 section: how-to
 status: draft
 tasks: [E1-20]
-updated: 2026-10-18
+updated: 2026-10-19
 since:
 screens: [placement_card, site_card, site_list, placement_list]
 tags: [повторное размещение, вторая статья, вкладки, продавец, удалить размещение, фишки статуса, период, больше не работаем]

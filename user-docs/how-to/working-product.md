@@ -4,7 +4,7 @@ description: Продукт, с которым вы работаете, выби
 section: how-to
 status: draft
 tasks: [E9-12, E1-19, E1-20]
-updated: 2026-10-07
+updated: 2026-10-19
 since:
 screens: [home, site_list, placement_list, invoice_list]
 tags: [продукт, фильтры, шапка]

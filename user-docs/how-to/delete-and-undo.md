@@ -3,8 +3,8 @@ title: Как удалить запись или отменить загрузк
 description: Как убрать из системы площадку, продавца или размещение вместе со всем, что на них ссылается, и как отменить загрузку файла целиком — вернув всё, что она записала.
 section: how-to
 status: draft
-tasks: [E1-15]
-updated: 2026-10-15
+tasks: [E1-15, E1-20]
+updated: 2026-10-19
 since:
 screens: [upload_list, upload_new, site_list, site_card, seller_list, placement_list]
 tags: [удаление, отмена, загрузки, ошибки]

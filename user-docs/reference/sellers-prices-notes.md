@@ -4,7 +4,7 @@ description: Что такое рабочая цена площадки и пр�
 section: reference
 status: draft
 tasks: [E1-20, E1-11, E1-24, E1-07, E1-08, E1-10, E9-09, E9-11, E1-13, E1-09, E1-14, E9-13]
-updated: 2026-10-14
+updated: 2026-10-19
 since:
 screens: [placement_list, site_card, seller_list, exchange_rates, upload_review, invoice_list]
 tags: [площадки, цены, продавцы, заметки, курсы валют]

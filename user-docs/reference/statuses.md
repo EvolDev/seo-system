@@ -4,7 +4,7 @@ description: Что означает каждый статус работы с �
 section: reference
 status: draft
 tasks: [E1-01, E1-02, E7-03, E1-04, E9-01, E1-08, E9-09, E1-12, E9-11, E1-13, E1-18, E1-22, E1-20]
-updated: 2026-10-18
+updated: 2026-10-19
 screens: [site_list, site_card, site_decision, placement_card, article_editor]
 tags: [статусы]
 ---
