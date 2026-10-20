@@ -264,6 +264,16 @@ def copy_domain_html(domain: str) -> SafeString:
     )
 
 
+def copy_column_html(domains: list[str]) -> SafeString:
+    """Кнопка «скопировать столбиком» — домены по одному на строке (seo/domain-tools.js)."""
+    return format_html(
+        '<button type="button" class="seo-icon-btn" data-copy="{}" title="Скопировать столбиком"'
+        ' aria-label="Скопировать столбиком">{}</button>',
+        "\n".join(domains),
+        _COPY_ICON,
+    )
+
+
 def take_placement_html(url: str) -> SafeString:
     """Значок «взять в размещение»: откроется пустая форма под рабочий продукт."""
     return format_html(

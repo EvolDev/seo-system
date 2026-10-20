@@ -434,6 +434,9 @@ class PlacementAdmin(RecordAdmin):
         "skip_checks",
     )
     search_fields = ("site__domain", "article_url", "collaborator_order_id")
+    # Столбик доменов — размещения ровно этих площадок; одно слово — как раньше,
+    # часть домена, адрес статьи или номер заказа.
+    domain_search = "site__domain"
     list_select_related = ("site", "product", "seller", "site__price__seller", "site__latest")
     autocomplete_fields = ("site", "seller")
     # «В индексе» и время проверки пишет проверка; результат, увиденный

@@ -233,6 +233,7 @@ class SiteAdmin(RecordAdmin):
     )
     list_filter = (DeletedFilter, "language", WorkingLinkTypeFilter, "marks_as_ad")
     search_fields = ("domain",)
+    domain_search = "domain"
     list_select_related = ("price__seller",)
     # Рабочую цену меняют кнопками карточки и действиями «Площадок», не полем
     # формы: каждая смена — заметка в истории (ADR-043).
@@ -252,9 +253,11 @@ class SiteAdmin(RecordAdmin):
         self, request: HttpRequest, queryset: models.QuerySet[Site], search_term: str
     ) -> tuple[models.QuerySet[Site], bool]:
         # Человек вставит адрес целиком: https://www.example.com/article.
-        # Не домен (например, пустой запрос) — ищем как есть.
-        with suppress(ValueError):
-            search_term = normalize_domain(search_term)
+        # Не домен (например, пустой запрос) — ищем как есть. Столбик доменов
+        # сводит каждый домен сам (`ModelAdmin.get_search_results`).
+        if self.pasted_domains(search_term) is None:
+            with suppress(ValueError):
+                search_term = normalize_domain(search_term)
         return super().get_search_results(request, queryset, search_term)
 
     def save_formset(
@@ -2286,6 +2289,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         NotesFilter,
     )
     search_fields = ("domain",)
+    domain_search = "domain"
     ordering = (F("dr").desc(nulls_last=True), "domain")
     # Полсотни строк вместо сотни (просьба пользователя 07.10.2026): отрисовка
     # строки стоит около 2,8 мс, и на сотне это треть времени страницы. Размер
@@ -2408,9 +2412,11 @@ class ProductSiteLatestAdmin(RecordAdmin):
     def get_search_results(
         self, request: HttpRequest, queryset: models.QuerySet[Any], search_term: str
     ) -> tuple[models.QuerySet[Any], bool]:
-        # Как в «Площадках»: вставленный адрес целиком сводится к домену.
-        with suppress(ValueError):
-            search_term = normalize_domain(search_term)
+        # Как в «Каталоге площадок»: вставленный адрес целиком сводится к домену,
+        # столбик доменов — каждый домен сам.
+        if self.pasted_domains(search_term) is None:
+            with suppress(ValueError):
+                search_term = normalize_domain(search_term)
         return super().get_search_results(request, queryset, search_term)
 
     # ---------- Колонки ----------

@@ -312,6 +312,31 @@ class ModelAdmin(_ModelAdmin):
                 initial["product"] = working
         return initial
 
+    # ---------- Поиск столбиком доменов ----------
+    #
+    # Поле домена записи («site__domain»). Вставили в поиск несколько доменов —
+    # в списке строки ровно этих доменов, а рядом со счётчиком — каких нет;
+    # поле поиска тогда многострочное (admin/search_form.html,
+    # seo/domain-search.js). None — поиск штатный, по слову.
+    domain_search: str | None = None
+
+    def pasted_domains(self, search_term: str) -> list[str] | None:
+        """Домены поиска столбиком; None — поиск обычный, по слову."""
+        if self.domain_search is None:
+            return None
+        from apps.sites.domains import pasted_domains
+
+        return pasted_domains(search_term)
+
+    def get_search_results(
+        self, request: HttpRequest, queryset: models.QuerySet[Any], search_term: str
+    ) -> tuple[models.QuerySet[Any], bool]:
+        domains = self.pasted_domains(search_term)
+        if domains is None:
+            return super().get_search_results(request, queryset, search_term)
+        # Домен целиком: lensa.com не тянет valensa.com.
+        return queryset.filter(**{f"{self.domain_search}__in": domains}), False
+
     # ---------- Панель записи ----------
 
     def changelist_view(

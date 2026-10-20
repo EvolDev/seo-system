@@ -1,0 +1,30 @@
+{% load i18n static seo_search %}
+{% comment %}
+Штатная форма поиска Django 5.2. У списков с поиском столбиком доменов
+(`ModelAdmin.domain_search`: «Размещения», «Площадки», «Каталог площадок»)
+поле многострочное: вставили столбик — раскрылось (seo/domain-search.js),
+Enter ищет, Shift+Enter — новая строка. Справа от «Найти» — счётчик и домены
+вставки, которых нет в списке, с кнопкой «скопировать столбиком».
+{% endcomment %}
+{% if cl.search_fields %}{% domain_search cl as found %}
+<div id="toolbar"><form id="changelist-search" method="get" role="search">
+<div{% if found %} class="seo-dsearch"{% endif %}><!-- DIV needed for valid HTML -->
+<label for="searchbar"><img src="{% static "admin/img/search.svg" %}" alt="Search"></label>
+{% if found %}<textarea name="{{ search_var }}" id="searchbar" rows="{{ found.rows }}" cols="40" wrap="off" spellcheck="false" data-domain-search data-max-rows="{{ found.max_rows }}" title="Один домен — или столбик: по одному на строке"{% if cl.search_help_text %} aria-describedby="searchbar_helptext"{% endif %}>{{ found.text }}</textarea>
+{% else %}<input type="text" size="40" name="{{ search_var }}" value="{{ cl.query }}" id="searchbar"{% if cl.search_help_text %} aria-describedby="searchbar_helptext"{% endif %}>
+{% endif %}<input type="submit" value="{% translate 'Search' %}">
+{% if found %}<div class="seo-dsearch-info">{% endif %}
+{% if show_result_count %}
+    <span class="small quiet">{% blocktranslate count counter=cl.result_count %}{{ counter }} result{% plural %}{{ counter }} results{% endblocktranslate %} (<a href="?{% if cl.is_popup %}{{ is_popup_var }}=1{% if cl.add_facets %}&{% endif %}{% endif %}{% if cl.add_facets %}{{ is_facets_var }}{% endif %}">{% if cl.show_full_result_count %}{% blocktranslate with full_result_count=cl.full_result_count %}{{ full_result_count }} total{% endblocktranslate %}{% else %}{% translate "Show all" %}{% endif %}</a>)</span>
+{% endif %}
+{% if found %}{% if found.missing %}<div class="small seo-dsearch-missing">нет в списке ({{ found.missing|length }}): {{ found.missing|join:", " }} {{ found.copy }}</div>{% endif %}</div>{% endif %}
+{% for pair in cl.params.items %}
+    {% if pair.0 != search_var %}<input type="hidden" name="{{ pair.0 }}" value="{{ pair.1 }}">{% endif %}
+{% endfor %}
+</div>
+{% if cl.search_help_text %}
+<br class="clear">
+<div class="help" id="searchbar_helptext">{{ cl.search_help_text }}</div>
+{% endif %}
+</form></div>
+{% endif %}

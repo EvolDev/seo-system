@@ -88,6 +88,7 @@ TEMPLATES = [
                 "seo_export": "config.export_tags",
                 "seo_docs": "config.user_docs",
                 "seo_status": "apps.placements.status_tags",
+                "seo_search": "apps.sites.search_tags",
             },
         },
     },

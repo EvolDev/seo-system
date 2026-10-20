@@ -1,0 +1,51 @@
+/* Поиск столбиком доменов (admin/search_form.html, seo/domain-search.js).
+   Строка поиска: значок, поле, «Найти», справа — счётчик и домены, которых
+   нет в списке. Поле растёт вниз, остальное — по его первой строке. */
+
+#changelist-search > div.seo-dsearch {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  max-width: none;
+  /* Пробелы между значком, полем и кнопкой flex не рисует — как в штатном поле. */
+  column-gap: 4px;
+}
+
+.seo-dsearch > label {
+  display: flex;
+  align-items: center;
+  height: 26px;
+}
+
+/* Пока строка одна — как штатное поле (#searchbar у Django — 1.1875rem). */
+#toolbar #searchbar[data-domain-search] {
+  height: auto;
+  line-height: 1.1875rem;
+  border-radius: 4px;
+  font-family: inherit;
+  resize: none;
+  white-space: pre;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.seo-dsearch-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 26px;
+}
+
+.seo-dsearch-info .quiet {
+  white-space: nowrap;
+}
+
+.seo-dsearch-missing {
+  margin-left: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.seo-dsearch-missing .seo-icon-btn {
+  vertical-align: middle;
+}
