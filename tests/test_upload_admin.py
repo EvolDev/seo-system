@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.observability.models import TaskRun
+from apps.placements.models import Placement, PlacementLink, PlacementStatus
 from apps.sites.models import (
     ExchangeRate,
     MetricSource,
@@ -310,3 +311,112 @@ class TestReviewDecisions:
         assert "new.com" in page and "стала рабочей сама" in page
         page = admin_client.get(url + "?tab=issues").content.decode()
         assert "Дубли в файле" in page
+
+
+class TestPlacementsKeepAnchors:
+    """Прайс продавца не трогает его размещения «В работе» и «Заявка отправлена».
+
+    Проверка по просьбе пользователя (20.10.2026): у таких размещений не было
+    анкоров. Запись прайса, решения разбора, их отмена и отмена всей загрузки
+    оставляют размещения и их ссылки как были.
+    """
+
+    @pytest.fixture
+    def placements(self, known: Site, linkhub: Seller) -> list[Placement]:
+        product = Product.objects.get(name="Convertio")
+        result = []
+        for status in (PlacementStatus.IN_WORK, PlacementStatus.ORDERED):
+            placement = Placement.objects.create(
+                site=known, product=product, seller=linkhub, status=status
+            )
+            placement.links.create(
+                anchor="mp4 to mp3", target_url="https://convertio.co/mp4-mp3/", link_index=1
+            )
+            placement.links.create(
+                anchor="Convertio", target_url="https://convertio.co/", link_index=2
+            )
+            result.append(placement)
+        return result
+
+    @staticmethod
+    def _state() -> tuple[list[Any], list[Any]]:
+        links = PlacementLink.objects.order_by("pk").values_list(
+            "pk", "placement_id", "anchor", "target_url", "link_index", "keyword_id"
+        )
+        rows = Placement.objects.order_by("pk").values_list("pk", "status", "seller_id", "price_id")
+        return list(links), list(rows)
+
+    def _decide(self, client: Client, upload: Upload, action: str, item: UploadItem) -> Any:
+        return client.post(
+            reverse("admin:sites_upload_decide", args=[upload.pk]),
+            data=json.dumps({"action": action, "items": [item.pk]}),
+            content_type="application/json",
+        )
+
+    def test_write_review_undo_and_cancel(
+        self, admin_client: Client, linkhub: Seller, known: Site, placements: list[Placement]
+    ) -> None:
+        before = self._state()
+        assert len(before[0]) == 4
+
+        upload = _uploaded(admin_client, linkhub)
+        assert upload.status == UploadStatus.DONE
+        assert self._state() == before
+
+        item = UploadItem.objects.get(upload=upload, site=known)
+        fixed = self._decide(admin_client, upload, "fix", item)
+        assert fixed.status_code == 200
+        assert self._state() == before
+        admin_client.post(
+            reverse("admin:sites_upload_undo", args=[upload.pk]),
+            data=json.dumps({"undo": fixed.json()["undo"]}),
+            content_type="application/json",
+        )
+        assert self._state() == before
+
+        # Площадку с размещениями из базы не удалить — только заблокировать.
+        self._decide(admin_client, upload, "delete", item)
+        assert self._state() == before
+
+        admin_client.post(reverse("admin:sites_upload_delete", args=[upload.pk]), {"post": "yes"})
+        assert not Upload.objects.filter(pk=upload.pk).exists()
+        assert self._state() == before
+
+    def test_anchors_after_upload_survive_cancel(
+        self, admin_client: Client, linkhub: Seller, known: Site, placements: list[Placement]
+    ) -> None:
+        """Анкоры правили на следующий день после прайса, потом прайс отменили.
+
+        Журнал загрузки помнит только то, что записала сама загрузка, поэтому
+        отмена не возвращает правки людей. Размещение, заведённое через цену из
+        этого прайса, остаётся с анкорами — пропадает только ссылка на цену.
+        """
+        upload = _uploaded(admin_client, linkhub)
+        item = UploadItem.objects.get(upload=upload, site=known)
+        ordered = placements[1]
+        ordered.links.filter(link_index=1).update(anchor="mov to mp4")
+        ordered.links.create(anchor="convert", target_url="https://convertio.co/", link_index=3)
+        through_new_price = Placement.objects.create(
+            site=known,
+            product=ordered.product,
+            seller=linkhub,
+            status=PlacementStatus.ORDERED,
+            price_id=item.price_id,
+        )
+        through_new_price.links.create(
+            anchor="mp4 to mp3", target_url="https://convertio.co/mp4-mp3/", link_index=1
+        )
+        before_links = self._state()[0]
+
+        url = reverse("admin:sites_upload_delete", args=[upload.pk])
+        page = admin_client.get(url).content.decode()
+        # Окно отмены не обещает удалить размещения: площадка была до прайса.
+        assert "Отменить загрузку" in page
+        assert "Удалится — размещения" not in page
+        admin_client.post(url, {"post": "yes"})
+
+        assert not Upload.objects.filter(pk=upload.pk).exists()
+        assert self._state()[0] == before_links
+        through_new_price.refresh_from_db()
+        # Цена из отменённого прайса ушла — у размещения пусто, как у старых без цены.
+        assert through_new_price.price_id is None
