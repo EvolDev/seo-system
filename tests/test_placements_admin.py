@@ -174,12 +174,32 @@ class TestExisting:
         assert (link.anchor, link.keyword_id) == ("Convertio", brand.pk)
         assert link.anchor_type == "branded"
 
-    def test_links_cannot_be_deleted(self, admin_client: Client, link: PlacementLink) -> None:
+    def test_link_removed_on_save(self, admin_client: Client, link: PlacementLink) -> None:
+        # ⊗ в заголовке ссылки — штатный флажок «Удалить» (ADR-060).
         url = reverse("admin:placements_placement_change", args=[link.placement_id])
-        response = admin_client.get(url)
-        assert response.context["inline_admin_formsets"][0].formset.can_delete is False
+        page = admin_client.get(url).content.decode()
+        assert 'class="seo-inline-remove-btn"' in page
+        assert "уберётся при сохранении" in page
         self._post(admin_client, link, keyword="", target_url="https://x", DELETE="on")
+        assert not PlacementLink.objects.filter(pk=link.pk).exists()
+
+    def test_kept_without_mark(self, admin_client: Client, link: PlacementLink) -> None:
+        self._post(admin_client, link, keyword="", target_url="https://convertio.co/")
         assert PlacementLink.objects.filter(pk=link.pk).exists()
+
+    def test_other_product_links_stay(
+        self, admin_client: Client, site: Site, convertio: Product
+    ) -> None:
+        # Размещение другого продукта — только просмотр (ADR-073): ⊗ нет.
+        clideo = Product.objects.create(name="Clideo", domain="clideo.com")
+        placement = Placement.objects.create(site=site, product=clideo)
+        placement.links.create(anchor="clideo", target_url="https://clideo.com/")
+        url = reverse("admin:placements_placement_change", args=[placement.pk])
+        response = admin_client.get(url)
+        assert response.status_code == 200
+        page = response.content.decode()
+        assert "https://clideo.com/" in page
+        assert "seo-inline-remove" not in page
 
 
 @pytest.mark.parametrize(

@@ -196,12 +196,16 @@ class PlacementLinkInline(StackedInline):
     Что на странице (`rel`, позиция, живость, время пропажи), пишут
     краулер и проверка живости (E2-04, E2-05) — в форме только чтение:
     время пропажи пишется один раз.
+
+    Ссылку убирают ⊗ в её заголовке, как новую (ADR-060): блок сворачивается
+    в «уберётся при сохранении · Вернуть», удаляется по «Сохранить»
+    (`admin/edit_inline/stacked_remove.html`, seo/inline-remove.css).
     """
 
     model = PlacementLink
     form = PlacementLinkForm
     formset = PlacementLinkFormSet
-    can_delete = False
+    template = "admin/edit_inline/stacked_remove.html"
     readonly_fields = (
         "is_alive",
         "rel",
@@ -242,6 +246,9 @@ class PlacementLinkInline(StackedInline):
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return own_product(request, obj) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return own_product(request, obj) and super().has_delete_permission(request, obj)
 
 
 def own_product(request: HttpRequest, obj: Any = None) -> bool:
@@ -526,6 +533,7 @@ class PlacementAdmin(RecordAdmin):
                 Css("seo/invoices.css"),
                 Css("seo/anchors.css"),
                 Css("seo/placement-tabs.css"),
+                Css("seo/inline-remove.css"),
             )
         }
 

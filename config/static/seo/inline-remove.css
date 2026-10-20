@@ -1,0 +1,70 @@
+/* ⊗ у сохранённой записи инлайна (admin/edit_inline/stacked_remove.html):
+   как у новой записи — тот же значок, то же место. Флажок «Удалить» штатный,
+   но спрятан; ⊗ и «Вернуть» — его подписи, состояние — :has(:checked), без
+   скрипта. Отмеченная запись сворачивается до заголовка. */
+
+.seo-inline-remove > input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Значок Django (inline-delete.svg) маской: цвет — свой, красный под мышью. */
+.seo-inline-remove-btn {
+  float: right;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background-color: #999;
+  -webkit-mask: url("../admin/img/inline-delete.svg") center / contain no-repeat;
+  mask: url("../admin/img/inline-delete.svg") center / contain no-repeat;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.seo-inline-remove-btn:hover {
+  background-color: var(--error-fg);
+}
+
+.seo-inline-removed {
+  display: none;
+  float: right;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0;
+  color: var(--error-fg);
+  font-weight: normal;
+  text-transform: none;
+}
+
+.seo-inline-remove:has(> input:checked) .seo-inline-remove-btn {
+  display: none;
+}
+
+.seo-inline-remove:has(> input:checked) .seo-inline-removed {
+  display: inline-flex;
+}
+
+.seo-inline-remove:has(> input:focus-visible) .seo-inline-remove-btn,
+.seo-inline-remove:has(> input:focus-visible) .seo-inline-removed .seo-btn {
+  outline: 2px solid var(--seo-accent);
+  outline-offset: 2px;
+}
+
+/* Отмеченная запись: только заголовок — зачёркнутый, с красной полосой слева. */
+.inline-related:has(> h3 > .seo-inline-remove > input:checked) > :not(h3) {
+  display: none;
+}
+
+.inline-related:has(> h3 > .seo-inline-remove > input:checked) > h3 {
+  box-shadow: inset 3px 0 0 var(--error-fg);
+}
+
+.inline-related:has(> h3 > .seo-inline-remove > input:checked) > h3 > b,
+.inline-related:has(> h3 > .seo-inline-remove > input:checked) > h3 > .inline_label {
+  color: var(--body-quiet-color);
+  text-decoration: line-through;
+}
