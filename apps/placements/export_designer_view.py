@@ -231,6 +231,7 @@ def _view(model_admin: ModelAdmin[Placement], request: HttpRequest) -> HttpRespo
             config = design.validate(payload.get("config"), registry)
             template = _template(request, str(payload.get("token", "")))
             records = design.dataset(_queryset(model_admin, request), registry)
+            design.convert(records, config)
             decisions = payload.get("decisions", {})
             if not isinstance(decisions, dict):
                 raise design.DesignError("Неверные решения для строк образца.")
@@ -304,6 +305,7 @@ def _view(model_admin: ModelAdmin[Placement], request: HttpRequest) -> HttpRespo
         "initial": design.initial(registry),
         "config": draft.config if draft else design.initial(registry),
         "profiles": _profiles(_user_id(request)),
+        "currencies": design.currencies(),
         "count": queryset.count(),
         "ids": request.POST.getlist("ids"),
         "select_across": request.POST.get("select_across", "0"),

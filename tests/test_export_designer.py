@@ -4,6 +4,7 @@ import csv
 import datetime as dt
 import io
 import json
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -15,7 +16,8 @@ from openpyxl import Workbook, load_workbook
 
 from apps.placements import export_designer as design
 from apps.placements.models import Placement, PlacementLink
-from apps.sites.models import Product, Site
+from apps.sites.models import ExchangeRate, Product, Site
+from apps.sites.rates import convert_cents
 from apps.workspace.models import ExportProfile
 
 pytestmark = pytest.mark.django_db
@@ -264,3 +266,85 @@ def test_constructor_keeps_admin_navigation(admin_client: Client, placed: Placem
     html = response.content.decode()
     assert 'id="header"' in html and 'id="nav-sidebar"' in html
     assert 'id="palette-switch"' in html
+
+
+class TestCurrency:
+    """Валюта сумм: «Исходная валюта» и «Пересчитать в» (просьба 19.10.2026)."""
+
+    @pytest.fixture(autouse=True)
+    def rates(self) -> None:
+        for code, rate in (("USD", "1.25"), ("GBP", "0.8")):
+            ExchangeRate.objects.create(
+                currency=code, rate_date=dt.date(2026, 10, 16), rate=Decimal(rate)
+            )
+
+    def _rows(self, client: Client, value: dict[str, Any]) -> list[list[str]]:
+        response = post(client, "preview", config=value)
+        assert response.status_code == 200, response.content
+        rows: list[list[str]] = response.json()["rows"]
+        return rows
+
+    def test_dollar_payment_in_euro(self, admin_client: Client, placed: Placement) -> None:
+        placed.price_paid_cents, placed.currency = 10000, "USD"
+        placed.save()
+        value = config("paid", "currency", "paid_eur")
+        assert self._rows(admin_client, value) == [["100.00", "USD", "80.00"]]
+        value["currency_to"] = "EUR"
+        assert self._rows(admin_client, value) == [["80.00", "EUR", "80.00"]]
+
+    def test_each_payment_from_its_own_currency(
+        self, admin_client: Client, placed: Placement
+    ) -> None:
+        # «Как в размещении»: евро остаются евро, в фунты — по курсу.
+        value = {**config("paid", "currency"), "currency_to": "GBP"}
+        assert self._rows(admin_client, value) == [["98.76", "GBP"]]
+
+    def test_chosen_source_overrides_recorded(
+        self, admin_client: Client, placed: Placement
+    ) -> None:
+        # Записано в евро, но выбрано «все суммы в долларах» — 123.45 считаются долларами.
+        value = {**config("paid", "currency", "paid_eur"), "currency_from": "USD"}
+        assert self._rows(admin_client, value) == [["123.45", "USD", "98.76"]]
+
+    def test_site_prices_and_default_header(self) -> None:
+        registry = design.fields()
+        value = {**config("placement_price", "announce_price"), "currency_to": "USD"}
+        value["columns"][0]["header"] = registry["placement_price"].header
+        records = [{"pk": 1, "values": {"placement_price": 10000, "announce_price": None}}]
+        design.convert(records, value)
+        assert records[0]["values"] == {"placement_price": 12500, "announce_price": None}
+        plan = design.build_plan(records, design.validate(value, registry), registry)
+        # Стандартный заголовок — в выбранной валюте, свой — как вписан.
+        assert [c.title for c in plan.sheet.columns] == [
+            "Цена размещения статья, USD",
+            "announce_price",
+        ]
+
+    def test_old_template_without_currency(self, admin_client: Client, placed: Placement) -> None:
+        value = config("paid")
+        del value["currency_from"], value["currency_to"]
+        assert self._rows(admin_client, value) == [["123.45"]]
+
+    def test_unknown_currency_rejected(self, admin_client: Client, placed: Placement) -> None:
+        value = {**config("paid"), "currency_to": "XXX"}
+        assert post(admin_client, "preview", config=value).status_code == 400
+
+    def test_choice_list(self, admin_client: Client, placed: Placement) -> None:
+        response = admin_client.get(reverse("admin:placements_placement_export_designer"))
+        assert response.context["bootstrap"]["currencies"] == ["EUR", "USD", "GBP"]
+
+
+@pytest.mark.parametrize(
+    ("cents", "source", "target", "expected"),
+    [
+        (10000, "USD", "USD", 10000),
+        (10000, "USD", "EUR", 8000),
+        (10000, "EUR", "GBP", 8000),
+        (10000, "USD", "GBP", 6400),
+        (1, "EUR", "USD", 1),
+        (10000, "USD", "JPY", None),
+    ],
+)
+def test_convert_cents(cents: int, source: str, target: str, expected: int | None) -> None:
+    rates = {"EUR": Decimal(1), "USD": Decimal("1.25"), "GBP": Decimal("0.8")}
+    assert convert_cents(cents, source, target, rates) == expected

@@ -59,3 +59,18 @@ def to_eur_cents(cents: int, currency: str, rates: dict[str, Decimal]) -> int | 
     if rate is None:
         return None
     return int((Decimal(cents) / rate).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+def convert_cents(cents: int, source: str, target: str, rates: dict[str, Decimal]) -> int | None:
+    """Центы из одной валюты в другую через евро по курсам `rates`; курса нет — None.
+
+    Деление и умножение — до округления: с округлением до евроцента посередине
+    USD → GBP терял бы цент. Округление — как в `to_eur_cents`.
+    """
+    if source == target:
+        return cents
+    source_rate, target_rate = rates.get(source), rates.get(target)
+    if source_rate is None or target_rate is None:
+        return None
+    exact = Decimal(cents) / source_rate * target_rate
+    return int(exact.quantize(Decimal(1), rounding=ROUND_HALF_UP))

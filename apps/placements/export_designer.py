@@ -1,5 +1,10 @@
 """План выгрузки: атомарные поля, точный порядок образца, один результат для
 предпросмотра, буфера, CSV и XLSX. Чтение размещений ничего в них не меняет.
+
+Валюта сумм — два выбора настроек (просьба пользователя 19.10.2026):
+«Исходная валюта» — валюта «Итог цены»: как записано в размещении или одна
+на все строки; «Пересчитать в» — куда перевести «Итог цену» и цены площадки
+(они в евро). Курс — последний ЕЦБ, как в «Экономике» (`latest_rates`).
 """
 
 import csv
@@ -16,11 +21,16 @@ from apps.placements import export as legacy
 from apps.placements.models import Placement, PlacementLink
 from apps.sites.domains import normalize_domain
 from apps.sites.models import Product
+from apps.sites.rates import convert_cents, latest_rates, to_eur_cents
 from config import export
 
 SCREEN = "placements.placement"
 MAX_COLUMNS = 100
 MAX_ROWS = 10000
+# Цены площадки «на сегодня» — в евро; при пересчёте переводятся из евро.
+EUR_PRICES = ("placement_price", "announce_price", "writing_price")
+# Первыми в выборе валюты; остальные — с курсом ЕЦБ, по алфавиту.
+MAIN_CURRENCIES = ("EUR", "USD", "GBP")
 
 
 class DesignError(ValueError):
@@ -286,6 +296,9 @@ def initial(registry: dict[str, Field]) -> dict[str, Any]:
         "delimiter": ";",
         # Как в рабочей Google-таблице (формат Financial): 206.14, 7.50 — без знака валюты.
         "decimal": ".",
+        # Пусто — «как в размещении» и «не пересчитывать».
+        "currency_from": "",
+        "currency_to": "",
     }
 
 
@@ -342,6 +355,11 @@ def validate(raw: object, registry: dict[str, Field]) -> dict[str, Any]:
         raise DesignError("Неверный формат CSV.")
     if not any(c["enabled"] for c in clean) and mode == "custom":
         raise DesignError("Включите хотя бы одну колонку.")
+    # У шаблонов до выбора валюты ключей нет — как было: без пересчёта.
+    source, target = raw.get("currency_from", ""), raw.get("currency_to", "")
+    known = {"", *currencies()}
+    if source not in known or target not in known:
+        raise DesignError("Выберите валюту из списка.")
     return {
         "version": 1,
         "mode": mode,
@@ -349,7 +367,56 @@ def validate(raw: object, registry: dict[str, Field]) -> dict[str, Any]:
         "columns": clean,
         "delimiter": delimiter,
         "decimal": decimal,
+        "currency_from": source,
+        "currency_to": target,
     }
+
+
+def currencies() -> list[str]:
+    """Валюты выбора: евро, доллар, фунт — первыми, остальные с курсом ЕЦБ."""
+    known = set(latest_rates())
+    first = [code for code in MAIN_CURRENCIES if code in known]
+    return first + sorted(known - set(first))
+
+
+def convert(records: list[dict[str, Any]], config: dict[str, Any]) -> None:
+    """Суммы строк — в валюте из настроек; курса нет — ячейка пустая.
+
+    «Итог цена» — из исходной валюты (своя у каждого размещения, если её не
+    выбрали одну на все), «Итог цена, EUR» — от неё же. Цены площадки — из
+    евро. «Валюта» — во что пересчитали.
+    """
+    source, target = config["currency_from"], config["currency_to"]
+    if not source and not target:
+        return
+    rates = latest_rates()
+    for record in records:
+        values = record["values"]
+        paid = values.get("paid")
+        if isinstance(paid, int):
+            paid_currency = source or str(values.get("currency") or "EUR")
+            values["paid_eur"] = to_eur_cents(paid, paid_currency, rates)
+            values["currency"] = target or paid_currency
+            if target:
+                values["paid"] = convert_cents(paid, paid_currency, target, rates)
+        if not target:
+            continue
+        for key in EUR_PRICES:
+            cents = values.get(key)
+            if isinstance(cents, int):
+                values[key] = convert_cents(cents, "EUR", target, rates)
+
+
+def _header(spec: dict[str, Any], config: dict[str, Any], registry: dict[str, Field]) -> str:
+    """Заголовок колонки: у пересчитанной цены площадки «, EUR» стандартного
+    заголовка меняется на выбранную валюту; свой заголовок — как вписан."""
+    header: str = spec["header"]
+    target = config["currency_to"]
+    source = spec["source"]
+    # Снятая галочка в образце — значение из файла, его не пересчитывали.
+    if target and spec["enabled"] and source in EUR_PRICES and header == registry[source].header:
+        return header.replace("EUR", target)
+    return header
 
 
 def dataset(queryset: QuerySet[Placement], registry: dict[str, Field]) -> list[dict[str, Any]]:
@@ -478,7 +545,7 @@ def build_plan(
             raise DesignError("Колонки образца должны сохранять исходные позиции.")
     columns = [
         export.Column(
-            c["header"],
+            _header(c, config, registry),
             registry[c["source"]].column.kind
             if c["source"] in registry and c["enabled"]
             else export.Kind.TEXT,

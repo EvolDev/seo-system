@@ -1,7 +1,9 @@
 """Реальный браузер: конструктор, сохранение, перетаскивание, импорт и оба файла."""
 
 import csv
+import datetime as dt
 import io
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -10,7 +12,7 @@ from playwright.sync_api import Page, expect
 from pytest_django.live_server_helper import LiveServer
 
 from apps.placements.models import Placement
-from apps.sites.models import Product, Site
+from apps.sites.models import ExchangeRate, Product, Site
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True, serialized_rollback=True)]
 URL = "/admin/placements/placement/export-designer/"
@@ -161,3 +163,36 @@ def test_constructor_admin_palettes_and_soft_navigation(
         expect(page.locator("#columns-dialog")).to_be_visible()
         page.locator("#expand-columns").click()
         assert page.evaluate("window.__exportSameDocument === true")
+
+
+def test_currency_choice_converts_and_is_remembered(
+    admin_page: Page, live_server: LiveServer
+) -> None:
+    """Два выбора валюты: пересчёт в предпросмотре, выбор — после перезагрузки."""
+    product = Product.objects.create(name="Convertio", domain="convertio.co")
+    Placement.objects.create(
+        site=Site.objects.create(domain="dollar.com"),
+        product=product,
+        price_paid_cents=10000,
+        currency="USD",
+    )
+    ExchangeRate.objects.create(
+        currency="USD", rate_date=dt.date(2026, 10, 16), rate=Decimal("1.25")
+    )
+    page = admin_page
+    page.goto(live_server.url + URL)
+    expect(page.locator("#server-status")).to_contain_text("Готово: 1 строк")
+    expect(page.locator("#currency-from")).to_have_value("")
+    expect(page.locator("#currency-to")).to_have_value("")
+    paid = page.locator(
+        "#columns tr", has=page.locator('[data-action="header"][value="Итог цена"]')
+    )
+    expect(paid.locator(".sample-value")).to_have_text("100.00")
+
+    page.locator("#currency-to").select_option("EUR")
+    expect(paid.locator(".sample-value")).to_have_text("80.00")
+    expect(page.locator("#currencyhelp")).to_contain_text("в EUR")
+    page.wait_for_timeout(1000)
+    page.reload()
+    expect(page.locator("#currency-to")).to_have_value("EUR")
+    expect(paid.locator(".sample-value")).to_have_text("80.00")
