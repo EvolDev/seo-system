@@ -3,17 +3,34 @@
 Шапка «Анкоров» продукта (E3-05): контекст page — anchor_views.page_context.
 Доли правятся прямо в таблице: поле с data-share уходит POST-ом при смене
 значения (seo/anchors.js), после записи список перечитывается на месте.
+Страница — один список анкоров, регион (ADR-075): выбор с флагами открывает
+адрес без перезагрузки (seo/country-picker.js, data-navigate); цели долей —
+общие для продукта, факт — по списку.
 {% endcomment %}
 <section class="seo-anchors" data-anchors-page data-share-url="{{ page.share_url }}" data-product="{{ page.product.pk|unlocalize }}">
   <div class="seo-anchors-top">
+    <div class="seo-anchors-region">
+      {% if page.region_links %}
+      <span class="seo-anchors-region-label">Список анкоров</span>
+      <div class="seo-country seo-anchors-region-picker" data-country-picker data-navigate data-auto data-label="Список анкоров" data-placeholder="США, Бразилия…">
+        <select>
+          {% for link in page.region_links %}<option value="{{ link.url }}"{% if link.flag %} data-flag="{{ link.flag }}"{% endif %}{% if link.selected %} selected{% endif %}>{{ link.list.region_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if page.delete_list_url %}<a class="seo-btn seo-btn-danger" href="{{ page.delete_list_url }}" data-panel>Удалить список «{{ page.anchor_list.region_name }}»</a>{% endif %}
+      {% else %}
+      <span class="seo-sub">Списков анкоров нет — загрузите файл анкоров с регионом.</span>
+      {% endif %}
+    </div>
     <div class="seo-anchors-actions">
-      {% if page.can_add %}<button type="button" class="seo-btn seo-btn-primary" data-anchor-new data-product="{{ page.product.pk|unlocalize }}">＋ Новый анкор</button>{% endif %}
+      {% if page.can_add and page.anchor_list %}<button type="button" class="seo-btn seo-btn-primary" data-anchor-new data-product="{{ page.product.pk|unlocalize }}" data-list="{{ page.anchor_list.pk|unlocalize }}">＋ Новый анкор</button>{% endif %}
       <a class="seo-btn" href="{{ page.upload_url }}">Загрузить файл анкоров</a>
       <a class="seo-btn" href="{{ page.inactive_url }}">Неактивные ({{ page.inactive_count }})</a>
     </div>
   </div>
 
-  <p class="seo-sub">Статистика и рекомендации используют активные анкоры. У неактивных сохраняются старые размещения и позиции.</p>
+  <p class="seo-sub">Статистика и рекомендации — по активным анкорам списка{% if page.anchor_list %} «{{ page.anchor_list.region_name }}»{% endif %}; цели долей общие для всех регионов. У неактивных сохраняются старые размещения и позиции.</p>
   <dl class="seo-anchors-tiles">
     <div><dt>Ключей</dt><dd>{{ page.keys }}</dd></div>
     <div><dt>Безанкорных</dt><dd>{{ page.naked_count }}</dd></div>
@@ -98,17 +115,18 @@
     </details>
 
     <details class="seo-anchors-block" open>
-      <summary><h3>Страны</h3><span class="seo-sub">целевая доля размещений по стране площадки</span></summary>
+      <summary><h3>Страны</h3><span class="seo-sub">цель — доля размещений по региону; факт — размещённые и ждущие по их списку анкоров, не выбран — по угаданному</span></summary>
       {% if page.countries %}
       <table class="seo-anchors-table">
-        <thead><tr><th>Страна</th><th class="seo-num-col">Цель</th></tr></thead>
+        <thead><tr><th>Страна</th><th class="seo-num-col">Цель</th><th class="seo-num-col">Размещений</th><th class="seo-num-col">Факт</th></tr></thead>
         <tbody>
         {% for row in page.countries %}
-          <tr><td>{{ row.flag }}{{ row.name }}</td><td class="seo-num-col">{% include "admin/keywords/_share_input.html" with kind="country" id=row.row.pk field="target" value=row.share label=row.name %}</td></tr>
+          <tr><td>{{ row.flag }}{{ row.name }}</td><td class="seo-num-col">{% if row.row %}{% include "admin/keywords/_share_input.html" with kind="country" id=row.row.pk field="target" value=row.share label=row.name %}{% else %}<span class="seo-sub">—</span>{% endif %}</td><td class="seo-num-col">{{ row.count|default:"—" }}</td><td class="seo-num-col">{{ row.fact }}</td></tr>
         {% endfor %}
         </tbody>
-        <tfoot><tr><td>Сумма</td><td class="seo-num-col {% if not page.country_sum_ok %}seo-anchors-warn{% endif %}"><b>{{ page.country_sum }}</b></td></tr></tfoot>
+        {% if page.country_sum %}<tfoot><tr><td>Сумма</td><td class="seo-num-col {% if not page.country_sum_ok %}seo-anchors-warn{% endif %}"><b>{{ page.country_sum }}</b></td><td colspan="2"></td></tr></tfoot>{% endif %}
       </table>
+      {% if not page.country_sum %}<p class="seo-sub">Целей по странам нет — придут из листа «Распределение по странам».</p>{% endif %}
       {% else %}
       <p class="seo-sub">Долей по странам нет — придут из листа «Распределение по странам».</p>
       {% endif %}

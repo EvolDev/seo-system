@@ -7,10 +7,21 @@ seo/anchors.js; добавленный анкор приходит событи�
 
 Окно стоит внутри формы размещения, поэтому своей формы у него нет, а у полей
 нет имён: с формой размещения они не уходят, значения собирает скрипт.
+Список анкоров — регион (ADR-075): заранее выбран открытый на странице или
+выбранный в блоке размещения; свой список окно не заводит — их заводит загрузка.
 {% endcomment %}
 <dialog class="seo-anchor-dialog" data-anchor-dialog data-add-url="{{ dialog.add_url }}" data-product="{{ product.pk|unlocalize }}" aria-labelledby="seo-anchor-dialog-title">
   <div class="seo-anchor-dialog-body">
     <h2 id="seo-anchor-dialog-title">Новый анкор <span class="seo-sub" data-anchor-dialog-product>{{ product.name }}</span></h2>
+    <label>Список анкоров
+      <div class="seo-country seo-anchor-dialog-list" data-country-picker data-auto data-label="Список анкоров" data-placeholder="США, Бразилия…">
+        <select data-dialog-field="list">
+          {% for item in dialog.lists %}<option value="{{ item.id }}"{% if item.flag %} data-flag="{{ item.flag }}"{% endif %}{% if item.id == dialog.current_list %} selected{% endif %}>{{ item.name }}</option>
+          {% empty %}<option value=""{% if dialog.first_list.flag %} data-flag="{{ dialog.first_list.flag }}"{% endif %}>{{ dialog.first_list.name }} — новый список</option>
+          {% endfor %}
+        </select>
+      </div>
+    </label>
     <label>Анкор<input type="text" data-dialog-field="keyword" maxlength="200" autocomplete="off" placeholder="mp4 to mp3"></label>
     <label>Куда ведёт<input type="url" data-dialog-field="target_url" maxlength="2000" autocomplete="off" placeholder="https://{{ dialog.product_domain|default:product.domain }}/…"></label>
     <label>Тип страницы <span class="seo-sub">— если знаете: так анкор попадёт в доли</span>

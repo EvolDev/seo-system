@@ -24,11 +24,11 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
 
 from apps.keywords import matching
-from apps.keywords.models import AnchorType, Keyword, KeywordPosition
+from apps.keywords.models import AnchorList, AnchorType, Keyword, KeywordPosition
 from apps.placements import invoices
 from apps.placements.matching import LADDER, match_placement
 from apps.placements.models import (
@@ -138,8 +138,13 @@ class Importer:
 
     # --- Ключи и позиции (маппинг §2) ---
 
+    def main_keywords(self) -> QuerySet[Keyword]:
+        """Анкоры основного списка Convertio — таблица ведёт их (США, ADR-075)."""
+        anchor_list = AnchorList.ensure_main(self.convertio.pk)
+        return Keyword.objects.filter(anchor_list=anchor_list)
+
     def import_keywords(self, rows: Iterable[KeywordData]) -> dict[str, Keyword]:
-        keywords = {k.keyword: k for k in Keyword.objects.filter(product=self.convertio)}
+        keywords = {k.keyword: k for k in self.main_keywords()}
         for data in rows:
             where = f"ключ «{data.keyword}» (строка {data.row})"
             keyword = keywords.get(data.keyword)
@@ -843,7 +848,7 @@ class Importer:
         """Links Placed / Waiting из таблицы против расчёта по базе (маппинг §2.1)."""
         counted = {
             keyword.pk: keyword
-            for keyword in Keyword.objects.filter(product=self.convertio).annotate(
+            for keyword in self.main_keywords().annotate(
                 placed=Count("links", filter=Q(links__placement__status=PlacementStatus.PLACED)),
                 waiting=Count("links", filter=Q(links__placement__status__in=WAITING)),
             )

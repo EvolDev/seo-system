@@ -4,15 +4,30 @@
 размещено и ждёт, «цель / факт» по типам страниц и «Рекомендуем» — анкоры по
 порядку, которые ведут доли к цели. Щелчок по анкору ставит его в свободную
 ссылку (seo/anchors.js). Контекст — anchor_block из anchor_views.summary_context;
-этот же кусок отдаёт адрес summary_url, когда в новой форме сменили продукт.
+этот же кусок отдаёт адрес summary_url, когда в новой форме сменили продукт или
+в блоке — список анкоров.
+
+Список анкоров — регион размещения (ADR-075): выбор с флагами — поле формы
+размещения anchor_list, сохраняется с ней; рядом — почему этот список. Сменили —
+блок приходит заново, в полях «Анкор» — анкоры этого списка.
 {% endcomment %}
 {% if anchor_block %}{% with block=anchor_block %}
 <section class="seo-anchor-block" data-anchor-block data-summary-url="{{ block.summary_url }}" data-product="{{ block.product.pk|unlocalize }}" aria-label="Анкоры продукта">
   <header class="seo-anchor-block-head">
     <h2>Анкоры {{ block.product.name }}</h2>
+    {% if block.lists %}
+    <div class="seo-country seo-anchor-region" data-country-picker data-auto data-label="Список анкоров размещения" data-placeholder="США, Бразилия…">
+      <select name="anchor_list" data-anchor-list aria-label="Список анкоров размещения">
+        {% for item in block.lists %}<option value="{{ item.id }}"{% if item.flag %} data-flag="{{ item.flag }}"{% endif %}{% if item.id == block.current_id %} selected{% endif %}>{{ item.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if block.reason %}<span class="seo-sub" data-anchor-region-why>{{ block.reason }}</span>{% endif %}
+    {% endif %}
     <span class="seo-anchor-block-totals">размещено <b class="seo-anchor-placed">{{ block.data.placed }}</b> · ждут <b class="seo-anchor-waiting">{{ block.data.waiting }}</b></span>
     <a href="{{ block.anchors_url }}" class="seo-anchor-block-all" target="_blank" rel="noopener">Все анкоры ↗</a>
   </header>
+  <p class="seo-warnline" data-anchor-region-warn hidden></p>
   <div class="seo-anchor-block-grid">
     <div class="seo-anchor-types">
       <h3>Доли по типам страниц <span class="seo-sub">факт / цель</span></h3>

@@ -8,6 +8,10 @@
 и страны над списком. Список — строки `v_keyword_coverage`; анкор правится
 панелью справа (форма ключа), новый — окном «＋ Новый анкор», доли — прямо в
 таблице над списком.
+
+Страница показывает один список анкоров — регион (ADR-075): выбор с флагами,
+последний запоминается. Позиции — по выдаче страны списка. Список удаляется
+целиком со служебной страницы списка — с подтверждением, что уйдёт с ним.
 """
 
 import datetime as dt
@@ -29,19 +33,27 @@ from django.views.decorators.http import require_GET, require_POST
 from apps.keywords import anchor_export, anchor_views
 from apps.keywords.models import (
     NAKED_TYPES,
+    AnchorList,
     AnchorType,
     Keyword,
     KeywordCoverage,
     KeywordPosition,
 )
+from apps.sites import countries
 from apps.sites.admin import ProductFilter
+from apps.workspace.filters import Remembering, remembered
 from apps.workspace.products import WorkingProductFilter, product_filter, working_product_id
+from apps.workspace.saved_filters import screen_of
 from config.admin import RecordAdmin, SnapshotAdmin
 from config.assets import Css, Js
 
 # Колонок позиций в списке «Анкоров» — как на листе таблицы: четыре последних снимка.
 POSITION_COLUMNS = 4
 _DATES = "_seo_anchor_dates"
+_LIST = "_seo_anchor_list"
+# Параметр адреса списка анкоров и экран, за которым запоминается выбор.
+LIST_PARAM = "list"
+SCREEN = screen_of("keywords", "keywordcoverage")
 
 
 @admin.register(Keyword)
@@ -49,13 +61,25 @@ class KeywordAdmin(RecordAdmin):
     """Ключ (анкор) — форма для панели «Анкоров». Список ключей — «Анкоры»."""
 
     panel = True
-    list_display = ("keyword", "product", "tool", "page_type", "volume", "anchor_type", "is_active")
-    list_filter = (WorkingProductFilter, "tool", "is_active", "anchor_type")
+    list_display = (
+        "keyword",
+        "product",
+        "anchor_list",
+        "tool",
+        "page_type",
+        "volume",
+        "anchor_type",
+        "is_active",
+    )
+    list_filter = (WorkingProductFilter, "anchor_list", "tool", "is_active", "anchor_type")
     # Поиск нужен и выбору ключа у ссылки размещения.
     search_fields = ("keyword",)
-    list_select_related = ("product",)
+    list_select_related = ("product", "anchor_list__product")
+    # Список — регион анкора (ADR-075): меняет его загрузка с другим регионом, не форма.
+    readonly_fields = ("anchor_list",)
     fields = (
         "product",
+        "anchor_list",
         "keyword",
         "target_url",
         "anchor_type",
@@ -66,6 +90,35 @@ class KeywordAdmin(RecordAdmin):
         "share",
         "is_active",
     )
+
+
+@admin.register(AnchorList)
+class AnchorListAdmin(RecordAdmin):
+    """Список анкоров региона (ADR-075): заводит загрузка файла анкоров, здесь —
+    посмотреть и удалить целиком. Подтверждение показывает, что уйдёт с ним:
+    анкоры и их позиции; ссылки размещений останутся без анкора, размещения —
+    без списка (регион снова угадается)."""
+
+    panel = True
+    list_display = ("product", "region_cell", "anchors_cell", "created_at")
+    list_filter = (WorkingProductFilter,)
+    list_select_related = ("product",)
+    fields = ("product", "region_cell", "anchors_cell", "created_at")
+    readonly_fields = ("product", "region_cell", "anchors_cell", "created_at")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    @admin.display(description="регион")
+    def region_cell(self, obj: AnchorList) -> SafeString:
+        return format_html("{}{}", countries.flag_html(obj.country), obj.region_name)
+
+    @admin.display(description="анкоров")
+    def anchors_cell(self, obj: AnchorList) -> int:
+        return obj.keywords.count()
 
 
 @admin.register(KeywordPosition)
@@ -157,9 +210,12 @@ class ValueFilter(admin.SimpleListFilter):
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
         product = anchors_product(request)
+        chosen, _ = anchors_lists(request)
         rows = KeywordCoverage.objects.exclude(**{f"{self.column}__isnull": True})
         if product is not None:
             rows = rows.filter(product_id=product)
+        if chosen is not None:
+            rows = rows.filter(anchor_list_id=chosen.pk)
         values = rows.order_by(self.column).values_list(self.column, flat=True).distinct()
         return [(value, value) for value in values]
 
@@ -188,6 +244,62 @@ def anchors_product(request: HttpRequest) -> int | None:
     return working_product_id(request)
 
 
+def anchors_lists(request: HttpRequest) -> tuple[AnchorList | None, list[AnchorList]]:
+    """Список анкоров экрана и все списки его продукта (ADR-075).
+
+    Из адреса, иначе выбранный тут в прошлый раз, иначе основной — если он у
+    продукта экрана: сменили продукт — открывается основной список нового.
+    """
+    if not hasattr(request, _LIST):
+        product = anchors_product(request)
+        lists = AnchorList.of_product(product) if product is not None else []
+        by_id = {str(item.pk): item for item in lists}
+        wanted = request.GET.get(LIST_PARAM) or remembered(request, SCREEN, LIST_PARAM) or ""
+        found = by_id.get(wanted) or (lists[0] if lists else None)
+        setattr(request, _LIST, (found, lists))
+    chosen: tuple[AnchorList | None, list[AnchorList]] = getattr(request, _LIST)
+    return chosen
+
+
+class AnchorListFilter(Remembering, admin.SimpleListFilter):
+    """Список анкоров — регион (ADR-075). Пункта «все» нет: доли считаются по одному
+    списку. Без выбора — выбранный в прошлый раз, иначе основной (`anchors_lists`)."""
+
+    title = "список анкоров"
+    parameter_name = LIST_PARAM
+    template = "admin/keywords/anchor_list_filter.html"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        _, self.lists = anchors_lists(request)
+        return [(str(item.pk), item.region_name) for item in self.lists]
+
+    def value(self) -> str | None:
+        chosen, _ = anchors_lists(self.request)
+        if chosen is None:
+            return None
+        value = str(chosen.pk)
+        self.used_parameters[self.parameter_name] = value
+        return value
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        value = self.value()
+        if value is None:
+            # Списков у продукта нет — и анкоров нет: продукт сузит до пустого.
+            return queryset
+        self.keep(value)
+        return queryset.filter(anchor_list_id=int(value))
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        value = self.value()
+        for item in self.lists:
+            yield {
+                "selected": str(item.pk) == value,
+                "query_string": changelist.get_query_string({self.parameter_name: item.pk}),
+                "display": item.region_name,
+                "flag": countries.flag_code(item.country) or "",
+            }
+
+
 @admin.register(KeywordCoverage)
 class KeywordCoverageAdmin(RecordAdmin):
     """Анкоры продукта: лист «Распределение анкоров» и доли над ним (E3-05)."""
@@ -195,6 +307,7 @@ class KeywordCoverageAdmin(RecordAdmin):
     list_display_links = None
     list_filter = (
         ProductFilter,
+        AnchorListFilter,
         ActivityFilter,
         KindFilter,
         ToolFilter,
@@ -208,8 +321,11 @@ class KeywordCoverageAdmin(RecordAdmin):
     change_list_template = "admin/keywords/keywordcoverage/change_list.html"
 
     class Media:
-        css: ClassVar[dict[str, tuple[Css, ...]]] = {"all": (Css("seo/anchors.css"),)}
-        js = (Js("seo/anchors.js"), Js("seo/anchor-export.js"))
+        # offers.css и флаги — выбор списка с флагами (seo/country-picker.js), как «Регион».
+        css: ClassVar[dict[str, tuple[Css, ...]]] = {
+            "all": (Css("seo/offers.css"), Css("flags/sprite-hq.css"), Css("seo/anchors.css"))
+        }
+        js = (Js("seo/country-picker.js"), Js("seo/anchors.js"), Js("seo/anchor-export.js"))
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -245,9 +361,10 @@ class KeywordCoverageAdmin(RecordAdmin):
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[KeywordCoverage]:
         queryset = super().get_queryset(request)
+        country = positions_country(request)
         for index, date in enumerate(position_dates(request)):
             positions = KeywordPosition.objects.filter(
-                keyword_id=OuterRef("pk"), country="US", checked_at=date
+                keyword_id=OuterRef("pk"), country=country, checked_at=date
             ).values("position")[:1]
             queryset = queryset.annotate(**{f"pos_{index}": Subquery(positions)})
         return queryset
@@ -314,7 +431,8 @@ class KeywordCoverageAdmin(RecordAdmin):
         self, request: HttpRequest, extra_context: dict[str, Any] | None = None
     ) -> HttpResponse:
         product = anchors_product(request)
-        page = anchor_views.page_context(request, product)
+        chosen, lists = anchors_lists(request)
+        page = anchor_views.page_context(request, product, chosen, lists)
         query = request.GET.urlencode()
         suffix = f"?{query}" if query else ""
         context = {
@@ -324,8 +442,9 @@ class KeywordCoverageAdmin(RecordAdmin):
             "anchor_export_url": reverse("admin:keywords_keywordcoverage_export") + suffix,
         }
         if page["anchors_page"] is not None:
-            # Заголовок экрана — с продуктом: «Анкоры Convertio».
-            context["title"] = f"Анкоры {page['anchors_page']['product'].name}"
+            # Заголовок экрана — с продуктом и регионом: «Анкоры Convertio · Бразилия».
+            region = f" · {chosen.region_name}" if chosen is not None else ""
+            context["title"] = f"Анкоры {page['anchors_page']['product'].name}{region}"
         return super().changelist_view(request, context)
 
     def get_changelist(self, request: HttpRequest, **kwargs: Any) -> type[ChangeList]:
@@ -381,14 +500,22 @@ class KeywordCoverageAdmin(RecordAdmin):
         return own + super().get_urls()
 
 
+def positions_country(request: HttpRequest) -> str:
+    """Страна позиций в списке: страна выдачи списка экрана, как пишет загрузка (US, BR)."""
+    chosen, _ = anchors_lists(request)
+    return chosen.country.upper() if chosen is not None else "US"
+
+
 def position_dates(request: HttpRequest) -> list[dt.date]:
-    """Даты последних снимков позиций анкоров продукта, новые слева — как на листе."""
+    """Даты последних снимков позиций анкоров списка, новые слева — как на листе."""
     if not hasattr(request, _DATES):
-        product = anchors_product(request)
+        chosen, _ = anchors_lists(request)
         dates: list[dt.date] = []
-        if product is not None:
+        if chosen is not None:
             dates = list(
-                KeywordPosition.objects.filter(keyword__product_id=product, country="US")
+                KeywordPosition.objects.filter(
+                    keyword__anchor_list_id=chosen.pk, country=positions_country(request)
+                )
                 .order_by("-checked_at")
                 .values_list("checked_at", flat=True)
                 .distinct()[:POSITION_COLUMNS]

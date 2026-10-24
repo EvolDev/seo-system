@@ -12,7 +12,7 @@ from django.test import Client
 from django.urls import reverse
 from openpyxl import load_workbook
 
-from apps.keywords.models import AnchorType, Keyword
+from apps.keywords.models import AnchorList, AnchorType, Keyword
 from apps.sites.models import Product, UploadKind
 from apps.sites.uploads import service
 from apps.workspace.products import choose_product
@@ -27,9 +27,12 @@ EXCEL = reverse("admin:keywords_keywordcoverage_export")
 def product(admin_user: User) -> Product:
     product = Product.objects.create(name="Convertio", domain="convertio.co")
     choose_product(admin_user, product)
+    # bulk_create не зовёт save(): список анкоров — явно (ADR-075).
+    anchor_list = AnchorList.ensure_main(product.pk)
     Keyword.objects.bulk_create(
         Keyword(
             product=product,
+            anchor_list=anchor_list,
             keyword=f"audio {i:03}",
             target_url="https://convertio.co/wav-mp3/",
             tool="Audio",

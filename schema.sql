@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.32 от 24.10.2026 — списки анкоров по регионам (ADR-075)
 -- Версия 1.31 от 24.10.2026 — наборы условий серости по языкам (ADR-074)
 -- Версия 1.30 от 18.10.2026 — повторные размещения: предложение продавца у размещения (ADR-073)
 -- Версия 1.29 от 14.10.2026 — копирайтеры, цена статьи и черновик у размещения (ADR-072)
@@ -447,6 +448,17 @@ CREATE TABLE copywriters (
 -- Имя без учёта регистра — как у продавцов.
 CREATE UNIQUE INDEX copywriters_name_key ON copywriters (lower(name));
 
+-- Список анкоров продукта для региона (ADR-075): свои анкоры и позиции по
+-- выдаче страны. Первый список продукта — основной. Цели долей — общие для
+-- продукта: page_type_shares и country_shares.
+CREATE TABLE anchor_lists (
+    id          bigserial PRIMARY KEY,
+    product_id  bigint NOT NULL REFERENCES products(id),
+    country     char(2) NOT NULL,                   -- регион, строчными: us, br
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (product_id, country)
+);
+
 CREATE TABLE placements (
     id                     bigserial PRIMARY KEY,
     site_id                bigint NOT NULL REFERENCES sites(id),
@@ -478,6 +490,7 @@ CREATE TABLE placements (
     copywriter_cents       integer,        -- цена статьи копирайтеру
     copywriter_currency    char(3),
     draft_url              text,           -- черновик статьи
+    anchor_list_id         bigint REFERENCES anchor_lists(id), -- регион анкоров; пусто — угадать (ADR-075)
     run_id                 uuid,
     created_at             timestamptz NOT NULL DEFAULT now(),
     updated_at             timestamptz NOT NULL DEFAULT now()
@@ -557,6 +570,7 @@ CREATE INDEX idx_invoice_items_placement ON invoice_items(placement_id);
 CREATE TABLE keywords (
     id           bigserial PRIMARY KEY,
     product_id   bigint NOT NULL REFERENCES products(id),
+    anchor_list_id bigint NOT NULL REFERENCES anchor_lists(id), -- регион (ADR-075); продукт — тот же
     keyword      text NOT NULL,
     target_url   text NOT NULL,
     volume       integer,
@@ -566,7 +580,7 @@ CREATE TABLE keywords (
     anchor_type  anchor_type,
     is_active    boolean NOT NULL DEFAULT true,
     share        numeric(5,2),              -- доля внутри группы, %: у безанкорного — из листа безанкорки
-    UNIQUE (product_id, keyword)
+    UNIQUE (anchor_list_id, keyword)            -- «convert» есть и у США, и у Бразилии
 );
 CREATE INDEX idx_keywords_tool ON keywords(tool) WHERE is_active;
 
@@ -1018,6 +1032,10 @@ CREATE TRIGGER placements_status_update AFTER UPDATE OF status ON placements
 
 -- Журнал загрузки (ADR-060): вставка и удаление — строкой; правка — только
 -- настоящая, со сменой значения.
+CREATE TRIGGER anchor_lists_upload_log AFTER INSERT OR DELETE ON anchor_lists
+    FOR EACH ROW EXECUTE FUNCTION log_upload_change();
+CREATE TRIGGER anchor_lists_upload_log_update AFTER UPDATE ON anchor_lists
+    FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION log_upload_change();
 CREATE TRIGGER auth_user_upload_log AFTER INSERT OR DELETE ON auth_user
     FOR EACH ROW EXECUTE FUNCTION log_upload_change();
 CREATE TRIGGER auth_user_upload_log_update AFTER UPDATE ON auth_user
@@ -1130,7 +1148,7 @@ SELECT
     k.volume,
     k.target_url,
     (SELECT position FROM keyword_positions kp
-      WHERE kp.keyword_id = k.id AND kp.country = 'US'
+      WHERE kp.keyword_id = k.id AND kp.country = upper(al.country)
       ORDER BY checked_at DESC LIMIT 1) AS last_position,
     COUNT(pl.id) FILTER (WHERE p.status = 'placed') AS links_placed,
     COUNT(pl.id) FILTER (WHERE p.status IN ('in_work','ordered','writing')) AS links_waiting,
@@ -1138,11 +1156,13 @@ SELECT
     k.page_type,
     k.anchor_type::text AS anchor_type,
     k.share,
-    k.is_active
+    k.is_active,
+    k.anchor_list_id
 FROM keywords k
+JOIN anchor_lists al ON al.id = k.anchor_list_id
 LEFT JOIN placement_links pl ON pl.keyword_id = k.id
 LEFT JOIN placements p ON p.id = pl.placement_id
-GROUP BY k.id;
+GROUP BY k.id, al.id;
 
 -- Срок берётся из ПОСЛЕДНЕЙ проверки. Минимум по всей истории давал вечные
 -- «просрочки» по уже выполненным проверкам (найдено тестом 23.09.2026).

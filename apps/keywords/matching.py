@@ -6,7 +6,8 @@
 странице и типу страниц, отдельный анкор под фразу не заводится.
 
 Одна функция поиска на всех: форма ссылки, подсказка в панели, обе загрузки
-размещений и привязка ссылок при загрузке анкоров.
+размещений и привязка ссылок при загрузке анкоров. Ищем в одном списке анкоров —
+регионе размещения (ADR-075): «Convertio» у США и у Бразилии — разные анкоры.
 
 Правила поиска (`find`):
 1. Полное совпадение текста с анкором — без регистра и лишних пробелов. Так
@@ -32,7 +33,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from apps.keywords.models import NAKED_TYPES, AnchorType, Keyword
+from apps.keywords.models import NAKED_TYPES, AnchorList, AnchorType, Keyword
 
 NAKED = frozenset(str(kind) for kind in NAKED_TYPES)
 # Слово — буквы и цифры подряд; апостроф и точка его разрывают:
@@ -81,11 +82,16 @@ def same_url(first: str, second: str) -> bool:
     return first.strip().rstrip("/") == second.strip().rstrip("/")
 
 
-def candidates(product_id: int) -> list[Candidate]:
-    """Активные анкоры продукта — для новых привязок."""
+def candidates(product_id: int, anchor_list_id: int | None = None) -> list[Candidate]:
+    """Активные анкоры списка — для новых привязок; список не задан — основной."""
+    if anchor_list_id is None:
+        main = AnchorList.main_of(product_id)
+        anchor_list_id = main.pk if main is not None else 0
     return [
         Candidate(pk, text, url, kind)
-        for pk, text, url, kind in Keyword.objects.filter(product_id=product_id, is_active=True)
+        for pk, text, url, kind in Keyword.objects.filter(
+            product_id=product_id, anchor_list_id=anchor_list_id, is_active=True
+        )
         .order_by("pk")
         .values_list("pk", "keyword", "target_url", "anchor_type")
     ]

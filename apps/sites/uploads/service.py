@@ -49,7 +49,7 @@ from apps.sites.uploads.columns import (
     looks_like_header,
     validate_mapping,
 )
-from apps.sites.uploads.files import Column, FileError, Table, read_table
+from apps.sites.uploads.files import Column, FileError, Table, read_sheets, read_table
 from apps.sites.uploads.placement_columns import PField
 from apps.sites.uploads.placement_columns import detect_currency as placement_detect_currency
 from apps.sites.uploads.placement_records import ParsedPlacements, parse_placements
@@ -792,10 +792,15 @@ def _skip(mapping: Mapping[str, str]) -> dict[str, str]:
 
 
 def anchors_plan(upload: Upload) -> anchors.AnchorPlan:
-    """Файл анкоров → план по свежему состоянию базы: сводка и запись строят его одинаково."""
+    """Файл анкоров → план по свежему состоянию базы: сводка и запись строят его одинаково.
+
+    Регион — страна загрузки (ADR-075); у загрузок до регионов — основной список.
+    """
+    product = upload.get_product()
+    region = anchors.region_of(product, upload.country)
     table = _table(upload, header_row=upload.header_row)
     mapping = anchors.column_mapping(upload.mapping or {})
-    parsed = anchors.Parsed()
+    parsed = anchors.Parsed(sheet=_anchors_sheet(upload))
     anchors.parse_anchors(
         table,
         mapping,
@@ -803,13 +808,29 @@ def anchors_plan(upload: Upload) -> anchors.AnchorPlan:
         as_naked=anchors.mode(upload.mapping) == anchors.Mode.NAKED
         or anchors.AField.SHARE in mapping.values(),
     )
-    anchors.read_shares(file_path(upload), parsed)
+    anchors.read_shares(file_path(upload), parsed, region)
     try:
         return anchors.build_plan(
-            parsed, upload.get_product(), sync=anchors.policy(upload.mapping) == anchors.Policy.SYNC
+            parsed,
+            product,
+            sync=anchors.policy(upload.mapping) == anchors.Policy.SYNC,
+            region=region,
         )
     except ValueError as error:
         raise FileError(str(error)) from error
+
+
+def _anchors_sheet(upload: Upload) -> str | None:
+    """Лист анкоров региона загрузки в книге; у CSV листа нет — проверяется имя файла.
+
+    Лист или файл помечен регионом другого списка продукта — FileError (ADR-075).
+    """
+    path = file_path(upload)
+    region = anchors.region_of(upload.get_product(), upload.country)
+    if path.suffix.lower() not in (".xlsx", ".xlsm"):
+        anchors.check_marks(Path(upload.file_name).stem, region, what="файл")
+        return None
+    return anchors.anchor_sheet(read_sheets(path), region)
 
 
 def _check_anchors(upload: Upload) -> None:
@@ -891,12 +912,14 @@ def _table(upload: Upload, *, header_row: int | None) -> Table:
         UploadKind.REF_DOMAINS: refdomains.looks_like_refdomains,
         UploadKind.ANCHORS: anchors.looks_like_anchors_header,
     }.get(UploadKind(upload.kind), looks_like_header)
-    # В книге анкоров нужный лист — не первый: берём тот, где узнаётся заголовок.
+    # В книге анкоров нужный лист — не первый: лист анкоров региона загрузки.
+    anchors_kind = upload.kind == UploadKind.ANCHORS
     return read_table(
         file_path(upload),
         header_row=header_row,
         is_header=is_header,
-        pick_sheet=upload.kind == UploadKind.ANCHORS,
+        pick_sheet=anchors_kind,
+        sheet=_anchors_sheet(upload) if anchors_kind else None,
     )
 
 

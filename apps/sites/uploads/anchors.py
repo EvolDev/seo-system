@@ -16,6 +16,12 @@
 ложатся снимками на дату колонки, доли — по строкам. Полный список отключает
 отсутствующие анкоры загружаемого вида; дополнение сохраняет их активными.
 Вернувшиеся включаются с прежним ID, в том числе при повторе того же файла.
+
+Файл — анкоры одного региона (ADR-075): сводится со списком анкоров продукта
+этого региона, нет списка — запись его заводит. Позиции — по выдаче страны
+региона. В книге с листами анкоров нескольких регионов («…EN», «…BR») берётся
+лист с пометкой региона в названии. Цели долей и страны — общие для продукта;
+лист безанкорки без пометки региона — основного списка (США).
 """
 
 import datetime as dt
@@ -24,15 +30,20 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+from functools import cache
 from pathlib import Path
 from typing import Any
 
 from django.db import transaction
-from django.utils import timezone
+from django.db.models import Q
+from django.utils import timezone, translation
+from django_countries import countries as country_names
 
 from apps.keywords import matching
 from apps.keywords.models import (
+    DEFAULT_REGION,
     NAKED_TYPES,
+    AnchorList,
     AnchorType,
     CountryShare,
     Keyword,
@@ -41,16 +52,19 @@ from apps.keywords.models import (
 )
 from apps.placements.models import PlacementLink
 from apps.sites import countries
+from apps.sites.languages import country_language
 from apps.sites.models import MetricSource, Product, Upload, UploadKind, UploadStatus
 from apps.sites.uploads.columns import Confidence
 from apps.sites.uploads.files import (
     HEADER_SEARCH_ROWS,
     Column,
+    FileError,
     SheetRows,
     Table,
     header_key,
     is_blank,
     read_sheets,
+    recognized,
     show,
 )
 
@@ -58,8 +72,6 @@ from apps.sites.uploads.files import (
 SHOWN = 200
 # Позиция «вне топ-100» в таблице — 101 (12-IMPORT-MAPPING.md §2.2).
 OUT_OF_TOP = 101
-# Позиции — по выдаче США, как в таблице.
-POSITIONS_COUNTRY = "US"
 PCT = Decimal("0.01")
 
 # Параметр разбора хранится рядом с разметкой; это не колонка файла.
@@ -258,6 +270,152 @@ def looks_like_anchors_header(cells: Sequence[str]) -> bool:
     return AField.KEYWORD in found and AField.URL in found
 
 
+# ---------- Регион файла (ADR-075) ----------
+
+# Как ещё пишут регион в названии листа или файла — кроме кода страны и языка выдачи.
+_REGION_WORDS: dict[str, frozenset[str]] = {
+    "us": frozenset({"usa"}),
+    "gb": frozenset({"uk"}),
+}
+
+
+@dataclass(frozen=True)
+class Region:
+    """Регион загрузки: страна, основной ли это список продукта, регионы других списков."""
+
+    country: str
+    is_main: bool
+    others: tuple[str, ...] = ()
+
+    @property
+    def name(self) -> str:
+        return countries.name(self.country)
+
+    @property
+    def positions_country(self) -> str:
+        """Страна позиций — как в `keyword_positions`: заглавными (US, BR)."""
+        return self.country.upper()
+
+
+def region_of(product: Product, country: str | None) -> Region:
+    """Регион загрузки у продукта. Не указан (загрузки до регионов) — основной список."""
+    lists = AnchorList.of_product(product.pk)
+    main = lists[0] if lists else None
+    code = (country or (main.country if main is not None else DEFAULT_REGION)).lower()
+    return Region(
+        country=code,
+        is_main=main is None or main.country == code,
+        others=tuple(item.country for item in lists if item.country != code),
+    )
+
+
+def marked_for(title: str, country: str) -> bool:
+    """В названии листа или файла пометка региона: код страны, язык выдачи, название.
+
+    «Распределение анкоров BR» — Бразилия, «…EN» — США (выдача на английском).
+    """
+    words = tuple(re.findall(r"\w+", title.casefold()))
+    marks = {country, *_REGION_WORDS.get(country, ())}
+    language = country_language(country)
+    if language is not None:
+        marks.add(language)
+    if marks.intersection(words):
+        return True
+    return any(_has_words(words, name) for name in _country_names(country))
+
+
+@cache
+def _country_names(country: str) -> tuple[tuple[str, ...], ...]:
+    """Название страны по-русски и по-английски — словами."""
+    with translation.override("en"):
+        english = str(country_names.name(country.upper()))
+    names = (countries.name(country), english)
+    return tuple(found for name in names if (found := tuple(re.findall(r"\w+", name.casefold()))))
+
+
+def _has_words(words: Sequence[str], name: Sequence[str]) -> bool:
+    size = len(name)
+    return any(tuple(words[i : i + size]) == tuple(name) for i in range(len(words) - size + 1))
+
+
+def anchor_sheet(sheets: Sequence[tuple[str, SheetRows]], region: Region) -> str | None:
+    """Лист анкоров книги для региона: один — он, несколько — с пометкой региона.
+
+    Не нашли, какой брать, или лист помечен другим регионом продукта — FileError:
+    анкоры одного региона в список другого не пишем.
+    """
+    found = [title for title, rows in sheets if recognized(looks_like_anchors_header)(rows)]
+    # Лист безанкорки («Anchor text», «URL», «%») тоже узнаётся как анкоры — он
+    # читается листом долей, а не основным листом.
+    naked = {title for title, rows in sheets if _is_naked_sheet(rows)}
+    found = [title for title in found if title not in naked] or found
+    if not found:
+        return None
+    if len(found) == 1:
+        check_marks(found[0], region, what="лист")
+        return found[0]
+    mine = [title for title in found if marked_for(title, region.country)]
+    if len(mine) == 1:
+        return mine[0]
+    names = ", ".join(f"«{title}»" for title in found)
+    raise FileError(
+        f"В книге несколько листов анкоров: {names}. Для региона «{region.name}» не понял,"
+        f" какой брать: в названии нужного листа должно быть «{region.country.upper()}»"
+        f" или «{region.name}». Переименуйте лист или загрузите его отдельным файлом."
+    )
+
+
+def _is_naked_sheet(rows: SheetRows) -> bool:
+    _, headers = _header(rows)
+    return _find(headers, "anchor text") is not None and "%" in headers
+
+
+def check_marks(title: str, region: Region, *, what: str) -> None:
+    """Лист или файл помечен другим регионом, а своим — нет: FileError.
+
+    Другой регион — регион другого списка продукта (в том числе по языку:
+    «EN» — США) или явная пометка любой страны: код заглавными («BR») или
+    название («Бразилия»). Так файл «…анкоров BR» не уйдёт в список США, даже
+    если списка Бразилии ещё нет и регион забыли выбрать.
+    """
+    if marked_for(title, region.country):
+        return
+    found = [other for other in region.others if marked_for(title, other)]
+    found += [code for code in explicit_countries(title) if code != region.country]
+    if found:
+        name = countries.name(found[0])
+        raise FileError(
+            f"Похоже, это анкоры региона «{name}»: так помечен {what} «{title}»."
+            f" Выберите регион «{name}» или переименуйте {what}."
+        )
+
+
+def explicit_countries(title: str) -> list[str]:
+    """Страны, явно названные в названии листа или файла: код заглавными или название.
+
+    Код — только заглавными: «BR», а не «co» из «convertio.co»; язык («EN», «PT»)
+    страной не считается — его понимает `marked_for` своего региона.
+    """
+    codes = [
+        word.lower()
+        for word in re.findall(r"\w+", title)
+        if len(word) == 2 and word.isupper() and countries.is_known(word.lower())
+    ]
+    words = tuple(re.findall(r"\w+", title.casefold()))
+    # Короткие названия одним словом («Чад», «США») словами заголовка не считаем:
+    # слишком легко совпасть случайно. США свой регион узнаёт и так (`marked_for`).
+    named = [
+        country.code
+        for country in countries.all_countries()
+        if any(
+            _has_words(words, name)
+            for name in _country_names(country.code)
+            if len(name) > 1 or len(name[0]) > 3
+        )
+    ]
+    return list(dict.fromkeys(codes + named))
+
+
 # ---------- Разбор ----------
 
 
@@ -303,6 +461,9 @@ class Parsed:
     naked: list[NakedRow] = field(default_factory=list)
     countries: list[CountryRow] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
+    # Что из книги не взято и почему — не ошибка файла, полный список не блокирует.
+    notes: list[str] = field(default_factory=list)
+    sheet: str | None = None  # лист анкоров книги
     rows: int = 0
     naked_only: bool = False
 
@@ -369,9 +530,15 @@ def parse_anchors(
         )
 
 
-def parse_share_sheets(sheets: Iterable[tuple[str, SheetRows]], parsed: Parsed) -> None:
-    """Листы долей книги — по заголовкам, без разметки."""
-    for _, rows in sheets:
+def parse_share_sheets(
+    sheets: Iterable[tuple[str, SheetRows]], parsed: Parsed, region: Region | None = None
+) -> None:
+    """Листы долей книги — по заголовкам, без разметки.
+
+    Цели по типам страниц и странам — общие для продукта, берутся всегда.
+    Безанкорка — анкоры списка: с `region` — только лист этого региона (`_naked_applies`).
+    """
+    for title, rows in sheets:
         header_at, headers = _header(rows)
         if header_at is None:
             continue
@@ -379,13 +546,35 @@ def parse_share_sheets(sheets: Iterable[tuple[str, SheetRows]], parsed: Parsed) 
         if "тип страницы" in headers and _find(headers, "целевая доля") is not None:
             _parse_types(body, headers, parsed)
         elif _find(headers, "anchor text") is not None and "%" in headers:
-            _parse_naked(body, headers, parsed)
+            if region is None or _naked_applies(title, region, parsed):
+                _parse_naked(body, headers, parsed)
         elif "страна" in headers and _find(headers, "доля") is not None:
             _parse_countries(body, headers, parsed)
 
 
-def read_shares(path: Path, parsed: Parsed) -> None:
-    parse_share_sheets(read_sheets(path), parsed)
+def _naked_applies(title: str, region: Region, parsed: Parsed) -> bool:
+    """Лист безанкорки — этого региона: помечен им, а без пометки — основного списка."""
+    if marked_for(title, region.country):
+        return True
+    for other in region.others:
+        if marked_for(title, other):
+            parsed.notes.append(
+                f"Лист «{title}» — безанкорка региона «{countries.name(other)}»:"
+                f" к списку «{region.name}» не применяю."
+            )
+            return False
+    if region.is_main:
+        return True
+    parsed.notes.append(
+        f"Лист «{title}» без региона в названии — это безанкорка основного списка:"
+        f" к списку «{region.name}» не применяю. Безанкорку региона — листом с"
+        f" «{region.country.upper()}» в названии или отдельным файлом."
+    )
+    return False
+
+
+def read_shares(path: Path, parsed: Parsed, region: Region | None = None) -> None:
+    parse_share_sheets(read_sheets(path), parsed, region)
 
 
 def _parse_types(rows: Sequence[Sequence[object]], headers: list[str], parsed: Parsed) -> None:
@@ -484,10 +673,15 @@ class Change:
 
 @dataclass
 class AnchorPlan:
-    """Что сделает запись: по свежему состоянию базы, сводка и запись строят его одинаково."""
+    """Что сделает запись: по свежему состоянию базы, сводка и запись строят его одинаково.
+
+    `anchor_list` — список региона; пусто — его заведёт запись.
+    """
 
     product: Product
     parsed: Parsed
+    region: Region
+    anchor_list: AnchorList | None = None
     new: list[AnchorRow] = field(default_factory=list)
     changed: list[Change] = field(default_factory=list)
     quiet: list[Change] = field(default_factory=list)
@@ -513,6 +707,12 @@ class AnchorPlan:
         naked = {r.text.casefold(): naked_type(r.text, self.product).label for r in parsed.naked}
         dates = sorted({date for row in parsed.anchors for date, _ in row.positions})
         return {
+            "region": self.region.name,
+            "region_flag": countries.flag_code(self.region.country) or "",
+            "positions_country": self.region.positions_country,
+            "new_list": self.anchor_list is None,
+            "sheet": parsed.sheet or "",
+            "notes": parsed.notes[:SHOWN],
             "rows": parsed.rows,
             "anchors": len(parsed.anchors),
             "new": [
@@ -572,7 +772,8 @@ class AnchorPlan:
     @property
     def nothing(self) -> bool:
         return not (
-            self.deactivate
+            (self.anchor_list is None and (self.parsed.anchors or self.parsed.naked))
+            or self.deactivate
             or self.new
             or self.changed
             or self.positions_new
@@ -595,15 +796,19 @@ _FACTS = (
 )
 
 
-def build_plan(parsed: Parsed, product: Product, *, sync: bool = False) -> AnchorPlan:
+def build_plan(
+    parsed: Parsed, product: Product, *, sync: bool = False, region: Region | None = None
+) -> AnchorPlan:
     if sync and (not parsed.anchors and not parsed.naked):
         raise ValueError("Полный список пуст: отключение анкоров не выполнено.")
     if sync and parsed.issues:
         raise ValueError(
             "В полном списке есть замечания. Исправьте файл или выберите дополнение списка."
         )
-    plan = AnchorPlan(product=product, parsed=parsed)
-    existing = _by_text(product)
+    region = region or region_of(product, None)
+    anchor_list = AnchorList.objects.filter(product=product, country=region.country).first()
+    plan = AnchorPlan(product=product, parsed=parsed, region=region, anchor_list=anchor_list)
+    existing = _by_text(anchor_list)
     in_file: set[str] = set()
     known_rows: list[tuple[Keyword, AnchorRow]] = []
     for row in parsed.anchors:
@@ -639,7 +844,7 @@ def build_plan(parsed: Parsed, product: Product, *, sync: bool = False) -> Ancho
     in_file.update(row.text.casefold() for row in parsed.naked)
     scope = [
         k
-        for k in Keyword.objects.filter(product=product, is_active=True)
+        for k in Keyword.objects.filter(anchor_list=anchor_list, is_active=True)
         if k.keyword.casefold() not in in_file
         and (
             (k.anchor_type in NAKED_TYPES and bool(parsed.naked))
@@ -660,7 +865,7 @@ def _plan_positions(plan: AnchorPlan, known: list[tuple[Keyword, AnchorRow]]) ->
     current = {
         (keyword_id, checked_at): position
         for keyword_id, checked_at, position in KeywordPosition.objects.filter(
-            keyword_id__in=ids, country=POSITIONS_COUNTRY
+            keyword_id__in=ids, country=plan.region.positions_country
         ).values_list("keyword_id", "checked_at", "position")
     }
     for keyword, row in known:
@@ -726,7 +931,10 @@ def _plan_countries(plan: AnchorPlan) -> None:
 
 
 def write(plan: AnchorPlan) -> dict[str, int]:
-    """Сведение плана с базой — одной транзакцией. Итог — счётчики для экрана."""
+    """Сведение плана с базой — одной транзакцией. Итог — счётчики для экрана.
+
+    Списка региона нет — запись его заводит (в журнале загрузки: отмена уберёт).
+    """
     product = plan.product
     counts = {
         "created": 0,
@@ -740,10 +948,16 @@ def write(plan: AnchorPlan) -> dict[str, int]:
         "reactivated": len(plan.reactivated),
     }
     with transaction.atomic():
+        anchor_list = (
+            plan.anchor_list
+            or AnchorList.objects.get_or_create(product=product, country=plan.region.country)[0]
+        )
+        plan.anchor_list = anchor_list
         created: dict[str, Keyword] = {}
         for row in plan.new:
             created[row.keyword.casefold()] = Keyword.objects.create(
                 product=product,
+                anchor_list=anchor_list,
                 keyword=row.keyword,
                 target_url=row.url,
                 volume=row.volume,
@@ -758,19 +972,19 @@ def write(plan: AnchorPlan) -> dict[str, int]:
                 setattr(change.keyword, attr, value)
             change.keyword.save(update_fields=list(change.values))
             counts["updated"] += 1 if change.shown else 0
-        counts["positions"] = _write_positions(plan, created)
-        counts["naked"] = _write_naked(plan)
+        counts["positions"] = _write_positions(plan, created, anchor_list)
+        counts["naked"] = _write_naked(plan, anchor_list)
         counts["types"] = _write_types(plan)
         counts["countries"] = _write_countries(plan)
         counts["deactivated"] = Keyword.objects.filter(
-            product=product, pk__in=[k.pk for k in plan.deactivate], is_active=True
+            anchor_list=anchor_list, pk__in=[k.pk for k in plan.deactivate], is_active=True
         ).update(is_active=False)
-        counts["links"] = attach_links(product)
+        counts["links"] = attach_links(anchor_list)
     return counts
 
 
-def _write_positions(plan: AnchorPlan, created: dict[str, Keyword]) -> int:
-    existing = _by_text(plan.product)
+def _write_positions(plan: AnchorPlan, created: dict[str, Keyword], anchor_list: AnchorList) -> int:
+    existing = _by_text(anchor_list)
     written = 0
     for row in plan.parsed.anchors:
         keyword = created.get(row.keyword.casefold()) or existing.get(row.keyword.casefold())
@@ -779,7 +993,7 @@ def _write_positions(plan: AnchorPlan, created: dict[str, Keyword]) -> int:
         for date, position in row.positions:
             _, made = KeywordPosition.objects.update_or_create(
                 keyword=keyword,
-                country=POSITIONS_COUNTRY,
+                country=plan.region.positions_country,
                 checked_at=date,
                 defaults={"position": position, "source": MetricSource.CSV_IMPORT},
             )
@@ -787,18 +1001,19 @@ def _write_positions(plan: AnchorPlan, created: dict[str, Keyword]) -> int:
     return written + plan.positions_changed
 
 
-def _write_naked(plan: AnchorPlan) -> int:
+def _write_naked(plan: AnchorPlan, anchor_list: AnchorList) -> int:
     """Безанкорные анкоры: тип по тексту, тип страницы — как у ключа с тем же адресом."""
-    page_types = _page_types_by_url(plan.product)
+    page_types = _page_types_by_url(anchor_list)
     # CSV безанкорки и строки книги могут попасть и в основной лист анкоров.
     # Их уже записала первая часть этой транзакции: используем свежий список.
-    existing = _by_text(plan.product)
+    existing = _by_text(anchor_list)
     written = 0
     for row in plan.naked_new:
         keyword = existing.get(row.text.casefold())
         if keyword is None:
             keyword = Keyword.objects.create(
                 product=plan.product,
+                anchor_list=anchor_list,
                 keyword=row.text,
                 target_url=row.url,
                 anchor_type=naked_type(row.text, plan.product),
@@ -864,18 +1079,25 @@ def _write_countries(plan: AnchorPlan) -> int:
     return len(plan.countries_new) + len(plan.countries_changed)
 
 
-def attach_links(product: Product) -> int:
+def attach_links(anchor_list: AnchorList) -> int:
     """Ссылки без анкора из списка — к анкору по тексту (ADR-069).
 
     Старые «Convertio», «click here» из таблицы получают анкор, когда в список
     пришла безанкорка; «Convertio's mp4 to mp3 converter» — когда пришёл ключ.
     Поиск — `apps.keywords.matching`: анкор целиком или ключ внутри фразы.
     Ссылки с ключом не трогаем: связь выбрал человек или прошлая загрузка.
-    Запись идёт в транзакции загрузки — журнал её отменит.
+    Только ссылки размещений этого списка (ADR-075); размещения без списка — у
+    основного. Запись идёт в транзакции загрузки — журнал её отменит.
     """
-    pool = matching.candidates(product.pk)
+    product_id = anchor_list.product_id
+    pool = matching.candidates(product_id, anchor_list.pk)
     attached = 0
-    links = PlacementLink.objects.filter(placement__product=product, keyword__isnull=True)
+    own = Q(placement__anchor_list=anchor_list)
+    if anchor_list == AnchorList.main_of(product_id):
+        own |= Q(placement__anchor_list__isnull=True)
+    links = PlacementLink.objects.filter(
+        own, placement__product_id=product_id, keyword__isnull=True
+    )
     for link in links.only("pk", "anchor", "target_url", "anchor_type"):
         found, kind = matching.bind(link.anchor, pool, url=link.target_url)
         if found.keyword is None:
@@ -904,14 +1126,16 @@ def naked_type(text: str, product: Product) -> AnchorType:
 # ---------- Мелочи ----------
 
 
-def _by_text(product: Product) -> dict[str, Keyword]:
-    return {k.keyword.casefold(): k for k in Keyword.objects.filter(product=product)}
+def _by_text(anchor_list: AnchorList | None) -> dict[str, Keyword]:
+    if anchor_list is None:
+        return {}
+    return {k.keyword.casefold(): k for k in Keyword.objects.filter(anchor_list=anchor_list)}
 
 
-def _page_types_by_url(product: Product) -> dict[str, str]:
+def _page_types_by_url(anchor_list: AnchorList | None) -> dict[str, str]:
     found: dict[str, str] = {}
     for url, page_type in (
-        Keyword.objects.filter(product=product, page_type__isnull=False)
+        Keyword.objects.filter(anchor_list=anchor_list, page_type__isnull=False)
         .exclude(anchor_type__in=NAKED_TYPES)
         .order_by("pk")
         .values_list("target_url", "page_type")

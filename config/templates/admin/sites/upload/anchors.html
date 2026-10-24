@@ -2,8 +2,11 @@
 {% comment %}
 Файл анкоров продукта (E3-05, ADR-059): сводка «что сведётся с базой» до записи
 и итог после. Полный список отключает отсутствующие; дополнение оставляет их активными.
-Новое добавляется, знакомое обновляется, позиции ложатся снимками. Пока идёт
+Новое добавляется, знакомое обновляется, позиции ложатся замерами на даты
+колонок «Pos …» (место анкора в Google на дату). Пока идёт
 проверка или запись, страница опрашивает состояние (seo/uploads.js).
+Файл — анкоры одного региона (ADR-075): список региона, новый — заведётся при
+записи; лист книги и пропущенные листы — в сводке.
 {% endcomment %}
 
 {% block extrahead %}{{ block.super }}{% include "admin/sites/upload/_head.html" %}{% endblock %}
@@ -12,7 +15,8 @@
 {% block content %}
 {% include "admin/sites/upload/_steps.html" %}
 <p class="seo-lead">
-  Анкоры <b>{{ upload.product.name }}</b> — файл «{{ upload.file_name }}».
+  Анкоры <b>{{ upload.product.name }}</b>{% if summary.region %} · список {{ region_flag }}<b>{{ summary.region }}</b>{% if summary.new_list and not done %} — новый, заведётся при записи{% endif %}{% endif %} — файл «{{ upload.file_name }}»{% if summary.sheet %}, лист «{{ summary.sheet }}»{% endif %}.
+  {% if summary.positions_country %}<span class="seo-sub">Замеры места в Google — по выдаче {{ summary.positions_country }}.</span>{% endif %}
 </p>
 {% if busy %}
   <div class="seo-busy" data-state-url="{% url 'admin:sites_upload_state' upload.pk %}">
@@ -25,7 +29,7 @@
 {% elif upload.status == 'failed' %}
   <div class="errornote">{{ upload.error }}</div>
   <div class="submit-row">
-    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}?kind=anchors&amp;product={{ upload.product_id }}">Загрузить файл снова</a>
+    <a class="seo-btn" href="{% url 'admin:sites_upload_add' %}?kind=anchors&amp;product={{ upload.product_id }}{% if upload.country %}&amp;anchor_country={{ upload.country }}{% endif %}">Загрузить файл снова</a>
   </div>
 {% else %}
   {% if done %}
@@ -34,7 +38,7 @@
       <div class="seo-stat"><b>{{ counts.updated|default:0 }}</b><span>обновлено</span></div>
       <div class="seo-stat seo-warn"><b>{{ counts.deactivated|default:0 }}</b><span>отключено анкоров</span></div>
       <div class="seo-stat seo-good"><b>{{ counts.reactivated|default:0 }}</b><span>снова включено</span></div>
-      <div class="seo-stat"><b>{{ counts.positions|default:0 }}</b><span>позиций записано</span></div>
+      <div class="seo-stat" title="Замер — место анкора в выдаче Google на дату колонки «Pos …» файла: у каждого анкора по замеру на каждую дату"><b>{{ counts.positions|default:0 }}</b><span>замеров записано</span></div>
       <div class="seo-stat"><b>{{ counts.naked|default:0 }}</b><span>безанкорных</span></div>
       <div class="seo-stat"><b>{{ counts.types|default:0 }}</b><span>долей типов страниц</span></div>
       <div class="seo-stat"><b>{{ counts.countries|default:0 }}</b><span>долей стран</span></div>
@@ -54,8 +58,8 @@
       <div class="seo-stat seo-warn"><b>{{ summary.deactivated_total }}</b><span>станут неактивными</span></div>
       <div class="seo-stat seo-good"><b>{{ summary.reactivated_total }}</b><span>снова включатся</span></div>
       <div class="seo-stat"><b>{{ summary.same }}</b><span>без изменений</span></div>
-      <div class="seo-stat"><b>{{ summary.positions_new }}</b><span>новых позиций{% if summary.dates %} · {{ summary.dates|join:", " }}{% endif %}</span></div>
-      <div class="seo-stat seo-warn"><b>{{ summary.positions_changed }}</b><span>позиций изменится</span></div>
+      <div class="seo-stat" title="Замер — место анкора в выдаче Google на дату колонки «Pos …» файла: у каждого анкора по замеру на каждую дату"><b>{{ summary.positions_new }}</b><span>новых замеров{% if summary.dates %} · {{ summary.dates|join:", " }}{% endif %}</span></div>
+      <div class="seo-stat seo-warn" title="Замер — место анкора в выдаче Google на дату колонки «Pos …» файла: у каждого анкора по замеру на каждую дату"><b>{{ summary.positions_changed }}</b><span>замеров изменится</span></div>
       <div class="seo-stat"><b>{{ summary.types_new|add:summary.types_changed }}</b><span>долей типов страниц</span></div>
       <div class="seo-stat"><b>{{ summary.naked_total }}</b><span>безанкорных{% if summary.naked_same %} · {{ summary.naked_same }} без изменений{% endif %}</span></div>
       <div class="seo-stat"><b>{{ summary.countries_new|add:summary.countries_changed }}</b><span>долей стран</span></div>
@@ -109,6 +113,14 @@
         <ul>
           {% for keyword in summary.missing %}<li>{{ keyword }}</li>{% endfor %}
           {% if summary.missing_total > summary.missing|length %}<li class="seo-flat">всего {{ summary.missing_total }}</li>{% endif %}
+        </ul>
+      </div>
+    {% endif %}
+    {% if summary.notes %}
+      <div class="seo-box">
+        <h3>Не взято из книги</h3>
+        <ul>
+          {% for line in summary.notes %}<li>{{ line }}</li>{% endfor %}
         </ul>
       </div>
     {% endif %}

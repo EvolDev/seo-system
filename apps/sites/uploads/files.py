@@ -120,11 +120,14 @@ def show(value: object) -> str:
 SheetRows = list[tuple[object, ...]]
 
 
-def read_rows(path: Path, pick: Callable[[SheetRows], bool] | None = None) -> SheetRows:
+def read_rows(
+    path: Path, pick: Callable[[SheetRows], bool] | None = None, *, sheet: str | None = None
+) -> SheetRows:
     """Все строки листа xlsx или файла csv, как есть.
 
-    Лист — первый, который узнаёт `pick` (в книге анкоров нужный лист —
-    четвёртый); не узнал ни один или `pick` нет — первый непустой.
+    Лист — названный `sheet`, иначе первый, который узнаёт `pick` (в книге
+    анкоров нужный лист — четвёртый); не узнал ни один или `pick` нет — первый
+    непустой.
     """
     if not path.is_file():
         raise FileError(f"Файл не найден: {path.name}")
@@ -133,11 +136,17 @@ def read_rows(path: Path, pick: Callable[[SheetRows], bool] | None = None) -> Sh
         first: SheetRows | None = None
         # Листы читаются по одному и дальше нужного не идут: в книге бывает
         # по 45 000 строк на листе.
-        for _, rows in _iter_sheets(path):
+        for title, rows in _iter_sheets(path):
+            if sheet is not None:
+                if title == sheet:
+                    return rows
+                continue
             if pick is None or pick(rows):
                 return rows
             if first is None:
                 first = rows
+        if sheet is not None:
+            raise FileError(f"В книге нет листа «{sheet}».")
         return first or []
     if suffix in (".csv", ".txt", ".tsv"):
         return _read_csv(path.read_bytes())
@@ -150,15 +159,17 @@ def read_table(
     header_row: int | None = None,
     is_header: Callable[[Sequence[str]], bool] | None = None,
     pick_sheet: bool = False,
+    sheet: str | None = None,
 ) -> Table:
     """Таблица файла. Строка заголовков — заданная или найденная сама.
 
     `is_header` — узнаёт заголовок по значениям ячеек (например, есть
     колонка «площадка» по словарю синонимов). Не узнал ни одну строку —
-    берётся первая строка хотя бы с двумя непустыми ячейками.
+    берётся первая строка хотя бы с двумя непустыми ячейками. `sheet` — лист
+    книги по названию (лист анкоров региона, ADR-075).
     """
-    pick = _recognized(is_header) if pick_sheet and is_header is not None else None
-    rows = read_rows(path, pick)
+    pick = recognized(is_header) if pick_sheet and is_header is not None else None
+    rows = read_rows(path, pick, sheet=sheet)
     if not any(not is_blank(cell) for row in rows for cell in row):
         raise FileError("Файл пустой.")
     if header_row is None:
@@ -246,7 +257,7 @@ def _columns(header_cells: Sequence[object], data: Sequence[Row], width: int) ->
     return tuple(columns)
 
 
-def _recognized(is_header: Callable[[Sequence[str]], bool]) -> Callable[[SheetRows], bool]:
+def recognized(is_header: Callable[[Sequence[str]], bool]) -> Callable[[SheetRows], bool]:
     """Лист узнан: в первых строках есть строка заголовков, которую узнаёт `is_header`."""
 
     def pick(rows: SheetRows) -> bool:

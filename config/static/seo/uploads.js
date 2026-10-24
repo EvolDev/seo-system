@@ -184,9 +184,11 @@
         steps.hidden = !inKinds(steps, "data-steps-for", kind);
       });
     }
-    // Страна выгрузки — общий выбор с флагами и поиском (seo/country-picker.js).
-    var picker = form.querySelector("[data-country-picker]");
-    if (picker && window.seoCountryPicker) window.seoCountryPicker(picker);
+    // Страна выгрузки Ahrefs и регион списка анкоров — общий выбор с флагами и
+    // поиском (seo/country-picker.js).
+    if (window.seoCountryPicker) {
+      form.querySelectorAll("[data-country-picker]").forEach(window.seoCountryPicker);
+    }
     form.querySelectorAll("input[name=kind]").forEach(function (input) {
       input.addEventListener("change", sync);
     });

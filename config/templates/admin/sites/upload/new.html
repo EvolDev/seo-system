@@ -44,6 +44,23 @@
       <label for="{{ form.anchor_policy.id_for_label }}">{{ form.anchor_policy.label }}</label> {{ form.anchor_policy }}
       <div class="help">«Полный список» отключит отсутствующие анкоры этого продукта: обычный файл — ключи, файл безанкорки — безанкорные ссылки. Старые размещения сохранят свои анкоры. Найденные в файле неактивные анкоры снова включатся.</div>
     </div>
+    <div class="form-row" data-kinds="anchors">
+      {{ form.anchor_country.errors }}
+      <label for="id_anchor_country">{{ form.anchor_country.label }}</label>
+      <div class="seo-country" data-country-picker data-label="Регион списка анкоров" data-placeholder="США, Бразилия, br…">
+        <select name="anchor_country" id="id_anchor_country">
+          {% if list_countries %}
+            <optgroup label="Уже есть списки анкоров">
+              {% for country in list_countries %}<option value="{{ country.code }}"{% if country.code == anchor_country %} selected{% endif %} data-search="{{ country.search }}"{% if country.flag %} data-flag="{{ country.flag }}"{% endif %}>{{ country.label }}</option>{% endfor %}
+            </optgroup>
+          {% endif %}
+          <optgroup label="Новый список — страна">
+            {% for country in countries %}{% if country not in list_countries %}<option value="{{ country.code }}"{% if country.code == anchor_country %} selected{% endif %} data-search="{{ country.search }}"{% if country.flag %} data-flag="{{ country.flag }}"{% endif %}>{{ country.label }}</option>{% endif %}{% endfor %}
+          </optgroup>
+        </select>
+      </div>
+      <div class="help">Анкоры какого региона в файле: сведу их со списком этого региона, замеры позиций — по выдаче Google этой страны. Новая страна — новый список. В книге с листами нескольких регионов возьму лист с пометкой региона в названии («Распределение анкоров BR»).</div>
+    </div>
     <div class="form-row" data-kinds="ahrefs_batch">
       {{ form.country.errors }}
       <label for="id_country">{{ form.country.label }}</label>

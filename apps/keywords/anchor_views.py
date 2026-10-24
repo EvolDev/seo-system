@@ -2,6 +2,10 @@
 правка долей на месте, блок «Анкоры продукта» над ссылками размещения и
 подсказка «ключ во фразе» в панели ссылки (ADR-069).
 
+Всё — по одному списку анкоров, региону (ADR-075): на странице — выбранный, в
+размещении — его список, сохранённый или угаданный (`regions`). Цели долей —
+общие для продукта; факт по странам — размещения по регионам.
+
 Ответы на запись — JSON и всегда 200: отказ — вопрос человеку, а не ошибка
 запроса (4xx браузер пишет в консоль ошибкой).
 """
@@ -20,17 +24,19 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.content.domain_settings import anchor_recommend
-from apps.keywords import matching
+from apps.keywords import matching, regions
 from apps.keywords.anchors import Anchor, TypeStat, overview, pct_text, recommend
 from apps.keywords.models import (
+    DEFAULT_REGION,
     NAKED_TYPES,
+    AnchorList,
     AnchorType,
     CountryShare,
     Keyword,
     PageTypeShare,
 )
 from apps.sites import countries
-from apps.sites.models import Product
+from apps.sites.models import Product, Site
 
 MAX_KEYWORD = 200
 MAX_URL = 2000
@@ -46,16 +52,36 @@ TYPE_FIELDS = {
 # ---------- Страница «Анкоры» ----------
 
 
-def page_context(request: HttpRequest, product_id: int | None) -> dict[str, Any]:
-    """Блоки над списком: итоги, доли типов страниц, безанкорка, страны."""
+def page_context(
+    request: HttpRequest,
+    product_id: int | None,
+    anchor_list: AnchorList | None = None,
+    lists: Sequence[AnchorList] = (),
+) -> dict[str, Any]:
+    """Блоки над списком: регион, итоги, доли типов страниц, безанкорка, страны."""
     product = Product.objects.filter(pk=product_id).first() if product_id else None
     if product is None:
         return {"anchors_page": None}
-    data = overview(product.pk)
-    inactive = Keyword.objects.filter(product=product, is_active=False).count()
+    data = overview(product.pk, anchor_list)
+    inactive = Keyword.objects.filter(
+        product=product, anchor_list=anchor_list, is_active=False
+    ).count()
     inactive_query = request.GET.copy()
     inactive_query["activity"] = "inactive"
     inactive_query.pop("p", None)
+    region_query = request.GET.copy()
+    region_query.pop("p", None)
+    region_links = []
+    for item in lists:
+        region_query["list"] = str(item.pk)
+        region_links.append(
+            {
+                "list": item,
+                "url": request.path + "?" + region_query.urlencode(),
+                "flag": countries.flag_code(item.country) or "",
+                "selected": item == anchor_list,
+            }
+        )
     naked = [a for a in data.anchors if a.is_naked]
     naked_links = sum(a.links for a in naked)
     keys = [a for a in data.anchors if not a.is_naked]
@@ -65,6 +91,9 @@ def page_context(request: HttpRequest, product_id: int | None) -> dict[str, Any]
         CountryShare.objects.filter(product=product).order_by("-target_pct", "country")
     )
     country_sum = sum((c.target_pct for c in country_rows), Decimal(0))
+    upload_url = reverse("admin:sites_upload_add") + f"?kind=anchors&product={product.pk}"
+    if anchor_list is not None:
+        upload_url += f"&anchor_country={anchor_list.country}"
     return {
         "anchors_page": {
             "product": product,
@@ -90,23 +119,58 @@ def page_context(request: HttpRequest, product_id: int | None) -> dict[str, Any]
             "naked_sum": pct_text(sum((a.share or Decimal(0) for a in naked), Decimal(0)))
             if naked
             else "",
-            "countries": [
-                {
-                    "row": c,
-                    "name": countries.name(c.country) if c.country else "Остальные",
-                    "flag": countries.flag_html(c.country or countries.GLOBE),
-                    "share": _input(c.target_pct),
-                }
-                for c in country_rows
-            ],
+            "countries": _country_rows(product, country_rows),
             "country_sum": pct_text(country_sum) if country_rows else "",
             "country_sum_ok": not country_rows or country_sum == PCT_MAX,
+            "anchor_list": anchor_list,
+            "region_links": region_links,
             "can_edit": request.user.has_perm("keywords.change_keyword"),
             "can_add": request.user.has_perm("keywords.add_keyword"),
+            "delete_list_url": reverse("admin:keywords_anchorlist_delete", args=[anchor_list.pk])
+            if anchor_list is not None and request.user.has_perm("keywords.delete_anchorlist")
+            else "",
             "share_url": reverse("admin:keywords_anchor_share"),
-            "upload_url": reverse("admin:sites_upload_add") + f"?kind=anchors&product={product.pk}",
-            **dialog_context(product),
+            "upload_url": upload_url,
+            **dialog_context(product, lists, anchor_list),
         }
+    }
+
+
+def _country_rows(product: Product, shares: Sequence[CountryShare]) -> list[dict[str, Any]]:
+    """Страны: цель из «Распределения по странам» и факт — размещения по регионам.
+
+    Регион размещения — его список анкоров, не выбирали — угаданный, как в
+    карточке размещения (`regions`). Страна с размещениями, но без цели, — своей
+    строкой без цели; «Остальные» — все, кого нет среди строк с целью.
+    """
+    placed = regions.placement_countries(product.pk)
+    total = sum(placed.values())
+    named = {share.country for share in shares if share.country}
+    rows: list[dict[str, Any]] = []
+    for share in shares:
+        if share.country:
+            count = placed.get(share.country, 0)
+        else:
+            count = sum(n for code, n in placed.items() if code not in named)
+        rows.append(_country_row(share, share.country, count, total))
+    if any(share.country is None for share in shares):
+        return rows
+    # «Остальных» среди целей нет — регион без цели своей строкой: факт сойдётся в 100%.
+    for code in sorted(set(placed) - named, key=lambda code: -placed[code]):
+        rows.append(_country_row(None, code, placed[code], total))
+    return rows
+
+
+def _country_row(
+    share: CountryShare | None, country: str | None, count: int, total: int
+) -> dict[str, Any]:
+    return {
+        "row": share,
+        "name": countries.name(country) if country else "Остальные",
+        "flag": countries.flag_html(country or countries.GLOBE),
+        "share": _input(share.target_pct) if share is not None else "",
+        "count": count,
+        "fact": pct_text(_percent(count, total)),
     }
 
 
@@ -185,8 +249,20 @@ def _percent(part: int, whole: int) -> Decimal | None:
 # ---------- Окно «Новый анкор» ----------
 
 
-def dialog_context(product: Product) -> dict[str, Any]:
-    """Что нужно окну «Новый анкор»: адрес записи и типы страниц продукта."""
+def dialog_context(
+    product: Product,
+    lists: Sequence[AnchorList] | None = None,
+    current: AnchorList | None = None,
+) -> dict[str, Any]:
+    """Что нужно окну «Новый анкор»: адрес записи, списки продукта и типы страниц.
+
+    Список в окне выбран заранее — открытый на странице или выбранный в
+    размещении; скрипт ставит его заново при каждом открытии.
+    """
+    if lists is None:
+        lists = AnchorList.of_product(product.pk)
+    if current is None and lists:
+        current = lists[0]
     names = set(PageTypeShare.objects.filter(product=product).values_list("page_type", flat=True))
     names.update(
         name
@@ -200,6 +276,13 @@ def dialog_context(product: Product) -> dict[str, Any]:
         "add_url": reverse("admin:keywords_anchor_add"),
         "page_types": page_types,
         "product_domain": product.domain,
+        "lists": regions.options(lists),
+        "current_list": str(current.pk) if current is not None else "",
+        # Списков нет — первый анкор заведёт основной: США (ADR-075).
+        "first_list": {
+            "name": countries.name(DEFAULT_REGION),
+            "flag": countries.flag_code(DEFAULT_REGION) or "",
+        },
     }
 
 
@@ -213,6 +296,11 @@ def quick_add_view(request: HttpRequest) -> JsonResponse:
     product = Product.objects.filter(pk=_digits(request.POST.get("product"))).first()
     if product is None:
         return JsonResponse({"ok": False, "message": "Выберите продукт размещения."})
+    # Список — выбранный в окне, иначе основной; у продукта без списков первый
+    # анкор заводит основной список — США, как анкоры до регионов (ADR-075).
+    anchor_list = AnchorList.objects.filter(
+        product=product, pk=_digits(request.POST.get("list"))
+    ).first() or AnchorList.main_of(product.pk)
     text = " ".join((request.POST.get("keyword") or "").split())
     url = (request.POST.get("target_url") or "").strip()
     page_type = " ".join((request.POST.get("page_type") or "").split()) or None
@@ -222,16 +310,19 @@ def quick_add_view(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "message": f"Анкор длиннее {MAX_KEYWORD} знаков."})
     found = (
         Keyword.objects.annotate(text=Lower("keyword"))
-        .filter(product=product, text=text.lower())
+        .filter(anchor_list=anchor_list, text=text.lower())
         .first()
+        if anchor_list is not None
+        else None
     )
-    if found is not None:
+    if found is not None and anchor_list is not None:
         if not found.is_active:
             found.is_active = True
             found.save(update_fields=["is_active"])
+        where = anchor_list.region_name
         return JsonResponse(
             {**anchor_json(found), "ok": True, "existing": True,
-             "message": f"Анкор «{found.keyword}» уже есть — выбран он."}
+             "message": f"Анкор «{found.keyword}» уже есть в списке «{where}» — выбран он."}
         )  # fmt: skip
     if not url.startswith(("http://", "https://")) or len(url) > MAX_URL or " " in url:
         return JsonResponse({"ok": False, "message": "Впишите адрес страницы целиком: https://…"})
@@ -240,8 +331,10 @@ def quick_add_view(request: HttpRequest) -> JsonResponse:
     kind = naked_type(text, product)
     try:
         with transaction.atomic():
+            anchor_list = anchor_list or AnchorList.ensure_main(product.pk)
             keyword = Keyword.objects.create(
                 product=product,
+                anchor_list=anchor_list,
                 keyword=text,
                 target_url=url,
                 page_type=page_type,
@@ -249,9 +342,10 @@ def quick_add_view(request: HttpRequest) -> JsonResponse:
             )
     except IntegrityError:
         return JsonResponse({"ok": False, "message": f"Анкор «{text}» уже есть."})
+    where = anchor_list.region_name
     return JsonResponse(
         {**anchor_json(keyword), "ok": True, "existing": False,
-         "message": f"Анкор «{keyword.keyword}» добавлен."}
+         "message": f"Анкор «{keyword.keyword}» добавлен в список «{where}»."}
     )  # fmt: skip
 
 
@@ -262,6 +356,7 @@ def anchor_json(keyword: Keyword) -> dict[str, Any]:
         "url": keyword.target_url,
         "page_type": keyword.page_type or "",
         "product": keyword.product_id,
+        "list": keyword.anchor_list_id,
         "naked": keyword.anchor_type in NAKED_TYPES,
     }
 
@@ -286,7 +381,8 @@ def match_view(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "message": "Выберите продукт размещения."})
     text = " ".join((request.GET.get("text") or "").split())
     url = (request.GET.get("url") or "").strip() or None
-    found = matching.find(text, matching.candidates(product.pk), url=url)
+    list_id = _digits(request.GET.get("list")) or None
+    found = matching.find(text, matching.candidates(product.pk, list_id), url=url)
     selected = Keyword.objects.filter(
         product=product, pk=_digits(request.GET.get("keyword"))
     ).first()
@@ -380,16 +476,33 @@ def _next_position(product: Product) -> int:
 # ---------- Блок «Анкоры продукта» над ссылками размещения ----------
 
 
-def summary_context(product_id: int | None, exclude: Iterable[int] = ()) -> dict[str, Any]:
-    """Итоги, «цель / факт» по типам и рекомендации — для блока в размещении."""
+def summary_context(
+    product_id: int | None,
+    exclude: Iterable[int] = (),
+    *,
+    choice: regions.Choice | None = None,
+    lists: Sequence[AnchorList] | None = None,
+) -> dict[str, Any]:
+    """Итоги, «цель / факт» по типам и рекомендации — для блока в размещении.
+
+    `choice` — список размещения и почему он (`regions`); не задан — основной.
+    """
     product = Product.objects.filter(pk=product_id).first() if product_id else None
     if product is None:
         return {"anchor_block": None}
-    data = overview(product.pk)
+    if lists is None:
+        lists = AnchorList.of_product(product.pk)
+    if choice is None:
+        choice = regions.Choice(lists[0] if lists else None, "")
+    current = choice.anchor_list
+    data = overview(product.pk, current)
     rules = anchor_recommend(product.pk)
     picks = recommend(
         data.anchors, data.shares, limit=rules.limit, skip_top=rules.skip_top, exclude=exclude
     )
+    anchors_url = reverse("admin:keywords_keywordcoverage_changelist") + f"?product={product.pk}"
+    if current is not None:
+        anchors_url += f"&list={current.pk}"
     return {
         "anchor_block": {
             "product": product,
@@ -397,8 +510,11 @@ def summary_context(product_id: int | None, exclude: Iterable[int] = ()) -> dict
             "types": [row for row in _type_rows(data.types) if row["stat"].target is not None],
             "picks": [_pick_json(p.anchor, p.reason) for p in picks],
             "skip_top": rules.skip_top,
-            "anchors_url": reverse("admin:keywords_keywordcoverage_changelist")
-            + f"?product={product.pk}",
+            "lists": regions.options(lists),
+            "current": current,
+            "current_id": str(current.pk) if current is not None else "",
+            "reason": choice.reason,
+            "anchors_url": anchors_url,
             "summary_url": reverse("admin:keywords_anchor_summary", args=[product.pk]),
         }
     }
@@ -419,10 +535,23 @@ def _pick_json(anchor: Anchor, reason: str) -> dict[str, Any]:
 
 
 def summary_view(request: HttpRequest, product_id: int) -> TemplateResponse:
-    """Блок «Анкоры продукта» заново — сменили продукт в форме нового размещения."""
+    """Блок «Анкоры продукта» заново: сменили продукт в форме нового размещения или
+    список анкоров в блоке (`list`). Без списка — угаданный по площадке (`site`)."""
     exclude = [int(pk) for pk in request.GET.getlist("exclude") if pk.isdigit()]
+    lists = AnchorList.of_product(product_id)
+    by_id = {item.pk: item for item in lists}
+    chosen = by_id.get(_digits(request.GET.get("list")))
+    site = Site.all_objects.filter(pk=_digits(request.GET.get("site"))).first()
+    if chosen is not None:
+        choice = regions.Choice(chosen, "выбран вами")
+    elif site is not None:
+        choice = regions.choose(site, lists)
+    else:
+        choice = regions.Choice(lists[0] if lists else None, "")
     return TemplateResponse(
-        request, "admin/keywords/anchor_summary.html", summary_context(product_id, exclude)
+        request,
+        "admin/keywords/anchor_summary.html",
+        summary_context(product_id, exclude, choice=choice, lists=lists),
     )
 
 

@@ -16,7 +16,6 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
-from apps.keywords.models import Keyword
 from apps.observability.models import TaskRun, TaskStatus
 from apps.sites.importing.apply import Importer, compare_copy
 from apps.sites.importing.invoice_sheet import (
@@ -141,9 +140,7 @@ def _import(options: ImportOptions, report: Report) -> None:
                 f"Доли анкоров: типов страниц {counts['types']}, безанкорных {counts['naked']}, "
                 f"стран {counts['countries']}; ссылок получили анкор {counts['links']}"
             )
-            saved_keywords = {
-                k.keyword: k for k in Keyword.objects.filter(product=importer.convertio)
-            }
+            saved_keywords = {k.keyword: k for k in importer.main_keywords()}
         importer.import_sites(sites, saved_keywords)
         if {LINKS_PLACED, LINKS_WAITING} <= set(keywords_sheet.headers):
             importer.compare_link_counts(keywords, saved_keywords)

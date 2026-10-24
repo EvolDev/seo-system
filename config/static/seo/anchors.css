@@ -62,6 +62,10 @@ body.admin-interface .seo-anchors-title {
   letter-spacing: 0;
 }
 .seo-anchors-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+/* Список анкоров — регион (ADR-075): выбор с флагами и «Удалить список» в одной строке. */
+.seo-anchors-region { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.seo-anchors-region-label { white-space: nowrap; }
+.seo-country.seo-anchors-region-picker { width: 16rem; }
 .seo-anchors-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 0; }
 .seo-anchors-tiles > div { padding: 10px 12px; border-radius: 8px; background: var(--darkened-bg, #f5f5f7); }
 .seo-anchors-tiles dt {
@@ -148,7 +152,8 @@ body.admin-interface .seo-share-input:focus {
   border-radius: 12px;
   background: var(--darkened-bg, #f5f5f7);
 }
-.seo-anchor-block-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 10px; }
+.seo-anchor-block-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 10px; }
+.seo-country.seo-anchor-region { width: 14rem; }
 body.admin-interface .seo-anchor-block-head h2 {
   margin: 0;
   padding: 0;
@@ -271,3 +276,6 @@ body.admin-interface .seo-anchor-dialog select { width: 100%; box-sizing: border
 .seo-anchor-hint-pick:focus-visible { outline: 2px solid var(--link-fg, #2a65a8); outline-offset: 1px; }
 .seo-anchor-hint-current { font-weight: 600; text-decoration: none; color: var(--body-fg, #333); }
 .seo-anchors-fact { display: block; font-size: 0.75rem; color: var(--body-quiet-color, #666); margin-top: 2px; }
+
+/* Окно «Новый анкор»: список анкоров — тот же выбор с флагами, во всю ширину поля. */
+.seo-country.seo-anchor-dialog-list { display: block; width: 100%; }

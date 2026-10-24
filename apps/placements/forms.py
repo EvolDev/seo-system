@@ -33,7 +33,7 @@ from django.utils import timezone
 
 from apps.content.models import Copywriter
 from apps.keywords import matching
-from apps.keywords.models import NAKED_TYPES, AnchorType, Keyword
+from apps.keywords.models import NAKED_TYPES, AnchorList, AnchorType, Keyword
 from apps.placements import invoices, repeat
 from apps.placements.models import (
     Invoice,
@@ -97,6 +97,14 @@ class PlacementForm(DayFieldsForm):
         label="Сделать эту цену рабочей для площадки",
         required=False,
         help_text="Иначе рабочая цена площадки остаётся прежней.",
+    )
+    # Список анкоров — регион размещения (ADR-075). На экране — выбор с флагами в
+    # блоке «Анкоры продукта» над ссылками, а не в полях формы; нет блока (у
+    # продукта нет списков) — поля в запросе нет, и сохранённое не трогаем.
+    anchor_list = forms.ModelChoiceField(
+        label="Список анкоров",
+        queryset=AnchorList.objects.all(),
+        required=False,
     )
     # «Через кого» на экране: форма из вкладок площадки (адрес с ?site=) —
     # ставит админка. В обычной «Добавить» поля нет, продавец и услуга — полями.
@@ -178,6 +186,8 @@ class PlacementForm(DayFieldsForm):
             return None
         if self.instance.pk is None:
             self._clean_new(cleaned)
+        if "anchor_list" in self.data:
+            self._clean_anchor_list(cleaned)
         copywriter = cleaned.get("copywriter")
         if copywriter is not None and cleaned.get("copywriter_cents") is None:
             # Цена не вписана — ставка копирайтера; без скрипта в браузере тоже.
@@ -209,6 +219,21 @@ class PlacementForm(DayFieldsForm):
         self.instance.placement_type = offer.placement_type
         if "link_type" not in self.fields:
             self.instance.link_type = offer.link_type
+
+    def _clean_anchor_list(self, cleaned: dict[str, Any]) -> None:
+        """Список анкоров — продукта размещения; в запись — сразу, до ссылок.
+
+        Ссылки проверяются после формы размещения и сверяют свои анкоры с этим
+        списком, поэтому он ставится в размещение уже здесь.
+        """
+        chosen: AnchorList | None = cleaned.get("anchor_list")
+        product = cleaned.get("product") or getattr(self.instance, "product", None)
+        if chosen is not None and product is not None and chosen.product_id != product.pk:
+            self.add_error(
+                None, "Список анкоров другого продукта — выберите список этого размещения."
+            )
+            return
+        self.instance.anchor_list = chosen
 
     def clean_copywriter_currency(self) -> str | None:
         value: str = self.cleaned_data.get("copywriter_currency") or ""
@@ -401,6 +426,7 @@ class AnchorSelect(forms.Select):
             option["attrs"].update(
                 {
                     "data-product": str(keyword.product_id),
+                    "data-list": str(keyword.anchor_list_id),
                     "data-url": keyword.target_url,
                     "data-type": keyword.page_type or "",
                     "data-naked": "1" if keyword.anchor_type in NAKED_TYPES else "",
@@ -455,9 +481,18 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
         model = PlacementLink
         fields = ("keyword", "target_url")
 
-    def __init__(self, *args: Any, product_id: int | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        product_id: int | None = None,
+        placement: Placement | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.product_id = product_id
+        # Размещение формы: его список анкоров ставит форма размещения при проверке,
+        # а она проверяется раньше ссылок — поэтому список читаем при проверке.
+        self.placement = placement
         field = self.fields["keyword"]
         assert isinstance(field, forms.ModelChoiceField)
         current = self.instance.keyword_id
@@ -465,8 +500,16 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
         # размещения; выключенный анкор этой ссылки — тоже, иначе он пропал бы.
         field.queryset = (
             Keyword.objects.filter(Q(is_active=True) | Q(pk=current))
-            .only("pk", "keyword", "product_id", "target_url", "page_type", "anchor_type")
-            .order_by("product_id", "keyword")
+            .only(
+                "pk",
+                "keyword",
+                "product_id",
+                "anchor_list_id",
+                "target_url",
+                "page_type",
+                "anchor_type",
+            )
+            .order_by("product_id", "anchor_list_id", "keyword")
         )
         field.widget.attrs["data-match-url"] = reverse("admin:keywords_anchor_match")
         link = self.instance
@@ -500,11 +543,29 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
         if keyword is not None and product_id and keyword.product_id != product_id:
             self.add_error("keyword", "Анкор другого продукта — выберите анкор этого размещения.")
             return data
+        anchor_list = self._anchor_list()
+        changed = self.instance.pk is None or "keyword" in self.changed_data
+        if (
+            keyword is not None
+            and anchor_list is not None
+            and changed
+            and keyword.anchor_list_id != anchor_list.pk
+        ):
+            # Старая ссылка с анкором другого списка остаётся как была — история.
+            other = AnchorList.objects.get(pk=keyword.anchor_list_id).region_name
+            mine = anchor_list.region_name
+            self.add_error(
+                "keyword",
+                f"Анкор из списка «{other}», а у размещения — «{mine}»:"
+                " выберите анкор этого списка или смените список над ссылками.",
+            )
+            return data
         # Ключ по фразе — только когда фразу ввели: сохранённую ссылку без ключа
         # обычное сохранение молча не привязывает.
         typed = self.instance.pk is None or "text" in self.changed_data
         if keyword is None and text and product_id and typed:
-            found = matching.find(text, matching.candidates(product_id), url=url or None)
+            pool = matching.candidates(product_id, anchor_list.pk if anchor_list else None)
+            found = matching.find(text, pool, url=url or None)
             if found.ambiguous:
                 names = ", ".join(f"«{c.keyword}»" for c in found.candidates[:4])
                 self.add_error(
@@ -545,6 +606,16 @@ class PlacementLinkForm(forms.ModelForm):  # type: ignore[type-arg]
         data["target_url"] = url
         return data
 
+    def _anchor_list(self) -> AnchorList | None:
+        """Список анкоров размещения — выбранный в блоке над ссылками (ADR-075)."""
+        placement = self.placement
+        if placement is None:
+            try:
+                placement = self.instance.placement
+            except Placement.DoesNotExist:
+                return None
+        return placement.anchor_list if placement.anchor_list_id is not None else None
+
     def _product_id(self) -> int | None:
         """Продукт размещения: его передаёт набор ссылок, у нового размещения — из формы."""
         if self.product_id is not None:
@@ -560,8 +631,12 @@ class PlacementLinkFormSet(BaseInlineFormSet):  # type: ignore[type-arg]
     """Ссылки статьи: номер новой ссылки — следующий за последним у размещения."""
 
     def get_form_kwargs(self, index: int | None) -> dict[str, Any]:
-        # Продукт размещения — для поиска ключа во фразе и проверки анкора.
-        return {**super().get_form_kwargs(index), "product_id": self.instance.product_id}
+        # Продукт и размещение — для поиска ключа во фразе и проверки анкора и его списка.
+        return {
+            **super().get_form_kwargs(index),
+            "product_id": self.instance.product_id,
+            "placement": self.instance,
+        }
 
     def save_new(self, form: forms.ModelForm, commit: bool = True) -> Any:  # type: ignore[type-arg]
         link = form.save(commit=False)

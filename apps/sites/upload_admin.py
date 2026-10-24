@@ -27,6 +27,7 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.keywords.models import DEFAULT_REGION, AnchorList
 from apps.sites import countries
 from apps.sites.display import delta_html, price_html, seller_mark, writing_html
 from apps.sites.models import (
@@ -105,6 +106,13 @@ class UploadForm(forms.Form):
         initial="USD",
         required=False,
     )
+    # У анкоров — регион списка (ADR-075): новая страна заведёт новый список.
+    anchor_country = forms.ChoiceField(
+        label="Регион списка",
+        choices=lambda: [(c.code, c.label) for c in countries.all_countries()],
+        initial=DEFAULT_REGION,
+        required=False,
+    )
     # Только у выгрузки Ahrefs: в файле страны нет, её выбирают так же, как в Ahrefs (ADR-045).
     country = forms.ChoiceField(
         label="Страна выгрузки",
@@ -150,7 +158,10 @@ class UploadForm(forms.Form):
         if kind != UploadKind.PLACEMENTS:
             data["employee"] = None
             data["new_employee"] = ""
-        if kind != UploadKind.AHREFS_BATCH:
+        if kind == UploadKind.ANCHORS:
+            # Страна загрузки анкоров — регион списка; без выбора — США, как анкоры до регионов.
+            data["country"] = data.get("anchor_country") or DEFAULT_REGION
+        elif kind != UploadKind.AHREFS_BATCH:
             data["country"] = ""
         if kind in (UploadKind.AHREFS_BATCH, UploadKind.REF_DOMAINS, UploadKind.ANCHORS):
             # Замер и ссылки — наши, из Ahrefs, анкоры — наши: продавца нет.
@@ -277,7 +288,14 @@ class UploadAdmin(RecordAdmin):
         if obj.kind == UploadKind.REF_DOMAINS:
             return format_html('Ahrefs<div class="seo-sub">ссылаются на {}</div>', obj.product)
         if obj.kind == UploadKind.ANCHORS:
-            return format_html('Анкоры<div class="seo-sub">{}</div>', obj.product)
+            # Регион списка (ADR-075); загрузки до регионов — основной список, США.
+            region = obj.country or DEFAULT_REGION
+            return format_html(
+                'Анкоры<div class="seo-sub">{} · {}{}</div>',
+                obj.product,
+                countries.flag_html(region),
+                countries.name(region),
+            )
         if obj.seller is not None:
             return format_html("{}", obj.seller.name)
         where = countries.name(obj.country) if obj.country else "все страны"
@@ -445,6 +463,8 @@ class UploadAdmin(RecordAdmin):
                 _start_check(upload)
             return HttpResponseRedirect(_step_url(upload))
         used = set(SiteCountryMetric.objects.values_list("country", flat=True).distinct())
+        # Регионы, у которых уже есть списки анкоров, — первыми (ADR-075).
+        lists = {item.country: item for item in AnchorList.objects.select_related("product")}
         context = {
             **self._context(request, "Новая загрузка", step=1),
             "form": form,
@@ -453,6 +473,8 @@ class UploadAdmin(RecordAdmin):
             "used_countries": [c for c in countries.all_countries() if c.code in used],
             "countries": countries.all_countries(),
             "globe": countries.GLOBE,
+            "anchor_country": str(form["anchor_country"].value() or DEFAULT_REGION),
+            "list_countries": [c for c in countries.all_countries() if c.code in lists],
         }
         return TemplateResponse(request, "admin/sites/upload/new.html", context)
 
@@ -633,11 +655,14 @@ class UploadAdmin(RecordAdmin):
             "steps": ["Файл", "Колонки", "Сводка до записи", "Записано"],
             "summary": upload.summary or {},
             "anchor_sync": anchors.policy(upload.mapping) == anchors.Policy.SYNC,
+            # Регион списка (ADR-075): у загрузок до регионов страны нет — основной, США.
+            "region_flag": countries.flag_html(upload.country or DEFAULT_REGION),
             "counts": result.get("counts") or {},
             "busy": upload.status in (UploadStatus.CHECKING, UploadStatus.WRITING),
             "done": done,
             "anchors_url": reverse("admin:keywords_keywordcoverage_changelist")
-            + f"?product={upload.product_id}",
+            + f"?product={upload.product_id}"
+            + _list_param(upload),
         }
         return TemplateResponse(request, "admin/sites/upload/anchors.html", context)
 
@@ -1025,6 +1050,9 @@ def _last_choice(request: HttpRequest) -> dict[str, Any]:
                     initial["seller"] = seller.pk
         if (request.GET.get("product") or "").isdigit():
             initial["product"] = int(request.GET["product"])
+        # Со страницы «Анкоры» — регион открытого там списка (ADR-075).
+        if countries.is_known(request.GET.get("anchor_country") or ""):
+            initial["anchor_country"] = request.GET["anchor_country"].lower()
         return initial
     last = (
         Upload.objects.filter(author_id=request.user.pk)
@@ -1037,7 +1065,19 @@ def _last_choice(request: HttpRequest) -> dict[str, Any]:
     initial["kind"] = last.kind
     if last.kind == UploadKind.AHREFS_BATCH:
         initial["country"] = last.country or ""
+    if last.kind == UploadKind.ANCHORS and last.country:
+        initial["anchor_country"] = last.country
     return initial
+
+
+def _list_param(upload: Upload) -> str:
+    """«К анкорам» после загрузки — на список её региона, если он уже есть (ADR-075)."""
+    if upload.product_id is None:
+        return ""
+    found = AnchorList.objects.filter(
+        product_id=upload.product_id, country=upload.country or DEFAULT_REGION
+    ).first()
+    return f"&list={found.pk}" if found is not None else ""
 
 
 def _start_check(upload: Upload) -> None:

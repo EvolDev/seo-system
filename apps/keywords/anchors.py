@@ -1,7 +1,8 @@
 """Анкоры продукта: доли «цель / факт» и рекомендации (E3-05, ADR-059).
 
 Сводка — сырым SQL по `v_keyword_coverage` (ADR-003): сколько ссылок под
-каждый анкор размещено и ждёт. Доля типа страниц — ссылки на анкоры этого типа
+каждый анкор размещено и ждёт. Считается по одному списку анкоров — региону
+(ADR-075); цели долей общие для продукта. Доля типа страниц — ссылки на анкоры этого типа
 среди всех ссылок на анкоры с типом, как на листе «Распределение по типам
 страниц»: размещённые, ждущие и суммарно.
 
@@ -24,7 +25,7 @@ from decimal import Decimal
 
 from django.db import connection
 
-from apps.keywords.models import NAKED_TYPES, PageTypeShare
+from apps.keywords.models import NAKED_TYPES, AnchorList, PageTypeShare
 
 # Безанкорные типы строкой — как их отдаёт представление.
 NAKED = frozenset(str(kind) for kind in NAKED_TYPES)
@@ -136,31 +137,40 @@ class Recommendation:
     reason: str
 
 
-def overview(product_id: int) -> Overview:
-    """Сводка анкоров продукта: два запроса и доли из `page_type_shares`."""
+def overview(product_id: int, anchor_list: AnchorList | None = None) -> Overview:
+    """Сводка анкоров списка: три запроса и доли из `page_type_shares`.
+
+    Список не задан — основной список продукта. Списков нет — анкоров нет, а
+    ссылки без анкора — все ссылки продукта.
+    """
+    if anchor_list is None:
+        anchor_list = AnchorList.main_of(product_id)
+    list_id = anchor_list.pk if anchor_list is not None else 0
+    is_main = anchor_list is None or anchor_list == AnchorList.main_of(product_id)
     with connection.cursor() as cursor:
         cursor.execute(
             """
             SELECT id, keyword, target_url, page_type, anchor_type, share,
                    links_placed, links_waiting, last_position, volume, global_volume, tool
             FROM v_keyword_coverage
-            WHERE product_id = %s AND is_active
+            WHERE anchor_list_id = %s AND is_active
             ORDER BY id
             """,
-            [product_id],
+            [list_id],
         )
         anchors = tuple(Anchor(*row) for row in cursor.fetchall())
-        # Непривязанные ссылки учитываем отдельно; выключенные анкоры исключены.
+        # Непривязанные ссылки — размещений этого списка; размещения без списка
+        # (не выбирали) — у основного. Выключенные анкоры исключены.
         cursor.execute(
             """
             SELECT COUNT(*) FILTER (WHERE p.status = 'placed'),
                    COUNT(*) FILTER (WHERE p.status IN ('in_work','ordered','writing'))
             FROM placement_links pl
             JOIN placements p ON p.id = pl.placement_id
-            LEFT JOIN keywords k ON k.id = pl.keyword_id
             WHERE p.product_id = %s AND pl.keyword_id IS NULL
+              AND (p.anchor_list_id = %s OR (p.anchor_list_id IS NULL AND %s))
             """,
-            [product_id],
+            [product_id, list_id, is_main],
         )
         loose_placed, loose_waiting = cursor.fetchone() or (0, 0)
         cursor.execute(
@@ -174,11 +184,11 @@ def overview(product_id: int) -> Overview:
             FROM placement_links pl
             JOIN placements p ON p.id = pl.placement_id
             JOIN keywords k ON k.id = pl.keyword_id
-            WHERE p.product_id = %s AND k.is_active AND k.page_type IS NOT NULL
+            WHERE k.anchor_list_id = %s AND k.is_active AND k.page_type IS NOT NULL
               AND p.status IN ('placed', 'in_work', 'ordered', 'writing')
             GROUP BY 1, 2, 3
             """,
-            [product_id],
+            [list_id],
         )
         kinds = kind_stats(cursor.fetchall())
     shares = tuple(

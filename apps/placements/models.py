@@ -177,6 +177,17 @@ class Placement(models.Model):
         "валюта копирайтера", max_length=3, null=True, blank=True
     )
     draft_url = models.TextField("черновик", null=True, blank=True)
+    # Список анкоров размещения — регион (ADR-075): из него выбираются анкоры
+    # ссылок. Пусто — не выбирали: карточка угадывает по языку площадки.
+    anchor_list = models.ForeignKey(
+        "keywords.AnchorList",
+        models.PROTECT,
+        verbose_name="список анкоров",
+        related_name="placements",
+        null=True,
+        blank=True,
+        db_index=False,
+    )
     run_id = models.UUIDField("run_id", null=True, blank=True, default=current_run_id)
     created_at = models.DateTimeField("создано", db_default=PgNow())
     updated_at = models.DateTimeField("изменено", auto_now=True, db_default=PgNow())

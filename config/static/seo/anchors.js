@@ -20,6 +20,11 @@
  *    подставляется найденный, если выбор однозначен; выбранный человеком ключ
  *    не трогаем. Сменили ключ — текст, равный прежнему ключу, меняется на
  *    новый; свою фразу не трогаем. Устаревшие ответы отбрасываются.
+ * 7. Список анкоров — регион (ADR-075): в блоке размещения — выбор с флагами
+ *    (select[data-anchor-list], поле формы). В полях «Анкор», «ключе во фразе»
+ *    и окне «Новый анкор» — анкоры этого списка. Сменили список — блок
+ *    приходит заново; ссылки с анкором другого списка остаются, но над ними
+ *    предупреждение — сервер такой анкор в новую ссылку не запишет.
  *
  * Обработчики на document — один раз; поля настраивает init(): скрипт
  * зовут в конце формы размещения (в панели записи — когда ссылки на месте),
@@ -73,6 +78,34 @@
     if (block && block.dataset.product) return block.dataset.product;
     var dialog = document.querySelector("[data-anchor-dialog]");
     return dialog ? dialog.dataset.product || "" : "";
+  }
+
+  // Список анкоров — регион (ADR-075): выбранный в блоке размещения, иначе тот,
+  // что на кнопке «＋ Новый анкор» страницы, иначе выбранный в окне.
+  function listOf(node) {
+    var chosen = document.querySelector("[data-anchor-block] select[data-anchor-list]");
+    if (chosen && chosen.value) return chosen.value;
+    var opener = node && node.closest ? node.closest("[data-list]") : null;
+    if (opener && opener.dataset.list) return opener.dataset.list;
+    var dialog = dialogEl();
+    var select = dialog ? field(dialog, "list") : null;
+    return select ? select.value : "";
+  }
+
+  // Выбор с флагами (seo/country-picker.js) строится поверх <select> один раз;
+  // сменили варианты или значение скриптом — собрать заново.
+  function refreshPicker(node) {
+    if (!node || !window.seoCountryPicker) return;
+    node.querySelectorAll(".seo-country-field, .seo-country-list").forEach(function (el) { el.remove(); });
+    node.removeAttribute("data-picker-ready");
+    var select = node.querySelector("select");
+    if (select) select.hidden = false;
+    window.seoCountryPicker(node);
+  }
+
+  function initPickers(root) {
+    if (!window.seoCountryPicker) return;
+    root.querySelectorAll("[data-country-picker][data-auto]").forEach(window.seoCountryPicker);
   }
 
   // ---------- Поле «Анкор» с поиском ----------
@@ -228,11 +261,13 @@
   function render(select, query) {
     var picker = select.seoPicker;
     var product = productOf(select);
+    var list = listOf(select);
     var q = norm(query);
     var starts = [];
     var contains = [];
     Array.prototype.forEach.call(select.options, function (option) {
       if (!option.value || (product && option.dataset.product !== product)) return;
+      if (list && option.dataset.list && option.dataset.list !== list) return;
       var text = norm(option.textContent);
       if (!q || text.indexOf(q) === 0) starts.push(option);
       else if (text.indexOf(q) !== -1) contains.push(option);
@@ -269,7 +304,7 @@
     if (!found.length) {
       var empty = document.createElement("li");
       empty.className = "seo-picker-empty";
-      empty.textContent = q ? "Такого анкора нет" : "У продукта нет анкоров";
+      empty.textContent = q ? "Такого анкора нет" : list ? "В списке нет анкоров" : "У продукта нет анкоров";
       picker.list.insertBefore(empty, picker.list.firstChild);
     } else if (found.length > MAX_SHOWN) {
       var more = document.createElement("li");
@@ -293,6 +328,7 @@
     choose(select, item.option.value);
     picker.box.classList.remove("seo-picker-legacy");
     picker.close();
+    warnOtherLists();
   }
 
   // ---------- Текст на сайте и вид ссылки (ADR-069) ----------
@@ -358,6 +394,7 @@
     var url = urlInputOf(select);
     var params = new URLSearchParams({
       product: product,
+      list: listOf(select),
       text: phrase,
       url: url ? url.value.trim() : "",
       keyword: select.value || "",
@@ -471,11 +508,29 @@
     return dialog.querySelector('[data-dialog-field="' + name + '"]');
   }
 
+  // Списки в окне — как в блоке размещения: у нового размещения продукт могли
+  // сменить, и блок пришёл со списками другого продукта.
+  function syncDialogLists(dialog, list) {
+    var select = field(dialog, "list");
+    if (!select) return;
+    var chosen = document.querySelector("[data-anchor-block] select[data-anchor-list]");
+    if (chosen) {
+      select.textContent = "";
+      Array.prototype.forEach.call(chosen.options, function (option) {
+        select.appendChild(option.cloneNode(true));
+      });
+    }
+    if (list) select.value = list;
+    refreshPicker(select.closest("[data-country-picker]"));
+  }
+
   function openDialog(product, text, from) {
     var dialog = dialogEl();
     if (!dialog) return;
-    requester = from || null;
+    // Окно открыли из поля «Анкор» — записанный анкор встанет в него; с кнопки — никуда.
+    requester = from && from.tagName === "SELECT" ? from : null;
     if (product) dialog.dataset.product = product;
+    syncDialogLists(dialog, listOf(from));
     var looksUrl = /^https?:\/\//i.test(text || "");
     field(dialog, "keyword").value = looksUrl ? "" : text || "";
     field(dialog, "target_url").value = looksUrl ? text : "";
@@ -503,8 +558,10 @@
     if (button.disabled) return;
     button.disabled = true;
     try {
+      var list = field(dialog, "list");
       var answer = await post(dialog.dataset.addUrl, {
         product: dialog.dataset.product || "",
+        list: list ? list.value : "",
         keyword: field(dialog, "keyword").value,
         target_url: field(dialog, "target_url").value,
         page_type: field(dialog, "page_type").value,
@@ -538,6 +595,7 @@
       option.value = String(anchor.id);
       option.textContent = anchor.keyword;
       option.dataset.product = String(anchor.product);
+      option.dataset.list = String(anchor.list);
       option.dataset.url = anchor.url;
       option.dataset.type = anchor.page_type || "";
       if (anchor.naked) option.dataset.naked = "1";
@@ -591,12 +649,34 @@
     row.classList.add("seo-anchor-row-flash");
   }
 
-  // ---------- Смена продукта в новой форме ----------
+  // ---------- Смена продукта в новой форме и списка анкоров в блоке ----------
 
-  async function reloadBlock(product) {
+  // Ссылки, чей анкор не из выбранного списка, — предупреждение над блоком.
+  function warnOtherLists() {
+    var block = document.querySelector("[data-anchor-block]");
+    var line = block ? block.querySelector("[data-anchor-region-warn]") : null;
+    var chosen = block ? block.querySelector("select[data-anchor-list]") : null;
+    if (!line) return;
+    var other = chosen ? linkSelects().filter(function (select) {
+      var option = select.selectedOptions[0];
+      return select.value && option && option.dataset.list && option.dataset.list !== chosen.value;
+    }).length : 0;
+    line.hidden = !other;
+    line.textContent = other
+      ? "Анкор из другого списка у ссылок: " + other + ". Новые ссылки — только из выбранного списка."
+      : "";
+  }
+
+  function siteOf(form) {
+    var field = form ? form.querySelector("select[name=site], input[name=site]") : null;
+    return field ? field.value : "";
+  }
+
+  async function reloadBlock(product, list) {
     var block = document.querySelector("[data-anchor-block]");
     var dialog = dialogEl();
     if (dialog) dialog.dataset.product = product;
+    var form = block ? block.closest("form") : null;
     linkSelects().forEach(function (select) {
       if (select.value && select.selectedOptions[0].dataset.product !== product) {
         select.value = "";
@@ -607,12 +687,18 @@
       schedule(select, 0);
     });
     if (!block || !product) return;
-    var url = block.dataset.summaryUrl.replace(/\/\d+\/$/, "/" + product + "/");
+    var params = new URLSearchParams();
+    if (list) params.set("list", list);
+    else if (siteOf(form)) params.set("site", siteOf(form));
+    linkSelects().forEach(function (select) { if (select.value) params.append("exclude", select.value); });
+    var url = block.dataset.summaryUrl.replace(/\/\d+\/$/, "/" + product + "/") + "?" + params.toString();
     try {
       var response = await fetch(url, { credentials: "same-origin" });
       if (!response.ok) return;
       var holder = block.parentNode;
       holder.innerHTML = await response.text();
+      initPickers(holder);
+      warnOtherLists();
     } catch (error) {
       toast("Не обновились анкоры продукта: " + error.message, "error");
     }
@@ -658,7 +744,7 @@
     var opener = target.closest("[data-anchor-new]");
     if (opener) {
       event.preventDefault();
-      openDialog(opener.dataset.product || productOf(opener), "", null);
+      openDialog(opener.dataset.product || productOf(opener), "", opener);
       return;
     }
     var pick = target.closest("[data-anchor-pick]");
@@ -703,7 +789,11 @@
       saveShare(target);
     } else if (target.matches && target.matches("select[name=product]") && target.closest("form") &&
                target.closest("form").querySelector("select[data-anchor-select]")) {
-      reloadBlock(target.value);
+      reloadBlock(target.value, "");
+    } else if (target.matches && target.matches("select[data-anchor-list]")) {
+      reloadBlock(productOf(target), target.value);
+    } else if (target.matches && target.matches("select[data-anchor-select]")) {
+      warnOtherLists();
     }
   });
 
@@ -727,6 +817,8 @@
       enhance(select);
       if (!isTemplate(select)) wireText(select);
     });
+    initPickers(root || document);
+    warnOtherLists();
   }
 
   document.addEventListener("seo:load", function () { init(document); });

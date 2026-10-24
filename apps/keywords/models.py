@@ -7,15 +7,23 @@
 Анкоры продукта (E3-05, ADR-059): ключ — анкор под позицию в выдаче,
 безанкорный анкор (бренд, адрес, нейтральное слово) — строка той же таблицы со
 своим типом и долей внутри безанкорки. Целевые доли по типам страниц и
-странам — `page_type_shares` и `country_shares`.
+странам — `page_type_shares` и `country_shares`, общие для продукта.
+
+Анкоры продукта живут списками по регионам (ADR-075): у США и Бразилии свои
+анкоры, адреса и позиции, хотя тексты бывают одни и те же («convert»).
 """
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.db import models
 
+from apps.sites import countries
 from apps.sites.models import MetricSource, Product
 from config.db import PgCurrentDate, PgEnumField, PgNow
+
+# Регион первого списка продукта, если его заводит не загрузка: анкоры до
+# регионов — это США (пользователь, 24.10.2026).
+DEFAULT_REGION = "us"
 
 
 class AnchorType(models.TextChoices):
@@ -27,6 +35,69 @@ class AnchorType(models.TextChoices):
     BRANDED = "branded", "Бренд"
     URL = "url", "Голый адрес"
     GENERIC = "generic", "Нейтральное слово"
+
+
+class AnchorList(models.Model):
+    """Список анкоров продукта для региона (ADR-075).
+
+    Регион — страна выдачи: позиции анкоров списка снимаются по ней, а в
+    карточке размещения список выбирается по языку площадки. Списки заводит
+    загрузка файла анкоров с новым регионом. Первый список продукта — основной:
+    в него попадают анкоры без указанного списка и листы безанкорки без пометки
+    региона.
+    """
+
+    product = models.ForeignKey(
+        Product,
+        models.PROTECT,
+        verbose_name="продукт",
+        related_name="anchor_lists",
+        db_index=False,
+    )
+    # Страна строчными, как в справочнике стран (`apps.sites.countries`): us, br.
+    country = models.CharField("регион", max_length=2)
+    created_at = models.DateTimeField("заведён", db_default=PgNow())
+
+    class Meta:
+        db_table = "anchor_lists"
+        verbose_name = "список анкоров"
+        verbose_name_plural = "списки анкоров"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["product", "country"],
+                name="anchor_lists_product_id_country_key",
+                violation_error_message="Список анкоров этого региона у продукта уже есть.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product} · {self.region_name}"
+
+    @property
+    def region_name(self) -> str:
+        return countries.name(self.country)
+
+    @property
+    def flag(self) -> str | None:
+        return countries.flag_code(self.country)
+
+    @classmethod
+    def of_product(cls, product_id: int) -> list["AnchorList"]:
+        """Списки продукта: основной первым, дальше — по порядку заведения."""
+        return list(cls.objects.filter(product_id=product_id).order_by("created_at", "pk"))
+
+    @classmethod
+    def main_of(cls, product_id: int) -> "AnchorList | None":
+        """Основной список продукта — заведённый первым; списков нет — None."""
+        return cls.objects.filter(product_id=product_id).order_by("created_at", "pk").first()
+
+    @classmethod
+    def ensure_main(cls, product_id: int) -> "AnchorList":
+        """Основной список продукта; нет списков — заводит его: США (`DEFAULT_REGION`)."""
+        found = cls.main_of(product_id)
+        if found is None:
+            found = cls.objects.create(product_id=product_id, country=DEFAULT_REGION)
+        return found
 
 
 class Keyword(models.Model):
@@ -42,6 +113,15 @@ class Keyword(models.Model):
         "sites.Product",
         models.PROTECT,
         verbose_name="продукт",
+        related_name="keywords",
+        db_index=False,
+    )
+    # Продукт — тот же, что у списка: его оставили ради фильтров и запросов по
+    # продукту, ставит его `save` из списка.
+    anchor_list = models.ForeignKey(
+        AnchorList,
+        models.PROTECT,
+        verbose_name="список анкоров",
         related_name="keywords",
         db_index=False,
     )
@@ -69,9 +149,9 @@ class Keyword(models.Model):
         verbose_name_plural = "ключи"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(
-                fields=["product", "keyword"],
-                name="keywords_product_id_keyword_key",
-                violation_error_message="Такой ключ у этого продукта уже есть.",
+                fields=["anchor_list", "keyword"],
+                name="keywords_anchor_list_id_keyword_key",
+                violation_error_message="Такой анкор в этом списке уже есть.",
             ),
         ]
         indexes: ClassVar[list[models.Index]] = [
@@ -82,6 +162,15 @@ class Keyword(models.Model):
 
     def __str__(self) -> str:
         return self.keyword
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Список не указан — основной список продукта: так анкор заводят импорт
+        # таблицы, форма ключа и всё, что было до регионов (ADR-075).
+        if self.anchor_list_id is None:
+            self.anchor_list = AnchorList.ensure_main(self.product_id)
+        elif self.product_id is None:
+            self.product_id = self.anchor_list.product_id
+        super().save(*args, **kwargs)
 
     @property
     def is_naked(self) -> bool:
@@ -214,11 +303,19 @@ class KeywordCoverage(models.Model):
     """Анкор продукта с покрытием — строка `v_keyword_coverage` (E1-05, E3-05).
 
     Только чтение: представление. Размещено и ждут — по ссылкам размещений,
-    позиция — последний снимок по US. Экран «Анкоры» — список этих строк.
+    позиция — последний снимок по стране списка (ADR-075). Экран «Анкоры» —
+    список этих строк.
     """
 
     product = models.ForeignKey(
         Product, models.DO_NOTHING, verbose_name="продукт", related_name="+", db_constraint=False
+    )
+    anchor_list = models.ForeignKey(
+        AnchorList,
+        models.DO_NOTHING,
+        verbose_name="список анкоров",
+        related_name="+",
+        db_constraint=False,
     )
     keyword = models.TextField("анкор")
     tool = models.TextField("раздел сайта", null=True)

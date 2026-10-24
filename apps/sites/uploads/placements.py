@@ -45,7 +45,7 @@ Clideo записался под Convertio, потому что в шапке с
 import datetime as dt
 import re
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -54,7 +54,8 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from apps.content.domain_settings import UploadPriceCap, indexation_schedule, offer_recheck
-from apps.keywords import matching
+from apps.keywords import matching, regions
+from apps.keywords.models import AnchorList
 from apps.observability.models import Check, CheckStatus, Performer
 from apps.placements import indexation, invoices
 from apps.placements.matching import match_placement, match_without_url, moves_forward
@@ -328,7 +329,7 @@ class _Planner:
         self.offers = _offers_by_key(site_ids)
         self.latest = _latest_offers(site_ids)
         self.recheck_pct = offer_recheck().min_change_pct
-        self.anchor_pool = matching.candidates(self.plan.product.pk)
+        self.anchors = _AnchorPools(self.plan.product, sites)
         # Рабочая цена, отказы и заявки площадок — как их видит разбор прайса.
         self.states: dict[str, SiteState] = load_state(
             domains, seller_id=0, before=start_of_day(upload.prices_date), rates=rates
@@ -574,7 +575,9 @@ class _Planner:
                 )
 
     def _bind(self, row: PlanRow, link: LinkData) -> None:
-        found = matching.find(link.anchor, self.anchor_pool, url=link.target_url)
+        domain = row.record.domain
+        anchor_list = self.anchors.list_for(row.target, domain, self.plan.sites.get(domain))
+        found = matching.find(link.anchor, self.anchors.pool(anchor_list), url=link.target_url)
         if found.keyword is None:
             row.unbound.append(
                 {
@@ -682,7 +685,7 @@ class Writer:
         self._sites()
         sellers = self._sellers()
         employees = self._employees()
-        keywords = matching.candidates(self.plan.product.pk)
+        anchors = _AnchorPools(self.plan.product, self.site_ids)
         offers = _offers_by_key(list(self.site_ids.values()))
         for row in self.plan.rows:
             if row.ambiguous:
@@ -690,7 +693,12 @@ class Writer:
                 continue
             site_id = self.site_ids[row.record.domain]
             placement = self._placement(row, site_id, sellers, employees)
-            self._links(row, placement, keywords)
+            anchor_list = anchors.list_for(placement, row.record.domain, site_id)
+            if placement.anchor_list_id is None and anchor_list is not None:
+                # Регион размещения — тот, по чьим анкорам привязаны его ссылки (ADR-075).
+                placement.anchor_list = anchor_list
+                Placement.objects.filter(pk=placement.pk).update(anchor_list=anchor_list)
+            self._links(row, placement, anchors.pool(anchor_list))
             self._checks(row, placement)
             self._note(row, site_id)
             self._offer(row, site_id, sellers, offers)
@@ -966,6 +974,38 @@ def _load_sites(domains: Sequence[str]) -> tuple[dict[str, int], dict[str, int],
             if price_id is not None:
                 prices[site_id] = price_id
     return sites, deleted, prices
+
+
+class _AnchorPools:
+    """Анкоры для ссылок файла — из списка региона размещения (ADR-075).
+
+    Список — сохранённый у размещения, иначе угаданный по площадке, как в его
+    карточке: язык из карточки Collaborator, зона домена; новая площадка — по
+    домену. «Convertio» на бразильской площадке — анкор списка Бразилии.
+    """
+
+    def __init__(self, product: Product, sites: Mapping[str, int]) -> None:
+        self.product_id = product.pk
+        self.lists = AnchorList.of_product(product.pk)
+        ids = list(sites.values())
+        self.languages: dict[int, str | None] = dict(
+            Site.all_objects.filter(pk__in=ids).values_list("pk", "language")
+        )
+        self.pools: dict[int, list[matching.Candidate]] = {}
+
+    def list_for(
+        self, placement: Placement | None, domain: str, site_id: int | None
+    ) -> AnchorList | None:
+        stored = placement.anchor_list_id if placement is not None else None
+        site = Site(domain=domain, language=self.languages.get(site_id or 0))
+        return regions.choose(site, self.lists, stored=stored).anchor_list
+
+    def pool(self, anchor_list: AnchorList | None) -> list[matching.Candidate]:
+        if anchor_list is None:
+            return []
+        if anchor_list.pk not in self.pools:
+            self.pools[anchor_list.pk] = matching.candidates(self.product_id, anchor_list.pk)
+        return self.pools[anchor_list.pk]
 
 
 def _placements(sites: dict[str, int], product: Product) -> dict[str, list[Placement]]:

@@ -97,6 +97,8 @@ TABLES = [
     "copywriters",
     # ADR-074
     "gray_term_sets",
+    # ADR-075
+    "anchor_lists",
 ]
 
 VIEWS = [
@@ -135,6 +137,7 @@ TRIGGERS = [
     *(
         f"{table}_upload_log{suffix}"
         for table in (
+            "anchor_lists",
             "auth_user",
             "checks",
             "country_shares",

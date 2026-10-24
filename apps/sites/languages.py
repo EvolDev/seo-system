@@ -1,8 +1,9 @@
-"""Язык площадки — для угадываний в карточках.
+"""Язык площадки и язык выдачи страны — для угадываний в карточках.
 
-Набор условий серости (ADR-074) выбирается по языку площадки из карточки
-Collaborator, нет его — по зоне домена. Здесь — откуда берётся язык и как
-называется; что по нему выбрать, решает модуль сам.
+Набор условий серости (ADR-074) и список анкоров региона (ADR-075) выбираются
+одинаково: язык площадки из карточки Collaborator, нет его — по зоне домена.
+Здесь — откуда берётся язык и как называется; что по нему выбрать, решает
+каждый модуль сам.
 """
 
 from apps.sites.importing.languages import LANGUAGE_CODES
@@ -56,6 +57,14 @@ DOMAIN_LANGUAGES: dict[str, str] = {
     "ie": "en",
     "nz": "en",
 }
+# Язык выдачи страны: зона домена страны говорит о нём же. Британия — `gb`, а
+# зона у неё `.uk`; Канада и Индия по зоне не угадываются, но выдача — английская.
+COUNTRY_LANGUAGES: dict[str, str] = {
+    **{zone: language for zone, language in DOMAIN_LANGUAGES.items() if zone != "uk"},
+    "gb": "en",
+    "ca": "en",
+    "in": "en",
+}
 
 
 def language_name(code: str) -> str:
@@ -66,6 +75,11 @@ def language_name(code: str) -> str:
 def domain_language(domain: str) -> str | None:
     """Язык по зоне домена: `acritica.com.br` → `pt`; зона не говорит о языке — None."""
     return DOMAIN_LANGUAGES.get(domain.rsplit(".", 1)[-1].lower())
+
+
+def country_language(country: str) -> str | None:
+    """Язык выдачи страны: `us` → `en`, `br` → `pt`; не знаем — None."""
+    return COUNTRY_LANGUAGES.get(country.lower())
 
 
 def site_language(site: Site) -> tuple[str | None, str]:

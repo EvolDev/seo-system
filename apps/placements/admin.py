@@ -48,7 +48,8 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from apps.keywords import anchor_views
+from apps.keywords import anchor_views, regions
+from apps.keywords.models import AnchorList
 from apps.observability.models import Check, CheckStatus, Performer, TaskRun, TaskStatus
 from apps.placements import export as placement_export
 from apps.placements import (
@@ -266,6 +267,33 @@ def _initial_product(context: dict[str, Any]) -> int | None:
     value = form.form.initial.get("product") if form is not None else None
     product = getattr(value, "pk", value)
     return int(product) if isinstance(product, int | str) and str(product).isdigit() else None
+
+
+def _anchor_choice(
+    context: dict[str, Any], obj: Placement | None, lists: Sequence[AnchorList]
+) -> regions.Choice:
+    """Список анкоров формы (ADR-075): выбранный до ошибки формы, сохранённый, угаданный.
+
+    Новое размещение угадывается по площадке из адреса (вкладки площадки), без
+    неё — основной список; сменят площадку или продукт — блок придёт заново.
+    """
+    form = context.get("adminform")
+    data = form.form.data if form is not None else {}
+    by_id = {str(item.pk): item for item in lists}
+    if data.get("anchor_list") in by_id:
+        return regions.Choice(by_id[data["anchor_list"]], "выбран вами")
+    if obj is not None and obj.pk is not None:
+        return regions.for_placement(obj, lists)
+    value = form.form.initial.get("site") if form is not None else None
+    site_id = getattr(value, "pk", value)
+    site = (
+        Site.all_objects.filter(pk=site_id).first()
+        if isinstance(site_id, int | str) and str(site_id).isdigit()
+        else None
+    )
+    if site is not None:
+        return regions.choose(site, lists)
+    return regions.Choice(lists[0] if lists else None, "")
 
 
 def _queue_checks(placement_ids: list[int]) -> list[str]:
@@ -521,6 +549,8 @@ class PlacementAdmin(RecordAdmin):
         js = (
             Js("seo/indexation.js"),
             Js("seo/invoices.js"),
+            # Выбор списка анкоров с флагами (ADR-075) — до скрипта анкоров.
+            Js("seo/country-picker.js"),
             Js("seo/anchors.js"),
             Js("seo/copywriter-pick.js"),
         )
@@ -530,6 +560,7 @@ class PlacementAdmin(RecordAdmin):
                 Css("seo/indexation.css"),
                 Css("seo/status-history.css"),
                 Css("seo/offers.css"),
+                Css("flags/sprite-hq.css"),
                 Css("seo/invoices.css"),
                 Css("seo/anchors.css"),
                 Css("seo/placement-tabs.css"),
@@ -870,10 +901,14 @@ class PlacementAdmin(RecordAdmin):
             if obj is not None
             else []
         )
-        context.update(anchor_views.summary_context(product_id, used))
+        lists = AnchorList.of_product(product_id) if product_id else []
+        choice = _anchor_choice(context, obj, lists)
+        context.update(anchor_views.summary_context(product_id, used, choice=choice, lists=lists))
         product = Product.objects.filter(pk=product_id).first() if product_id else None
         if product is not None:
-            context["anchor_dialog"] = anchor_views.dialog_context(product)
+            context["anchor_dialog"] = anchor_views.dialog_context(
+                product, lists, choice.anchor_list
+            )
             context["anchor_product"] = product
         if obj is not None:
             # Чужие продукты — ссылками в шапке панели, только просмотр (E1-19,

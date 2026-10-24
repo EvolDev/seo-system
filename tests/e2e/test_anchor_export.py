@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from playwright.sync_api import Page, expect
 from pytest_django.live_server_helper import LiveServer
 
-from apps.keywords.models import Keyword
+from apps.keywords.models import AnchorList, Keyword
 from apps.sites.models import Product
 from apps.workspace.products import choose_product
 
@@ -21,9 +21,12 @@ pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True, serialize
 def product(admin_user: User) -> Product:
     product = Product.objects.create(name="Convertio", domain="convertio.co")
     choose_product(admin_user, product)
+    # bulk_create не зовёт save(): список анкоров — явно (ADR-075).
+    anchor_list = AnchorList.ensure_main(product.pk)
     Keyword.objects.bulk_create(
         Keyword(
             product=product,
+            anchor_list=anchor_list,
             keyword=f"audio {i:03}",
             target_url="https://convertio.co/wav-mp3/",
             volume=i,

@@ -9,7 +9,7 @@ from django.urls import reverse
 from apps.keywords import matching
 from apps.keywords.anchors import Anchor, Share, overview, recommend
 from apps.keywords.matching import Candidate
-from apps.keywords.models import AnchorType, Keyword, PageTypeShare
+from apps.keywords.models import AnchorList, AnchorType, Keyword, PageTypeShare
 from apps.placements.forms import PlacementLinkForm
 from apps.placements.models import Placement, PlacementLink, PlacementStatus
 from apps.sites.models import Product, Site
@@ -350,7 +350,7 @@ def test_attach_links_finds_key_inside_phrase(
         anchor="convert mp4 to mp3 online",
         target_url="https://convertio.co/other/",
     )
-    assert attach_links(placement.product) == 2
+    assert attach_links(AnchorList.ensure_main(placement.product_id)) == 2
     diluted.refresh_from_db()
     typed.refresh_from_db()
     ambiguous.refresh_from_db()
