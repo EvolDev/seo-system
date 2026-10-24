@@ -1,0 +1,17 @@
+{% comment %}
+Поля набора условий серости (ADR-074) — у нового набора и у правки выбранного.
+editor — язык, условия и ошибки (_gray_editor в apps/sites/admin.py): после
+ошибки — введённое, оно не теряется. original — язык набора, который правят;
+пусто — новый набор.
+{% endcomment %}
+      <input type="hidden" name="original" value="{{ original }}">
+      <div class="seo-country seo-gray-picker" data-country-picker data-auto data-label="Язык набора" data-placeholder="Португальский, Немецкий…">
+        <select name="language" aria-label="Язык набора">
+          {% for item in gray.languages %}<option value="{{ item.code }}"{% if item.flag %} data-flag="{{ item.flag }}"{% endif %} data-search="{{ item.code }}"{% if item.code == editor.language %} selected{% endif %}>{{ item.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <textarea name="terms" rows="10" aria-label="Условия набора" placeholder="casino&#10;poker&#10;delta 8">{{ editor.terms }}</textarea>
+      <div class="seo-sub">По одному условию на строку, или вставьте запрос Google целиком — условия возьмутся из кавычек. Google учитывает первые {{ gray.word_limit }} слова вместе с site:домен.</div>
+      {% for error in editor.errors %}<div class="seo-warnline">{{ error }}</div>{% endfor %}
+      <span class="seo-gray-editor-buttons"><button type="submit" class="seo-btn seo-btn-primary seo-btn-small">Сохранить набор</button> <button type="button" class="seo-btn seo-btn-small" data-gray-toggle="">Отмена</button></span>

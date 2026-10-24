@@ -10,6 +10,10 @@
  *    data-gray-query); примеры адресов — с выдачи серых. Пришли оба числа от
  *    расширения — форма отправляется сама, панель покажет новую карточку.
  *    count не число — Google не показал оценку: подсказка просит вписать руками.
+ * 3. Набор условий (ADR-074): выбор в списке с флагами (seo/country-picker.js)
+ *    сразу уходит формой — карточка вернётся с новым запросом. ＋ / ✎ / корзина
+ *    (data-gray-toggle) раскрывают редактор набора или подтверждение удаления
+ *    (data-gray-editor), «Отмена» — пустой data-gray-toggle — прячет.
  *
  * Скрипт стоит в разметке раздела и выполняется при каждом показе карточки:
  * обработчики на document и window навешиваются один раз, пересчёт — каждый.
@@ -96,8 +100,32 @@
     });
   }
 
+  function toggle(button) {
+    var section = button.closest("[data-gray-scan]");
+    if (!section) return;
+    var kind = button.getAttribute("data-gray-toggle");
+    section.querySelectorAll("[data-gray-editor]").forEach(function (editor) {
+      var open = editor.getAttribute("data-gray-editor") === kind && editor.hidden;
+      editor.hidden = !open;
+      if (!open) return;
+      var field = editor.querySelector("textarea") || editor.querySelector("button[type=submit]");
+      if (field) field.focus();
+    });
+  }
+
   if (!window.seoGrayReady) {
     window.seoGrayReady = true;
+    document.addEventListener("click", function (event) {
+      var button = event.target.closest ? event.target.closest("[data-gray-toggle]") : null;
+      if (button) toggle(button);
+    });
+    document.addEventListener("change", function (event) {
+      var select = event.target;
+      if (!select.matches || !select.matches("[data-gray-language]")) return;
+      // requestSubmit — с событием submit: в панели форму отправляет seo/panel.js.
+      if (select.form.requestSubmit) select.form.requestSubmit();
+      else select.form.submit();
+    });
     document.addEventListener("input", function (event) {
       var input = event.target;
       if (!input.matches || !input.matches("[data-gray-input]")) return;

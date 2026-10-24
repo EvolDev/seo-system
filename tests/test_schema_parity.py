@@ -95,6 +95,8 @@ TABLES = [
     "seller_ratings",
     # E1-14, ADR-072
     "copywriters",
+    # ADR-074
+    "gray_term_sets",
 ]
 
 VIEWS = [

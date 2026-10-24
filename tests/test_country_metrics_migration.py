@@ -60,3 +60,7 @@ def test_us_traffic_moved_to_country_snapshots() -> None:
     ]
     assert "us_traffic" not in columns
     assert apps.get_model("sites", "SiteMetric").objects.count() == 4
+    # Схему — обратно к последней миграции, как соседние тесты: иначе следующий
+    # тест с serialized_rollback не вернёт строки таблиц новее 0014 (наборы серости).
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())

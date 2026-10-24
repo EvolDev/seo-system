@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.31 от 24.10.2026 — наборы условий серости по языкам (ADR-074)
 -- Версия 1.30 от 18.10.2026 — повторные размещения: предложение продавца у размещения (ADR-073)
 -- Версия 1.29 от 14.10.2026 — копирайтеры, цена статьи и черновик у размещения (ADR-072)
 -- Версия 1.28 от 14.10.2026 — написание и анонс для всех площадок прайса (ADR-071)
@@ -231,6 +232,16 @@ CREATE TABLE gray_scans (
     checked_at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_gray_site ON gray_scans(site_id, checked_at DESC);
+
+-- Условия запроса серости на одном языке (ADR-074): карточка площадки берёт
+-- набор её языка, в запрос условия уходят в кавычках через OR.
+CREATE TABLE gray_term_sets (
+    id          bigserial PRIMARY KEY,
+    language    text NOT NULL,                      -- ISO 639-1: en, pt
+    terms       text[] NOT NULL,
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT gray_term_sets_language_key UNIQUE (language)
+);
 
 CREATE TABLE site_audits (
     id          bigserial PRIMARY KEY,

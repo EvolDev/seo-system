@@ -21,7 +21,6 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.views.main import ChangeList
-from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.db.models import Case, Count, Exists, F, Max, OuterRef, Q, Subquery, Value, When
 from django.db.models.fields.json import KT
@@ -42,11 +41,20 @@ from apps.content.admin import (
     ProductOtherSettingsInline,
     ProductSettingsForm,
 )
-from apps.content.domain_settings import gray_terms, gray_zones
+from apps.content.domain_settings import gray_zones
 from apps.content.models import DomainSetting
 from apps.placements import invoices, other_products, repeat, status_chips
 from apps.placements.models import Invoice, InvoiceStatus, Placement
-from apps.sites import ahrefs_domains, ahrefs_links, countries, gray_scan, offers, rating, sellers
+from apps.sites import (
+    ahrefs_domains,
+    ahrefs_links,
+    countries,
+    gray_scan,
+    languages,
+    offers,
+    rating,
+    sellers,
+)
 from apps.sites import export as site_export
 from apps.sites.display import (
     Amount,
@@ -70,6 +78,7 @@ from apps.sites.export import REGION_AT, REGION_KEYWORDS, REGION_TRAFFIC
 from apps.sites.models import (
     ExchangeRate,
     GrayScan,
+    GrayTermSet,
     LinkType,
     PlacementType,
     Product,
@@ -339,6 +348,21 @@ class SiteAdmin(RecordAdmin):
                 name="sites_site_card_gray",
             ),
             path(
+                "<int:object_id>/card/gray-language/",
+                self.admin_site.admin_view(require_POST(self.card_gray_language_view)),
+                name="sites_site_card_gray_language",
+            ),
+            path(
+                "<int:object_id>/card/gray-set/",
+                self.admin_site.admin_view(require_POST(self.card_gray_set_view)),
+                name="sites_site_card_gray_set",
+            ),
+            path(
+                "<int:object_id>/card/gray-set-delete/",
+                self.admin_site.admin_view(require_POST(self.card_gray_set_delete_view)),
+                name="sites_site_card_gray_set_delete",
+            ),
+            path(
                 "<int:object_id>/rate/",
                 self.admin_site.admin_view(require_POST(self.rate_view)),
                 name="sites_site_rate",
@@ -378,16 +402,18 @@ class SiteAdmin(RecordAdmin):
         gray_form: "GrayReadingForm | None" = None,
         price_form: "OfferPriceForm | None" = None,
         extra_form: "OfferExtraPriceForm | None" = None,
+        set_form: "GrayTermSetForm | None" = None,
     ) -> HttpResponse:
         """Карточка: панели (заголовок X-Seo-Partial) — только содержимое, иначе страница.
 
-        `gray_form` — форма замера серости с ошибками: карточка покажет их у полей.
+        `gray_form` — форма замера серости с ошибками: карточка покажет их у полей;
+        `set_form` — набор условий серости с ошибками: редактор набора открыт.
         """
         site = get_object_or_404(Site.all_objects.select_related("price__seller"), pk=object_id)
         if not self.has_view_permission(request, site):
             return HttpResponse(status=403)
         partial = is_partial(request)
-        gray = _gray_context(site, gray_form)
+        gray = _gray_context(site, gray_form, request, set_form)
         working = working_product_id(request)
         context = {
             **self.admin_site.each_context(request),
@@ -531,6 +557,51 @@ class SiteAdmin(RecordAdmin):
                 return self.card_view(request, object_id, gray_form=form)
             return self._back_to_card(request, object_id)
         gray_scan.record(site, form.reading())
+        return self._back_to_card(request, object_id)
+
+    def card_gray_language_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Набор условий серости выбран руками: держится до конца сессии (ADR-074).
+
+        Пустой выбор — «Авто»: снова по языку площадки.
+        """
+        get_object_or_404(Site.all_objects, pk=object_id)
+        language = request.POST.get("language") or ""
+        if GrayTermSet.objects.filter(language=language).exists():
+            request.session[GRAY_LANGUAGE_SESSION] = language
+        else:
+            request.session.pop(GRAY_LANGUAGE_SESSION, None)
+        return self._back_to_card(request, object_id)
+
+    def card_gray_set_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Новый набор условий серости или правка набора — из карточки (ADR-074)."""
+        get_object_or_404(Site.all_objects, pk=object_id)
+        original = GrayTermSet.objects.filter(language=request.POST.get("original") or "").first()
+        permission = "change_graytermset" if original is not None else "add_graytermset"
+        if not request.user.has_perm(f"sites.{permission}"):
+            return HttpResponse(status=403)
+        form = GrayTermSetForm(request.POST, original=original)
+        if not form.is_valid():
+            return self.card_view(request, object_id, set_form=form)
+        term_set = original or GrayTermSet()
+        renamed = original is not None and original.language != form.cleaned_data["language"]
+        term_set.language = form.cleaned_data["language"]
+        term_set.terms = form.cleaned_data["terms"]
+        term_set.updated_at = timezone.now()
+        term_set.save()
+        # Сменили язык выбранного набора — выбор идёт за набором.
+        if renamed and original is not None and request.session.get(GRAY_LANGUAGE_SESSION):
+            request.session[GRAY_LANGUAGE_SESSION] = term_set.language
+        return self._back_to_card(request, object_id)
+
+    def card_gray_set_delete_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Удалить набор условий серости. Прошлые замеры остаются: запрос — в замере."""
+        get_object_or_404(Site.all_objects, pk=object_id)
+        if not request.user.has_perm("sites.delete_graytermset"):
+            return HttpResponse(status=403)
+        language = request.POST.get("language") or ""
+        GrayTermSet.objects.filter(language=language).delete()
+        if request.session.get(GRAY_LANGUAGE_SESSION) == language:
+            request.session.pop(GRAY_LANGUAGE_SESSION)
         return self._back_to_card(request, object_id)
 
     def _back_to_card(self, request: HttpRequest, object_id: int) -> HttpResponse:
@@ -789,6 +860,7 @@ class GrayReadingForm(forms.Form):
         choices=[(gray_scan.SOURCE_TYPED, "вручную"), (gray_scan.SOURCE_EXTENSION, "расширение")],
         required=False,
     )
+    language = forms.CharField(max_length=16, required=False)
 
     def clean_sample_urls(self) -> list[str]:
         # Примеры — по адресу на строку; не адрес страницы — не пример.
@@ -808,7 +880,48 @@ class GrayReadingForm(forms.Form):
             gray_query=data["gray_query"],
             sample_urls=data["sample_urls"],
             source=data["source"] or gray_scan.SOURCE_TYPED,
+            language=data["language"] or None,
         )
+
+
+# Языки набора серости — по алфавиту названий, как в карточке Collaborator.
+GRAY_LANGUAGE_CHOICES = sorted(languages.LANGUAGE_NAMES.items(), key=lambda item: item[1])
+
+
+class GrayTermSetForm(forms.Form):
+    """Набор условий серости: язык и условия — по одному на строку или запросом целиком."""
+
+    language = forms.ChoiceField(
+        label="Язык",
+        choices=GRAY_LANGUAGE_CHOICES,
+        error_messages={"required": "Выберите язык набора."},
+    )
+    terms = forms.CharField(
+        label="Условия",
+        widget=forms.Textarea(attrs={"rows": 10}),
+        error_messages={"required": "Впишите хотя бы одно условие."},
+    )
+
+    def __init__(self, *args: Any, original: GrayTermSet | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.original = original
+
+    def clean_language(self) -> str:
+        language: str = self.cleaned_data["language"]
+        taken = GrayTermSet.objects.filter(language=language)
+        if self.original is not None:
+            taken = taken.exclude(pk=self.original.pk)
+        if taken.exists():
+            raise forms.ValidationError(
+                f"Набор «{languages.language_name(language)}» уже есть — правьте его."
+            )
+        return language
+
+    def clean_terms(self) -> list[str]:
+        try:
+            return gray_scan.clean_terms(self.cleaned_data["terms"])
+        except ValueError as error:
+            raise forms.ValidationError(str(error)) from error
 
 
 def _with_gray_zone(queryset: models.QuerySet[Any]) -> models.QuerySet[Any]:
@@ -839,23 +952,34 @@ def _with_gray_zone(queryset: models.QuerySet[Any]) -> models.QuerySet[Any]:
 
 # Замеров серости в истории карточки.
 GRAY_HISTORY = 20
+# Набор условий серости, выбранный руками (ADR-074): язык набора, до конца сессии.
+GRAY_LANGUAGE_SESSION = "seo_gray_language"
 GRAY_SOURCES = {gray_scan.SOURCE_EXTENSION: "расширение", gray_scan.SOURCE_TYPED: "вручную"}
 
 
-def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
-    """Раздел «Серость в Google»: кнопки, форма замера, последний замер и история."""
-    try:
-        terms = gray_terms()
-    except ImproperlyConfigured:
-        # Общее значение стёрли руками: кнопка «всего» работает и без него.
-        terms = ()
+def _gray_context(
+    site: Site,
+    form: GrayReadingForm | None,
+    request: HttpRequest,
+    set_form: GrayTermSetForm | None = None,
+) -> dict[str, Any]:
+    """Раздел «Серость в Google»: набор условий, кнопки, форма замера, последний
+    замер и история."""
+    sets = list(GrayTermSet.objects.all())
+    choice = gray_scan.choose(site, sets, request.session.get(GRAY_LANGUAGE_SESSION))
+    current = choice.term_set
+    # «Авто» в выборе — какой набор взялся бы по языку площадки.
+    auto = gray_scan.choose(site, sets, None).term_set
+    terms = current.terms if current is not None else []
     zones = gray_zones()
     total_query = gray_scan.total_query(site.domain)
     gray_query = gray_scan.gray_query(site.domain, terms) if terms else ""
     rows = []
     for scan in site.gray_scans.order_by("-checked_at", "-pk")[:GRAY_HISTORY]:
         zone = gray_scan.zone_of(scan.ratio, zones)
-        source = str((scan.breakdown or {}).get("source") or "")
+        breakdown = scan.breakdown or {}
+        source = str(breakdown.get("source") or "")
+        language = str(breakdown.get("language") or "")
         rows.append(
             {
                 "when": f"{timezone.localtime(scan.checked_at):%d.%m.%Y %H:%M}",
@@ -865,13 +989,15 @@ def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
                 "zone_title": gray_scan.ZONE_TITLES[zone] if zone else "",
                 "total": gray_scan.count_text(scan.total_indexed),
                 "gray": gray_scan.count_text(scan.gray_hits),
-                "over_total": bool((scan.breakdown or {}).get("over_total")),
+                "over_total": bool(breakdown.get("over_total")),
                 "source": GRAY_SOURCES.get(source, source or "—"),
+                "language": languages.language_name(language) if language else "",
+                "flag": countries.flag_html(gray_scan.language_flag(language)),
                 "samples": scan.sample_urls or [],
             }
         )
-    setting = DomainSetting.objects.filter(key="GRAY_TERMS", product__isnull=True).first()
     words = gray_scan.word_count(gray_query)
+    user = request.user
     return {
         "total_query": total_query,
         "gray_query": gray_query,
@@ -881,14 +1007,63 @@ def _gray_context(site: Site, form: GrayReadingForm | None) -> dict[str, Any]:
         "word_limit": gray_scan.GOOGLE_WORD_LIMIT,
         "too_long": words > gray_scan.GOOGLE_WORD_LIMIT,
         "zones": zones,
-        "terms_count": len(terms),
-        "settings_url": reverse("admin:content_domainsetting_change", args=[setting.pk])
-        if setting is not None
-        else "",
+        "current": _gray_set_row(current) if current is not None else None,
+        "auto": _gray_set_row(auto) if auto is not None else None,
+        "reason": choice.reason,
+        "picked": choice.picked,
+        "sets": sorted(
+            (_gray_set_row(term_set) for term_set in sets), key=lambda row: str(row["name"])
+        ),
+        "languages": [
+            {"code": code, "name": name, "flag": gray_scan.language_flag(code) or ""}
+            for code, name in GRAY_LANGUAGE_CHOICES
+        ],
+        "can_add_set": user.has_perm("sites.add_graytermset"),
+        "can_change_set": user.has_perm("sites.change_graytermset"),
+        "can_delete_set": user.has_perm("sites.delete_graytermset"),
+        "add_editor": _gray_editor(
+            set_form,
+            None,
+            # Новый набор — сразу на языке площадки: его чаще всего и не хватает.
+            site.language or languages.domain_language(site.domain) or "",
+            "",
+        ),
+        "edit_editor": _gray_editor(
+            set_form,
+            current,
+            current.language if current is not None else "",
+            "\n".join(terms),
+        ),
+        "language_url": reverse("admin:sites_site_card_gray_language", args=[site.pk]),
+        "set_url": reverse("admin:sites_site_card_gray_set", args=[site.pk]),
+        "set_delete_url": reverse("admin:sites_site_card_gray_set_delete", args=[site.pk]),
         "save_url": reverse("admin:sites_site_card_gray", args=[site.pk]),
         "form": form or GrayReadingForm(),
         "latest": rows[0] if rows else None,
         "history": rows,
+    }
+
+
+def _gray_editor(
+    form: GrayTermSetForm | None, term_set: GrayTermSet | None, language: str, terms: str
+) -> dict[str, object]:
+    """Поля редактора набора: после ошибки в этом редакторе — введённое и ошибки."""
+    if form is not None and form.original == term_set:
+        return {
+            "language": form.data.get("language", ""),
+            "terms": form.data.get("terms", ""),
+            "errors": [error for errors in form.errors.values() for error in errors],
+        }
+    return {"language": language, "terms": terms, "errors": []}
+
+
+def _gray_set_row(term_set: GrayTermSet) -> dict[str, object]:
+    language = term_set.language
+    return {
+        "language": language,
+        "name": languages.language_name(language),
+        "flag": gray_scan.language_flag(language) or "",
+        "count": len(term_set.terms),
     }
 
 

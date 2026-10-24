@@ -719,6 +719,34 @@ class GrayScan(models.Model):
         return f"{self.site} · {self.checked_at:%d.%m.%Y}"
 
 
+class GrayTermSet(models.Model):
+    """Условия запроса серости на одном языке (ADR-074): один набор на язык.
+
+    Карточка площадки берёт набор её языка (`apps.sites.gray_scan.choose`);
+    в запрос условия уходят в кавычках через OR, в том порядке, в каком их
+    ввели. Прошлые замеры от набора не зависят — запрос сохранён в замере.
+    """
+
+    language = models.TextField("язык")  # ISO 639-1: en, pt
+    terms = ArrayField(models.TextField(), verbose_name="условия")
+    updated_at = models.DateTimeField("изменён", db_default=PgNow())
+
+    class Meta:
+        db_table = "gray_term_sets"
+        verbose_name = "набор условий серости"
+        verbose_name_plural = "наборы условий серости"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["language"],
+                name="gray_term_sets_language_key",
+                violation_error_message="Набор для этого языка уже есть.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.language
+
+
 class SiteAudit(models.Model):
     """Вердикт по площадке под конкретный продукт. Повторный аудит — новая строка."""
 

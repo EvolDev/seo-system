@@ -2,8 +2,10 @@
 
 В карточке площадки две кнопки открывают Google в новой вкладке: запрос
 `site:домен` — сколько страниц площадки в индексе, и `site:домен "casino" OR
-"poker" OR …` — сколько из них на серые темы. Условия второго запроса —
-настройка `GRAY_TERMS`, их дописывают в «Настройках».
+"poker" OR …` — сколько из них на серые темы. Условия второго запроса — набор
+на языке площадки (`GrayTermSet`, ADR-074): язык из карточки Collaborator,
+нет его — по зоне домена, набора для языка нет — английский. Другой набор
+человек выбирает сам, выбор держится до конца сессии (`choose`).
 
 Оценку «About N results» с обеих страниц в карточку подставляет расширение
 браузера (`browser-extension/`) или человек руками. Сервер в Google не ходит:
@@ -15,6 +17,7 @@
 `www.`, и поддомены. С `https://домен/` площадка на `www.` показала бы ноль.
 """
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
@@ -22,7 +25,9 @@ from typing import Literal
 from urllib.parse import urlencode
 
 from apps.content.domain_settings import GrayZones
-from apps.sites.models import GrayScan, MetricSource, Site
+from apps.sites import countries
+from apps.sites.languages import language_name, site_language
+from apps.sites.models import GrayScan, GrayTermSet, MetricSource, Site
 
 GOOGLE_SEARCH = "https://www.google.com/search"
 # Google учитывает в запросе первые 32 слова, остальные молча отбрасывает. Это
@@ -41,6 +46,103 @@ ZONE_TITLES: dict[Zone, str] = {
 # Откуда числа замера: расширение браузера или человек вписал руками.
 SOURCE_EXTENSION = "extension"
 SOURCE_TYPED = "typed"
+
+# Набор, когда для языка площадки своего нет.
+FALLBACK_LANGUAGE = "en"
+# Флаг языка — страна, где на нём говорят; код языка и страны совпадает не всегда
+# (pt, de — совпадает, en, uk — нет). Нет здесь — флаг по коду языка, если он есть.
+LANGUAGE_FLAGS: dict[str, str] = {
+    "en": "gb",
+    "uk": "ua",
+    "cs": "cz",
+    "da": "dk",
+    "el": "gr",
+    "he": "il",
+    "ja": "jp",
+    "ko": "kr",
+    "zh": "cn",
+    "sv": "se",
+    "et": "ee",
+    "ka": "ge",
+    "kk": "kz",
+    "be": "by",
+    "sr": "rs",
+    "sl": "si",
+    "hi": "in",
+    "ur": "pk",
+    "fa": "ir",
+    "ar": "sa",
+    "vi": "vn",
+    "ms": "my",
+    "bn": "bd",
+    "ta": "in",
+    "te": "in",
+    "tl": "ph",
+    "jv": "id",
+    "la": "va",
+    "ca": "es",
+    "sq": "al",
+    "hy": "am",
+    "bs": "ba",
+}
+
+
+def language_flag(code: str) -> str | None:
+    """Код страны для флага языка: `en` → `gb`, `pt` → `pt`; флага нет — None."""
+    return countries.flag_code(LANGUAGE_FLAGS.get(code, code))
+
+
+@dataclass(frozen=True)
+class Choice:
+    """Какой набор условий у карточки и почему — подпись рядом с выбором."""
+
+    term_set: GrayTermSet | None
+    reason: str
+    picked: bool = False
+
+
+def choose(site: Site, sets: Sequence[GrayTermSet], picked: str | None) -> Choice:
+    """Набор для карточки: выбранный человеком в эту сессию, иначе по языку площадки.
+
+    Язык — из карточки Collaborator, нет его — по зоне домена. Для языка нет
+    набора — английский, нет и его — первый по названию языка.
+    """
+    by_language = {term_set.language: term_set for term_set in sets}
+    if picked is not None and picked in by_language:
+        return Choice(by_language[picked], "выбран вами", picked=True)
+    language, how = site_language(site)
+    if language is not None and language in by_language:
+        return Choice(by_language[language], how)
+    fallback = by_language.get(FALLBACK_LANGUAGE) or min(
+        sets, key=lambda term_set: language_name(term_set.language), default=None
+    )
+    if fallback is None:
+        return Choice(None, "")
+    taken = f"взят «{language_name(fallback.language)}»"
+    if language:
+        return Choice(fallback, f"для языка «{language_name(language)}» набора нет — {taken}")
+    return Choice(fallback, f"язык площадки не известен — {taken}")
+
+
+# Вставили запрос целиком: `site:… ("casino" OR "poker")` — условия в кавычках.
+WHOLE_QUERY = re.compile(r'"\s+OR\s+"')
+
+
+def clean_terms(text: str) -> list[str]:
+    """Условия из поля набора: по одному на строку или запрос Google целиком.
+
+    Пробелы внутри условия схлопываются, повтор без учёта регистра пропускается.
+    Ни одного условия — ValueError.
+    """
+    lines = re.findall(r'"([^"]+)"', text) if WHOLE_QUERY.search(text) else text.splitlines()
+    terms: list[str] = []
+    for line in lines:
+        term = " ".join(line.split())
+        if term and term.casefold() not in (seen.casefold() for seen in terms):
+            terms.append(term)
+    if not terms:
+        raise ValueError("Впишите хотя бы одно условие.")
+    return terms
 
 
 def total_query(domain: str) -> str:
@@ -114,12 +216,14 @@ class Reading:
     gray_query: str
     sample_urls: Sequence[str] = ()
     source: str = SOURCE_TYPED
+    language: str | None = None  # набор условий серого запроса
 
 
 def record(site: Site, reading: Reading) -> GrayScan:
     """Новый замер серости площадки — строка `gray_scans`."""
     breakdown = {
         "queries": {"total": reading.total_query, "gray": reading.gray_query},
+        "language": reading.language,
         "source": reading.source,
         "over_total": reading.gray > reading.total,
     }

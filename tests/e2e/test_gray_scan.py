@@ -6,6 +6,7 @@
 tests/test_gray_scan.py.
 """
 
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,7 +15,15 @@ from django.conf import settings
 from playwright.sync_api import Page, expect
 from pytest_django.live_server_helper import LiveServer
 
-from apps.sites.models import GrayScan, Product, Site, SiteList, SiteListItem, SiteMetric
+from apps.sites.models import (
+    GrayScan,
+    GrayTermSet,
+    Product,
+    Site,
+    SiteList,
+    SiteListItem,
+    SiteMetric,
+)
 
 from .conftest import mark, same_document
 
@@ -65,7 +74,7 @@ def test_typed_numbers(admin_page: Page, live_server: LiveServer, site: Site) ->
     expect(section.locator("[data-gray-result]")).to_have_text("→ 3,2 % · зелёная зона")
     section.locator("input[name=gray]").fill("100")
     expect(section.locator("[data-gray-result]")).to_have_text("→ 26,67 % · красная зона")
-    section.locator("button[type=submit]").click()
+    section.locator(".seo-gray-form button[type=submit]").click()
 
     latest = page.locator(PANEL).locator(".seo-gray-latest")
     expect(latest).to_contain_text("26,67 %")
@@ -127,6 +136,53 @@ def test_extension_without_count(admin_page: Page, live_server: LiveServer, site
     _send(page, "site:youengage.me", None)
     expect(section.locator("[data-gray-hint]")).to_contain_text("впишите число руками")
     expect(section.locator("input[name=total]")).to_have_value("")
+
+
+def test_term_set_pick_add_and_delete(
+    admin_page: Page, live_server: LiveServer, site: Site
+) -> None:
+    """Набор условий (ADR-074): выбрал «Португальский» → запрос с его словами, выбор
+    держится на следующей площадке; ＋ — новый набор, корзина — удалить с подтверждением."""
+    page = admin_page
+    Site.objects.create(domain="acritica.net", language="pt")
+    _open_card(page, live_server)
+    section = page.locator(PANEL).locator("[data-gray-scan]")
+    picker = section.locator(".seo-gray-pick .seo-country-input")
+    expect(picker).to_have_value("Авто — Английский")
+    expect(section.locator(".seo-gray-pick .seo-country-flag .flag-_b")).to_have_count(1)
+    picker.click()
+    section.locator(".seo-country-list li", has_text="Португальский").click()
+    expect(section).to_have_attribute("data-gray-query", re.compile('"cassino"'))
+    expect(section.locator("[data-gray-reason]")).to_contain_text("выбран вами")
+    expect(section.locator(".seo-gray-pick .seo-country-input")).to_have_value("Португальский")
+
+    # Другая площадка — набор тот же, хотя язык у неё английский.
+    page.keyboard.press("Escape")
+    page.goto(f"{live_server.url}/admin/sites/site/{site.pk}/card/")
+    page.wait_for_function("window.seoGrayReady === true")
+    card = page.locator("[data-gray-scan]")
+    expect(card).to_have_attribute("data-gray-query", re.compile('"cassino"'))
+
+    card.locator("[data-gray-toggle=add]").click()
+    editor = card.locator("[data-gray-editor=add]")
+    expect(editor).to_be_visible()
+    editor.locator(".seo-country-input").fill("немец")
+    editor.locator(".seo-country-list li", has_text="Немецкий").click()
+    editor.locator("textarea").fill('site:spiegel.de ("Kasino" OR "Kredit")')
+    editor.locator("button[type=submit]").click()
+    expect(page.locator("[data-gray-language] option[value=de]")).to_have_count(1)
+    assert GrayTermSet.objects.get(language="de").terms == ["Kasino", "Kredit"]
+
+    card = page.locator("[data-gray-scan]")
+    card.locator("[data-gray-toggle=delete]").click()
+    confirm = card.locator("[data-gray-editor=delete]")
+    expect(confirm).to_contain_text("Удалить набор «Португальский»")
+    confirm.locator("button", has_text="Отмена").click()
+    expect(confirm).to_be_hidden()
+    card.locator("[data-gray-toggle=delete]").click()
+    card.locator("[data-gray-editor=delete] button[type=submit]").click()
+    expect(page.locator("[data-gray-reason]")).to_contain_text("по языку площадки")
+    assert not GrayTermSet.objects.filter(language="pt").exists()
 
 
 @pytest.mark.parametrize(

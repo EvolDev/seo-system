@@ -41,12 +41,13 @@ tags: [пороги, настройки]
 в более тёмной зоне: 10% — уже жёлтая, 25% — ещё жёлтая). По ним
 раскрашены доля в карточке площадки и колонка **Серость** в **Площадках**.
 
-Условия запроса серых тем — **GRAY_TERMS**, по одному на строку, в запрос —
-в кавычках через OR. Стартовый список повторяет запрос ручной проверки:
-casino, poker, betting, bookmaker, roulette, blackjack, slots, jackpot,
-gambling, spins, porn, escort, nude, sex, cbd, weed, marijuana, cannabis,
-hemp, delta 8, delta 9, loan, payday, essay, viagra, cialis, levitra, ed
-pills, xanax. Google читает только первые 32 слова запроса. Как
+Условия запроса серых тем — не настройка, а наборы по языкам прямо в
+карточке площадки: карточка берёт набор на языке площадки. Английский
+повторяет запрос ручной проверки: casino, poker, betting, bookmaker,
+roulette, blackjack, slots, jackpot, gambling, spins, porn, escort, nude,
+sex, cbd, weed, marijuana, cannabis, hemp, delta 8, delta 9, loan, payday,
+essay, viagra, cialis, levitra, ed pills, xanax. Google читает только первые
+32 слова запроса. Как
 пользоваться — [Как проверить серость площадки](../how-to/check-gray-share.md).
 
 ## Цена

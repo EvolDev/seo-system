@@ -1,4 +1,5 @@
-"""Серость площадки в Google: запросы, доля, зона, замер в карточке, колонка (E2-06)."""
+"""Серость площадки в Google: запросы, доля, зона, замер в карточке, колонка (E2-06);
+наборы условий по языкам (ADR-074)."""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -10,11 +11,11 @@ from django.contrib.auth.models import Permission
 from django.test import Client
 from django.urls import reverse
 
-from apps.content.domain_settings import GrayZones, gray_terms
+from apps.content.domain_settings import GrayZones
 from apps.content.models import DomainSetting
-from apps.sites import gray_scan
+from apps.sites import gray_scan, languages
 from apps.sites.gray_scan import Reading
-from apps.sites.models import GrayScan, MetricSource, Product, Site, SiteMetric
+from apps.sites.models import GrayScan, GrayTermSet, MetricSource, Product, Site, SiteMetric
 from config.admin import PARTIAL_HEADER
 
 pytestmark = pytest.mark.django_db
@@ -29,6 +30,10 @@ def site() -> Site:
     site = Site.objects.create(domain="youengage.me", language="en")
     SiteMetric.objects.create(site=site, dr=60)
     return site
+
+
+def _english() -> list[str]:
+    return GrayTermSet.objects.get(language="en").terms
 
 
 def _card(client: Client, site: Site) -> str:
@@ -59,7 +64,7 @@ class TestQueries:
         assert query == 'site:youengage.me "casino" OR "delta 8" OR "online casino"'
 
     def test_default_terms_repeat_manual_query(self) -> None:
-        query = gray_scan.gray_query("youengage.me", gray_terms())
+        query = gray_scan.gray_query("youengage.me", _english())
         assert query.startswith('site:youengage.me "casino" OR "poker" OR "betting"')
         assert query.endswith('OR "ed pills" OR "xanax"')
 
@@ -75,7 +80,7 @@ class TestQueries:
     def test_word_count_skips_or(self) -> None:
         assert gray_scan.word_count('site:a.com "casino" OR "delta 8"') == 4
         # Запрос из ручной проверки: site: и 32 слова условий.
-        assert gray_scan.word_count(gray_scan.gray_query("a.com", gray_terms())) == 33
+        assert gray_scan.word_count(gray_scan.gray_query("a.com", _english())) == 33
 
 
 class TestRatio:
@@ -136,6 +141,7 @@ class TestRecord:
         assert first.method == MetricSource.MANUAL
         assert first.breakdown == {
             "queries": {"total": "site:youengage.me", "gray": 'site:youengage.me "casino"'},
+            "language": None,
             "source": "typed",
             "over_total": False,
         }
@@ -158,31 +164,29 @@ class TestCard:
         page = _card(admin_client, site)
         total_url = gray_scan.google_url("site:youengage.me")
         assert f'href="{total_url}"' in page.replace("&amp;", "&")
-        gray_url = gray_scan.google_url(gray_scan.gray_query("youengage.me", gray_terms()))
+        gray_url = gray_scan.google_url(gray_scan.gray_query("youengage.me", _english()))
         assert gray_url.replace("&", "&amp;") in page
         assert 'data-total-query="site:youengage.me"' in page
         assert 'data-green="10.0" data-yellow="25.0"' in page
         assert 'target="_blank"' in page
 
-    def test_long_query_warning_and_settings_link(self, admin_client: Client, site: Site) -> None:
+    def test_long_query_warning(self, admin_client: Client, site: Site) -> None:
         page = _card(admin_client, site)
         assert "Слов в запросе серости без OR: 33." in page
-        assert "Условия запроса серости: 29" in page
-        setting = DomainSetting.objects.get(key="GRAY_TERMS", product=None)
-        assert reverse("admin:content_domainsetting_change", args=[setting.pk]) in page
+        assert "по языку площадки · условий: 29" in page
 
     def test_short_list_has_no_warning(self, admin_client: Client, site: Site) -> None:
-        DomainSetting.objects.filter(key="GRAY_TERMS").update(value=["casino", "loan"])
+        GrayTermSet.objects.filter(language="en").update(terms=["casino", "loan"])
         page = _card(admin_client, site)
         assert "Слов в запросе серости" not in page
         assert "&quot;casino&quot; OR &quot;loan&quot;" in page
 
     def test_without_terms_only_total_button(self, admin_client: Client, site: Site) -> None:
-        DomainSetting.objects.filter(key="GRAY_TERMS").delete()
+        GrayTermSet.objects.all().delete()
         page = _card(admin_client, site)
         assert "Google: всего страниц" in page
         assert "Google: серые темы" not in page
-        assert "Нет условий запроса серости" in page
+        assert "Нет ни одного набора условий серости" in page
 
     def test_save_from_card(self, admin_client: Client, site: Site) -> None:
         response = _save(admin_client, site, {"total": "375", "gray": "12"})
@@ -245,6 +249,191 @@ class TestCard:
         assert "seo-gray-form" not in page
         _save(client, site, {"total": "10", "gray": "1"})
         assert not GrayScan.objects.exists()
+
+
+PORTUGUESE_QUERY = (
+    'site:acritica.net ("casino" OR "cassino" OR "póquer" OR "apostas" OR'
+    ' "apostas esportivas" OR "Casino" OR "delta 8")'
+)
+
+
+def _post(client: Client, name: str, site: Site, data: dict[str, str]) -> Any:
+    url = reverse(f"admin:sites_site_card_{name}", args=[site.pk])
+    return client.post(url, data, headers={PARTIAL_HEADER: "1"})
+
+
+class TestTermSets:
+    """Наборы условий серости по языкам: стартовые, выбор набора, разбор условий (ADR-074)."""
+
+    def test_sets_come_from_migration(self) -> None:
+        english = _english()
+        assert len(english) == 29
+        assert (english[0], english[-1]) == ("casino", "xanax")
+        portuguese = GrayTermSet.objects.get(language="pt").terms
+        assert portuguese[:3] == ["casino", "cassino", "poker"]
+        # Сокращён до лимита Google вместе с site:домен.
+        query = gray_scan.gray_query("acritica.net", portuguese)
+        assert gray_scan.word_count(query) == gray_scan.GOOGLE_WORD_LIMIT
+
+    def test_site_language_wins(self) -> None:
+        site = Site(domain="example.com.br", language="pt")
+        choice = gray_scan.choose(site, list(GrayTermSet.objects.all()), None)
+        assert choice.term_set is not None
+        assert (choice.term_set.language, choice.reason) == ("pt", "по языку площадки")
+        assert not choice.picked
+
+    def test_domain_zone_without_language(self) -> None:
+        site = Site(domain="acritica.com.br")
+        choice = gray_scan.choose(site, list(GrayTermSet.objects.all()), None)
+        assert choice.term_set is not None
+        assert (choice.term_set.language, choice.reason) == ("pt", "по домену .br")
+
+    @pytest.mark.parametrize(
+        ("language", "domain", "reason"),
+        [
+            ("de", "spiegel.de", "для языка «Немецкий» набора нет — взят «Английский»"),
+            (None, "example.com", "язык площадки не известен — взят «Английский»"),
+        ],
+    )
+    def test_falls_back_to_english(self, language: str | None, domain: str, reason: str) -> None:
+        site = Site(domain=domain, language=language)
+        choice = gray_scan.choose(site, list(GrayTermSet.objects.all()), None)
+        assert choice.term_set is not None
+        assert (choice.term_set.language, choice.reason) == ("en", reason)
+
+    def test_without_english_first_by_name(self) -> None:
+        GrayTermSet.objects.filter(language="en").delete()
+        GrayTermSet.objects.create(language="de", terms=["casino"])
+        choice = gray_scan.choose(
+            Site(domain="a.fr", language="fr"), list(GrayTermSet.objects.all()), None
+        )
+        assert choice.term_set is not None
+        assert choice.term_set.language == "de"
+
+    def test_picked_set_wins_and_unknown_pick_is_ignored(self) -> None:
+        sets = list(GrayTermSet.objects.all())
+        site = Site(domain="example.com", language="en")
+        picked = gray_scan.choose(site, sets, "pt")
+        assert picked.term_set is not None
+        assert (picked.term_set.language, picked.reason, picked.picked) == (
+            "pt",
+            "выбран вами",
+            True,
+        )
+        stale = gray_scan.choose(site, sets, "de")
+        assert stale.term_set is not None
+        assert (stale.term_set.language, stale.picked) == ("en", False)
+
+    def test_no_sets(self) -> None:
+        assert gray_scan.choose(Site(domain="a.com"), [], None).term_set is None
+
+    def test_terms_one_per_line(self) -> None:
+        text = "casino\n\n  online   casino \nCasino\nforex\n"
+        assert gray_scan.clean_terms(text) == ["casino", "online casino", "forex"]
+
+    def test_whole_google_query_is_split(self) -> None:
+        assert gray_scan.clean_terms(PORTUGUESE_QUERY) == [
+            "casino",
+            "cassino",
+            "póquer",
+            "apostas",
+            "apostas esportivas",
+            "delta 8",
+        ]
+
+    def test_empty_terms_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="хотя бы одно"):
+            gray_scan.clean_terms(" \n ")
+
+    def test_language_names_and_flags(self) -> None:
+        assert languages.language_name("pt") == "Португальский"
+        assert gray_scan.language_flag("pt") == "pt"
+        assert gray_scan.language_flag("en") == "gb"
+        assert gray_scan.language_flag("xx") is None
+        assert languages.domain_language("site.io") is None
+
+
+class TestCardTermSets:
+    """Выбор, добавление, правка и удаление набора из карточки площадки (ADR-074)."""
+
+    @pytest.fixture
+    def brazil(self) -> Site:
+        return Site.objects.create(domain="acritica.net", language="pt")
+
+    def test_card_uses_site_language(self, admin_client: Client, brazil: Site) -> None:
+        page = _card(admin_client, brazil)
+        assert "&quot;cassino&quot;" in page
+        assert "по языку площадки · условий: 28" in page
+        assert '<option value="" data-flag="pt" selected>Авто — Португальский</option>' in page
+        assert 'data-gray-toggle="add"' in page
+        assert 'name="language" value="pt"' in page  # набор уходит в замер
+
+    def test_pick_is_kept_for_session(self, admin_client: Client, site: Site, brazil: Site) -> None:
+        response = _post(admin_client, "gray_language", site, {"language": "pt"})
+        assert response.status_code == 200
+        assert "выбран вами" in response.content.decode()
+        # Следующая площадка — с тем же набором, хотя язык у неё свой.
+        other = Site.objects.create(domain="other.com", language="en")
+        page = _card(admin_client, other)
+        assert "&quot;cassino&quot;" in page
+        assert '<option value="pt" data-flag="pt" selected>Португальский</option>' in page
+        _post(admin_client, "gray_language", site, {"language": ""})
+        assert "&quot;cassino&quot;" not in _card(admin_client, other)
+        assert "&quot;cassino&quot;" in _card(admin_client, brazil)
+
+    def test_add_set(self, admin_client: Client, site: Site) -> None:
+        data = {"original": "", "language": "de", "terms": "Kasino\nKredit\n"}
+        response = _post(admin_client, "gray_set", site, data)
+        assert response.status_code == 200
+        assert GrayTermSet.objects.get(language="de").terms == ["Kasino", "Kredit"]
+        assert '<option value="de" data-flag="de">Немецкий</option>' in response.content.decode()
+
+    def test_existing_language_is_rejected(self, admin_client: Client, site: Site) -> None:
+        data = {"original": "", "language": "pt", "terms": "casino"}
+        page = _post(admin_client, "gray_set", site, data).content.decode()
+        assert "Набор «Португальский» уже есть — правьте его." in page
+        assert GrayTermSet.objects.get(language="pt").terms != ["casino"]
+        # Редактор нового набора открыт, введённое на месте.
+        editor = page[page.index('data-gray-editor="add"') :]
+        assert editor[: editor.index(">")].strip() == 'data-gray-editor="add"'
+        assert ">casino</textarea>" in editor
+
+    def test_edit_set_and_move_pick(self, admin_client: Client, site: Site) -> None:
+        _post(admin_client, "gray_language", site, {"language": "pt"})
+        data = {"original": "pt", "language": "es", "terms": "casino\napuestas"}
+        page = _post(admin_client, "gray_set", site, data).content.decode()
+        assert not GrayTermSet.objects.filter(language="pt").exists()
+        assert GrayTermSet.objects.get(language="es").terms == ["casino", "apuestas"]
+        assert "&quot;apuestas&quot;" in page
+        assert "выбран вами" in page
+
+    def test_delete_set_clears_pick(self, admin_client: Client, site: Site) -> None:
+        _post(admin_client, "gray_language", site, {"language": "pt"})
+        gray_scan.record(site, Reading(100, 1, "q1", "q2", language="pt"))
+        page = _post(admin_client, "gray_set_delete", site, {"language": "pt"}).content.decode()
+        assert not GrayTermSet.objects.filter(language="pt").exists()
+        assert GrayScan.objects.filter(site=site).count() == 1
+        assert "по языку площадки" in page
+        # Замер помнит набор и после удаления.
+        assert 'title="Набор «Португальский»"' in page
+
+    def test_scan_keeps_set_language(self, admin_client: Client, site: Site) -> None:
+        _save(admin_client, site, {"total": "100", "gray": "2", "language": "en"})
+        assert (GrayScan.objects.get(site=site).breakdown or {})["language"] == "en"
+
+    def test_viewer_cannot_change_sets(self, client: Client, site: Site) -> None:
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_user("viewer", password="x", is_staff=True)
+        user.user_permissions.add(Permission.objects.get(codename="view_site"))
+        client.force_login(user)
+        page = _card(client, site)
+        assert "data-gray-toggle" not in page
+        assert "data-gray-language" in page  # выбрать набор может и он
+        data = {"original": "", "language": "de", "terms": "Kasino"}
+        assert _post(client, "gray_set", site, data).status_code == 403
+        assert _post(client, "gray_set_delete", site, {"language": "pt"}).status_code == 403
+        assert GrayTermSet.objects.count() == 2
 
 
 class TestSitesColumn:

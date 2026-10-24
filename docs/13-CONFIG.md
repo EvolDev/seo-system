@@ -154,11 +154,10 @@ PRIMARY_PRODUCT_DOMAIN=convertio.co
 | `TRAFFIC_ZONES` | общее | `{"green": 10000, "yellow": 3000}` |
 | `DR_ZONES` | общее | `{"green": 50, "yellow": 35}` |
 | `KEYWORDS_ZONES` | общее | `{"green": 100, "yellow": 20}` |
-| `GRAY_ZONES` | общее | `{"green": 10, "yellow": 25}` |
+| `GRAY_ZONES` | общее | `{"green": 10, "yellow": 25}`. Условия запроса серости — не настройка, а наборы по языкам в карточке площадки (`gray_term_sets`, ADR-074) |
 | `PRICE_REFERENCE` | Convertio | `{"total_eur": 550, "writing_eur": 50, "announce_eur": 100}`. `writing_eur` — порог «пишем мы» в `v_product_site_latest` |
 | `PROJECT_TOPICS` | Convertio | список тематик проекта из `04-DOMAIN-RULES.md` §1.0 — в написании Collaborator, «Мобильные технологи» без последней «и» |
 | `SPECIAL_TOPICS` | общее | четыре категории «особых тематик»: «Азартные игры», «Кредитование, микрозаймы», «Форекс, брокеры», «Сайты знакомств» |
-| `GRAY_TERMS` | общее | условия запроса серости — список строк, в запрос в кавычках через OR (`04-DOMAIN-RULES.md` §1.4, ADR-054); стартовые 29 и `GRAY_ZONES` заводит миграция `content.0006`. Действует только общее значение |
 
 ### 2.3. Контент — таблица `domain_settings`
 

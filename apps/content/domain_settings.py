@@ -24,7 +24,6 @@ SETTING_KEYS: dict[str, str] = {
     "PRICE_REFERENCE": "Ценовой ориентир, EUR: total_eur, writing_eur, announce_eur",
     "PROJECT_TOPICS": "Тематики продукта — в написании Collaborator",
     "SPECIAL_TOPICS": "Особые тематики Collaborator",
-    "GRAY_TERMS": "Условия запроса серости — через OR, по одному",
     # Контент — 13-CONFIG.md §2.3
     "SIMILARITY_THRESHOLD": "Порог близости статей: max_cosine",
     "FACT_ROTATION_WINDOW": "Окно ротации фактов: last_n_articles",
@@ -204,21 +203,6 @@ class GrayZones:
         return cls(float(value["green"]), float(value["yellow"]))
 
 
-def parse_gray_terms(value: Any) -> tuple[str, ...]:
-    """Условия запроса серости — `GRAY_TERMS`: непустой список строк без повторов (E2-06)."""
-    if not isinstance(value, list) or not value:
-        raise ValueError("Нужен непустой список условий.")
-    terms: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ValueError("Каждое условие — непустая строка.")
-        term = " ".join(item.split())
-        if term.casefold() in (seen.casefold() for seen in terms):
-            raise ValueError(f"Условие «{term}» повторяется.")
-        terms.append(term)
-    return tuple(terms)
-
-
 # Настройки с проверкой формы значения: ошибку видно в админке при вводе,
 # а не в упавшей ночью задаче.
 SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
@@ -226,7 +210,6 @@ SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "OFFER_RECHECK": OfferRecheck.parse,
     "UPLOAD_PRICE_CAP": UploadPriceCap.parse,
     "GRAY_ZONES": GrayZones.parse,
-    "GRAY_TERMS": parse_gray_terms,
     "ANCHOR_RECOMMEND": AnchorRecommend.parse,
     "MONTHLY_BUDGET": MonthlyBudget.parse,
 }
@@ -297,18 +280,6 @@ def monthly_budget(product_id: int | None) -> MonthlyBudget:
         return MonthlyBudget.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"MONTHLY_BUDGET: {error}") from error
-
-
-def gray_terms() -> tuple[str, ...]:
-    """Действующие условия запроса серости: общее значение — серость у площадки, не у продукта."""
-    value = get_setting("GRAY_TERMS", None)
-    if value is None:
-        # Общее значение заводит миграция content.0006 — его стёрли руками.
-        raise ImproperlyConfigured("Нет настройки GRAY_TERMS — заведите общее значение.")
-    try:
-        return parse_gray_terms(value)
-    except ValueError as error:
-        raise ImproperlyConfigured(f"GRAY_TERMS: {error}") from error
 
 
 def gray_zones() -> GrayZones | None:
