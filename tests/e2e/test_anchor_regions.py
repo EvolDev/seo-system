@@ -79,9 +79,12 @@ def test_placement_region_guess_switch_and_save(
     )
     picker.press("Escape")
 
+    # Раскрытый «Рекомендуем» остаётся раскрытым, когда блок приходит заново.
+    block.locator("[data-anchor-picks] > summary").click()
     _pick_region(region, "США")
     block = page.locator("[data-anchor-block]")
     expect(block.locator("[data-anchor-region-why]")).to_have_text("выбран вами")
+    expect(block.locator("[data-anchor-picks]")).to_have_attribute("open", "")
     expect(block.locator("[data-anchor-region-warn]")).to_contain_text(
         "Анкор из другого списка у ссылок: 1"
     )

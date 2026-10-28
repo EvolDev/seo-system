@@ -8,7 +8,8 @@
  * 2. Окно «Новый анкор» (<dialog data-anchor-dialog>): анкор, куда ведёт, тип
  *    страницы. Записанный анкор появляется во всех полях анкора и выбирается
  *    в том, откуда окно открыли; на странице «Анкоры» список перечитывается.
- * 3. «Рекомендуем» — щелчок ставит анкор в первую свободную ссылку, нет
+ * 3. «Рекомендуем» — под спойлером (<details data-anchor-picks>, свёрнут при
+ *    открытии размещения). Щелчок ставит анкор в первую свободную ссылку, нет
  *    свободной — добавляет ссылку («Добавить ещё»).
  * 4. Сменили продукт в новой форме — блок «Анкоры продукта» приходит заново,
  *    в полях анкора — анкоры нового продукта.
@@ -696,7 +697,12 @@
       var response = await fetch(url, { credentials: "same-origin" });
       if (!response.ok) return;
       var holder = block.parentNode;
+      // Раскрытый «Рекомендуем» остаётся раскрытым и в новом блоке.
+      var picks = block.querySelector("[data-anchor-picks]");
+      var open = Boolean(picks && picks.open);
       holder.innerHTML = await response.text();
+      var fresh = holder.querySelector("[data-anchor-picks]");
+      if (fresh) fresh.open = open;
       initPickers(holder);
       warnOtherLists();
     } catch (error) {

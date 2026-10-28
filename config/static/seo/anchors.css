@@ -185,6 +185,28 @@ body.admin-interface .seo-anchor-block h3 {
 .seo-anchor-type-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seo-anchor-type-pct { white-space: nowrap; color: var(--body-quiet-color, #666); font-variant-numeric: tabular-nums; }
 .seo-anchor-type-pct b { color: var(--body-fg, #333); }
+/* «Рекомендуем» — спойлер: свёрнут — заголовок с числом, подсказка — когда раскрыт. */
+.seo-anchor-picks > summary { display: flex; align-items: baseline; gap: 6px; cursor: pointer; list-style: none; }
+.seo-anchor-picks > summary::-webkit-details-marker { display: none; }
+.seo-anchor-picks > summary::before { content: "▾"; color: var(--body-quiet-color, #666); font-size: 0.75rem; }
+.seo-anchor-picks:not([open]) > summary::before { content: "▸"; }
+body.admin-interface .seo-anchor-picks > summary h3 { margin: 0; }
+.seo-anchor-picks[open] > summary { margin-bottom: 8px; }
+.seo-anchor-picks:not([open]) .seo-anchor-picks-hint { display: none; }
+.seo-anchor-picks > summary:hover h3,
+.seo-anchor-picks > summary:focus-visible h3 { color: var(--seo-accent, #2a65a8); }
+.seo-anchor-picks-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--seo-info-bg, #e7eff9);
+  color: var(--seo-info, #2a65a8);
+  font-size: 0.6875rem;
+  text-align: center;
+  letter-spacing: 0;
+}
 .seo-anchor-picks ol { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; padding: 0; list-style: none; }
 .seo-anchor-picks li { list-style: none; padding: 0; }
 .seo-anchor-pick {

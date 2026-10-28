@@ -136,6 +136,7 @@ def test_recommendation_goes_to_free_link(
     expect(picks.first).to_contain_text("mp4 converter")
     expect(page.locator(".seo-anchor-pick-why").first).to_contain_text("Video: цель 60%")
 
+    page.locator("[data-anchor-picks] > summary").click()
     picks.nth(0).click()
     expect(_row(page, 0).locator(".seo-picker-input")).to_have_value("mp4 converter")
     picks.nth(1).click()
@@ -151,6 +152,25 @@ def test_recommendation_goes_to_free_link(
     assert len(links) == 2
 
 
+def test_recommendations_under_spoiler(
+    admin_page: Page, live_server: LiveServer, placement: Placement
+) -> None:
+    """Пользователь 28.10.2026: «Рекомендуем» свёрнут, «размещено · ждут» и доли — на виду."""
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/{placement.pk}/change/")
+    block = page.locator("[data-anchor-block]")
+    expect(block.locator(".seo-anchor-block-totals")).to_be_visible()
+    expect(block.locator(".seo-anchor-type").first).to_be_visible()
+    spoiler = block.locator("[data-anchor-picks]")
+    expect(spoiler.locator("summary")).to_contain_text("Рекомендуем")
+    expect(spoiler.locator(".seo-anchor-picks-count")).to_have_text("4")
+    expect(spoiler.locator(".seo-anchor-picks-hint")).to_be_hidden()
+    expect(block.locator("[data-anchor-pick]").first).to_be_hidden()
+    spoiler.locator("summary").click()
+    expect(block.locator("[data-anchor-pick]").first).to_be_visible()
+    expect(spoiler.locator(".seo-anchor-picks-hint")).to_be_visible()
+
+
 def test_picker_in_panel(admin_page: Page, live_server: LiveServer, placement: Placement) -> None:
     """Размещение панелью справа: блок анкоров и поле с поиском работают и там."""
     page = admin_page
@@ -158,6 +178,7 @@ def test_picker_in_panel(admin_page: Page, live_server: LiveServer, placement: P
     page.locator("#result_list a", has_text="blog.com").click()
     panel = page.locator(PANEL)
     expect(panel.locator("[data-anchor-block]")).to_be_visible()
+    panel.locator("[data-anchor-picks] > summary").click()
     panel.locator("[data-anchor-pick]").first.click()
     picker = panel.locator("#links-0 .seo-picker-input")
     expect(picker).to_have_value("mp4 converter")

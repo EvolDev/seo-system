@@ -10,6 +10,10 @@
 Список анкоров — регион размещения (ADR-075): выбор с флагами — поле формы
 размещения anchor_list, сохраняется с ней; рядом — почему этот список. Сменили —
 блок приходит заново, в полях «Анкор» — анкоры этого списка.
+
+«Рекомендуем» — под спойлером (пользователь, 28.10.2026): свёрнут при каждом
+открытии размещения, регион и доли видны всегда; раскрытый остаётся раскрытым,
+когда блок приходит заново (seo/anchors.js).
 {% endcomment %}
 {% if anchor_block %}{% with block=anchor_block %}
 <section class="seo-anchor-block" data-anchor-block data-summary-url="{{ block.summary_url }}" data-product="{{ block.product.pk|unlocalize }}" aria-label="Анкоры продукта">
@@ -41,8 +45,8 @@
       <p class="seo-sub">Долей по типам страниц нет — <a href="{{ block.anchors_url }}" target="_blank" rel="noopener">заведите на странице «Анкоры»</a>.</p>
       {% endfor %}
     </div>
-    <div class="seo-anchor-picks">
-      <h3>Рекомендуем <span class="seo-sub">щелчок — в свободную ссылку</span></h3>
+    <details class="seo-anchor-picks" data-anchor-picks>
+      <summary><h3>Рекомендуем <span class="seo-anchor-picks-count">{{ block.picks|length }}</span>{% if block.picks %} <span class="seo-sub seo-anchor-picks-hint">щелчок — в свободную ссылку</span>{% endif %}</h3></summary>
       {% if block.picks %}
       <ol>
         {% for pick in block.picks %}
@@ -61,7 +65,7 @@
       {% else %}
       <p class="seo-sub">Предложить нечего: у продукта нет анкоров — загрузите файл на странице «Анкоры».</p>
       {% endif %}
-    </div>
+    </details>
   </div>
 </section>
 {% endwith %}{% endif %}

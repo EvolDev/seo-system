@@ -255,6 +255,8 @@ def test_block_in_new_placement(
     assert "video converter" not in picks
     page = response.content.decode()
     assert "Рекомендуем" in page and "data-anchor-pick" in page
+    # Рекомендации — под спойлером, свёрнуты (пользователь, 28.10.2026).
+    assert '<details class="seo-anchor-picks" data-anchor-picks>' in page
     assert "data-anchor-dialog" in page
     assert "Ключи на позициях 1–3 не предлагаются" in page
 
