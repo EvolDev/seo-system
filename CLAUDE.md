@@ -16,8 +16,8 @@ QuerySet, async), объясняй её коротко, одной-двумя ф
 
 - `PROGRESS.md` — где мы сейчас: сделанное, текущая задача, следующие.
   Читать в начале каждой задачи.
-- `docs/06-BACKLOG.md` — индекс задач, Definition of Done, задачи E0.
-  `docs/backlog/E<N>-*.md` — задачи остальных эпиков.
+- `docs/06-BACKLOG.md` — оставшиеся задачи по направлениям, Definition of
+  Done, реестр ID сделанных. `docs/backlog/E<N>-*.md` — описания оставшихся.
 - `docs/specs/<ID>.md` — ТЗ задачи, если есть. Оно главнее описания
   в бэклоге.
 - `docs/03-DATA-MODEL.md` и `schema.sql` — модель данных. `schema.sql` —
