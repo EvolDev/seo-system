@@ -71,6 +71,7 @@ from apps.placements.models import (
 from apps.placements.tasks import check_indexation, check_url_indexation, url_result_key
 from apps.sites import countries, rating, statuses
 from apps.sites.display import domain_tools_html, rating_html
+from apps.sites.languages import top_geo_of
 from apps.sites.models import (
     Product,
     Seller,
@@ -292,7 +293,7 @@ def _anchor_choice(
         else None
     )
     if site is not None:
-        return regions.choose(site, lists)
+        return regions.choose(site, lists, top_geo=top_geo_of(site.pk))
     return regions.Choice(lists[0] if lists else None, "")
 
 
@@ -368,6 +369,70 @@ class PlacementChangeList(PerPageChangeList):
             row.page_products = found.get(row.site_id, [])
             row.page_cell = cells.get(row.site_id)
             row.page_offer = offers.get(row.deal_offer_id)
+
+
+class PlacementRegionFilter(admin.SimpleListFilter):
+    """Регион размещения (ADR-076): страна его списка анкоров — выбранного в блоке
+    анкоров карточки или угаданного по ссылкам, языку и топ-региону площадки
+    (`apps/keywords/regions.py`). По нему отбирают, например, бразильские
+    размещения для отдельной выгрузки. «Не определён» — регион не известен:
+    основной список взят по умолчанию; в выгрузке у таких «Region» пустой.
+
+    Выбор не запоминается: забытый регион молча прятал бы размещения других стран.
+    """
+
+    title = "регион"
+    parameter_name = "region"
+    UNKNOWN = "unknown"
+    # Флаги и поиск поверх выпадающего списка — как «Регион» в «Площадках».
+    template = "admin/sites/region_filter.html"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        working = working_product_id(request)
+        lists = AnchorList.of_product(working) if working is not None else []
+        return [(item.country, item.region_name) for item in lists]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        value = self.value()
+        if not value:
+            return queryset
+        # Список тянет цены площадки (`list_select_related`) — региону они не нужны.
+        placements = list(
+            queryset.select_related(None)
+            .select_related("site")
+            .only("pk", "product_id", "anchor_list_id", "site__domain", "site__language")
+        )
+        found = {
+            pk: regions.known_region(choice)
+            for pk, choice in regions.effective_choices(placements).items()
+        }
+        wanted = None if value == self.UNKNOWN else value
+        return queryset.filter(pk__in=[pk for pk, code in found.items() if code == wanted])
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        yield {
+            "selected": not self.value(),
+            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+            "display": "Все регионы",
+            "flag": countries.GLOBE,
+            "search": "все регионы all",
+        }
+        for code, title in self.lookup_choices:
+            yield {
+                "selected": self.value() == code,
+                "query_string": changelist.get_query_string({self.parameter_name: code}),
+                "display": title,
+                "flag": countries.flag_code(code) or "",
+                "search": code,
+            }
+        if self.lookup_choices:
+            yield {
+                "selected": self.value() == self.UNKNOWN,
+                "query_string": changelist.get_query_string({self.parameter_name: self.UNKNOWN}),
+                "display": "Не определён",
+                "flag": "",
+                "search": "не определён неизвестен пусто",
+            }
 
 
 class PlacementSellerFilter(MultiChoiceFilter):
@@ -458,6 +523,7 @@ class PlacementAdmin(RecordAdmin):
     list_display_links = None
     list_filter = (
         FrameProductFilter,
+        PlacementRegionFilter,
         PlacementSellerFilter,
         PublishedMonthFilter,
         # Статус и «Период ▾» — полосой над списком (ADR-073).

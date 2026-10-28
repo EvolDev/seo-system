@@ -36,6 +36,7 @@ from apps.keywords.models import (
     PageTypeShare,
 )
 from apps.sites import countries
+from apps.sites.languages import top_geo_of
 from apps.sites.models import Product, Site
 
 MAX_KEYWORD = 200
@@ -545,7 +546,7 @@ def summary_view(request: HttpRequest, product_id: int) -> TemplateResponse:
     if chosen is not None:
         choice = regions.Choice(chosen, "выбран вами")
     elif site is not None:
-        choice = regions.choose(site, lists)
+        choice = regions.choose(site, lists, top_geo=top_geo_of(site.pk))
     else:
         choice = regions.Choice(lists[0] if lists else None, "")
     return TemplateResponse(

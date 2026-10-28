@@ -66,10 +66,6 @@
   var revealTimer = 0;
   // Что сделать после записи вместо закрытия (вопрос при ↑/↓ или переходе).
   var afterSave = null;
-  // Из панели завели новую запись (вкладка «+ Ещё размещение», ADR-073): её
-  // строки в списке ещё нет — при закрытии панели список перечитать целиком.
-  var added = false;
-
   function seoNav() {
     return window.seoNav && window.seoNav.enabled ? window.seoNav : null;
   }
@@ -332,9 +328,11 @@
       return;
     }
     if (was && was.add && data.next && was.row && was.row.isConnected) {
-      // Завели из вкладок площадки — новое размещение сразу в той же панели;
-      // список перечитаем, когда панель закроют.
-      added = true;
+      // Завели из вкладок площадки — новое размещение сразу в той же панели, а
+      // строка площадки — сразу со свежим статусом; под фильтры больше не
+      // подходит — бледнеет, как после решения, а не пропадает (20.10.2026).
+      changed = true;
+      refreshRow(was);
       open(was.opener, data.next, true);
       return;
     }
@@ -409,14 +407,12 @@
     snapshot = null;
     if (!options.unload) {
       styles.forEach(function (link) { link.remove(); });
-      if (added && seoNav()) seoNav().reload();
-      else if (changed) refreshRow(was);
+      if (changed) refreshRow(was);
       var back = was && was.row && was.row.isConnected ? linkIn(was.row, was.column) : null;
       if (back) back.focus({ preventScroll: true });
     }
     styles = [];
     changed = false;
-    added = false;
   }
 
   // ---------- Правки и вопрос о них ----------

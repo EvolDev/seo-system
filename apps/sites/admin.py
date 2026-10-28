@@ -966,10 +966,11 @@ def _gray_context(
     """Раздел «Серость в Google»: набор условий, кнопки, форма замера, последний
     замер и история."""
     sets = list(GrayTermSet.objects.all())
-    choice = gray_scan.choose(site, sets, request.session.get(GRAY_LANGUAGE_SESSION))
+    top_geo = languages.top_geo_of(site.pk)
+    choice = gray_scan.choose(site, sets, request.session.get(GRAY_LANGUAGE_SESSION), top_geo)
     current = choice.term_set
     # «Авто» в выборе — какой набор взялся бы по языку площадки.
-    auto = gray_scan.choose(site, sets, None).term_set
+    auto = gray_scan.choose(site, sets, None, top_geo).term_set
     terms = current.terms if current is not None else []
     zones = gray_zones()
     total_query = gray_scan.total_query(site.domain)
@@ -1025,7 +1026,7 @@ def _gray_context(
             set_form,
             None,
             # Новый набор — сразу на языке площадки: его чаще всего и не хватает.
-            site.language or languages.domain_language(site.domain) or "",
+            languages.site_language(site, top_geo)[0] or "",
             "",
         ),
         "edit_editor": _gray_editor(

@@ -9,6 +9,8 @@
 часть проверяют tests/test_repeat_placements.py и tests/test_status_chips.py.
 """
 
+import re
+
 import pytest
 from django.utils import timezone
 from playwright.sync_api import Page, expect
@@ -221,4 +223,42 @@ def test_stop_decision_with_placements(
     expect(panel).to_be_hidden()
     expect(row.locator(".seo-st-no")).to_have_count(0)
     expect(row.locator(".seo-st")).to_have_count(1)
+    assert same_document(page)
+
+
+def test_new_placement_marks_row_in_sites_list(
+    admin_page: Page, live_server: LiveServer, convertio: Product
+) -> None:
+    """«Площадки» с фильтром «Новая»: завели размещение из панели — строка сразу
+    «В работе» и бледнеет, как после решения; закрыли панель — строка на месте
+    (просьба 20.10.2026: раньше строка не менялась, а после закрытия пропадала)."""
+    site = Site.objects.create(domain="educba.com")
+    working = SitePrice.objects.create(
+        site=site, seller=Seller.collaborator(), placement_cents=17803, reviewed_at=timezone.now()
+    )
+    site.price = working
+    site.save(update_fields=["price"])
+    latest.refresh([site.pk])
+    Site.objects.create(domain="fresh.example")
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/sites/productsitelatest/?list=all")
+    mark(page)
+    with soft_load(page):
+        page.locator(".seo-stbar a", has_text="Новая").click()
+    row = page.locator("#result_list tbody tr", has_text="educba.com")
+    expect(row).to_have_count(1)
+
+    row.locator("a[data-panel]", has_text="educba.com").click()
+    panel = page.locator(PANEL)
+    panel.locator(".seo-ptab-add").click()
+    expect(panel.locator(".seo-panel-title")).to_have_text("educba.com — новое размещение")
+    panel.locator("[data-panel-save]").click()
+    expect(panel.locator(".seo-ptab-on")).to_contain_text("№1 · Collaborator")
+
+    expect(row).to_have_class(re.compile(r"\bseo-row-stale\b"))
+    expect(row.locator(".seo-st")).to_contain_text("В работе")
+    page.keyboard.press("Escape")
+    expect(panel).to_be_hidden()
+    expect(row).to_have_count(1)
+    expect(row).to_have_class(re.compile(r"\bseo-row-stale\b"))
     assert same_document(page)

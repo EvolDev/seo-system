@@ -61,6 +61,7 @@ from apps.placements import indexation, invoices
 from apps.placements.matching import match_placement, match_without_url, moves_forward
 from apps.placements.models import Placement, PlacementLink, PlacementStatus
 from apps.sites import latest
+from apps.sites.languages import top_geos
 from apps.sites.models import (
     MetricSource,
     PlacementType,
@@ -991,6 +992,7 @@ class _AnchorPools:
         self.languages: dict[int, str | None] = dict(
             Site.all_objects.filter(pk__in=ids).values_list("pk", "language")
         )
+        self.geos = top_geos(ids)
         self.pools: dict[int, list[matching.Candidate]] = {}
 
     def list_for(
@@ -998,7 +1000,8 @@ class _AnchorPools:
     ) -> AnchorList | None:
         stored = placement.anchor_list_id if placement is not None else None
         site = Site(domain=domain, language=self.languages.get(site_id or 0))
-        return regions.choose(site, self.lists, stored=stored).anchor_list
+        top_geo = self.geos.get(site_id or 0)
+        return regions.choose(site, self.lists, stored=stored, top_geo=top_geo).anchor_list
 
     def pool(self, anchor_list: AnchorList | None) -> list[matching.Candidate]:
         if anchor_list is None:

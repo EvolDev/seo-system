@@ -101,16 +101,19 @@ class Choice:
     picked: bool = False
 
 
-def choose(site: Site, sets: Sequence[GrayTermSet], picked: str | None) -> Choice:
+def choose(
+    site: Site, sets: Sequence[GrayTermSet], picked: str | None, top_geo: str | None = None
+) -> Choice:
     """Набор для карточки: выбранный человеком в эту сессию, иначе по языку площадки.
 
-    Язык — из карточки Collaborator, нет его — по зоне домена. Для языка нет
-    набора — английский, нет и его — первый по названию языка.
+    Язык — из карточки Collaborator, нет его — по зоне домена, по топ-региону
+    площадки (`top_geo`). Для языка нет набора — английский, нет и его — первый
+    по названию языка.
     """
     by_language = {term_set.language: term_set for term_set in sets}
     if picked is not None and picked in by_language:
         return Choice(by_language[picked], "выбран вами", picked=True)
-    language, how = site_language(site)
+    language, how = site_language(site, top_geo)
     if language is not None and language in by_language:
         return Choice(by_language[language], how)
     fallback = by_language.get(FALLBACK_LANGUAGE) or min(

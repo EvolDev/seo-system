@@ -63,7 +63,8 @@ def config(*sources: str) -> dict[str, Any]:
 def test_default_and_typed_excel(admin_client: Client, placed: Placement) -> None:
     value = config()
     preview = post(admin_client, "preview", config=value).json()
-    assert len(preview["headers"]) == 34
+    # Набор листа и «Region» после «Region Traff» (ADR-076).
+    assert len(preview["headers"]) == 35
     assert preview["headers"][0] == "" and preview["headers"][6] == "Дата отправки"
     assert preview["rows"][0][0] == "example.com"
     excel = post(admin_client, "download", config=value, digest=preview["digest"], format="xlsx")
@@ -71,7 +72,7 @@ def test_default_and_typed_excel(admin_client: Client, placed: Placement) -> Non
     assert book.sheetnames == ["Размещения"]
     assert book.active is not None
     assert book.active["G2"].value == dt.datetime(2026, 10, 1)
-    assert book.active["Z2"].value == 123.45
+    assert book.active["AA2"].value == 123.45
     assert excel["Content-Type"].startswith("application/vnd.openxmlformats")
 
 
@@ -246,6 +247,16 @@ def test_selection_and_filter_are_preserved(admin_client: Client, placed: Placem
         },
     )
     assert response.json()["count"] == 0
+
+
+def test_list_page_size_in_address(admin_client: Client, placed: Placement) -> None:
+    # «На странице: 500» в «Размещениях» — параметр адреса, а не отбор (ошибка 20.10.2026).
+    url = reverse("admin:placements_placement_export_designer") + "?per_page=500&o=9"
+    assert admin_client.post(url, {"action": "open"}).status_code == 200
+    response = admin_client.post(
+        url, {"action": "preview", "payload": json.dumps({"config": config("target")})}
+    )
+    assert response.json()["count"] == 1
 
 
 def test_unknown_fields_and_forged_template_token_rejected(

@@ -70,6 +70,8 @@
 #seo-export-designer .drag-handle:hover, #seo-export-designer .info-button:hover { background: var(--selected-row); }
 #seo-export-designer .source-control { display: flex; align-items: center; gap: 5px; min-width: 0; }
 #seo-export-designer .source-control select { flex: 1; }
+/* Выбор источника с поиском (seo/picker.js) — во всю ширину ячейки. */
+#seo-export-designer .source-control .seo-picker { flex: 1; width: auto; min-width: 0; }
 #seo-export-designer .info-button { flex: 0 0 23px; cursor: pointer; font-size: 14px; line-height: 20px; padding: 3px; color: var(--body-quiet-color); }
 #seo-export-designer .sample-value { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; line-height: 20px; cursor: text; }
 #seo-export-designer .field-description { margin-top: 5px; }

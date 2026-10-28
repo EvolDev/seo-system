@@ -11,6 +11,11 @@
 
 Строки — те, что отобраны в списке «Размещений» (фильтры, поиск,
 сортировка), все страницы.
+
+«Region» и «Region Traff» — регион размещения (страна его списка анкоров,
+ADR-075) и трафик этой страны из последнего замера Ahrefs (ADR-076): у
+бразильского — Бразилии, у американского — США. Регион не известен — пусто.
+«US Traff» — всегда трафик США.
 """
 
 from collections import defaultdict
@@ -21,6 +26,7 @@ from typing import Any
 from django.db import connection
 from django.db.models import F, QuerySet
 
+from apps.keywords import regions
 from apps.placements import invoices
 from apps.placements.models import (
     Invoice,
@@ -92,6 +98,9 @@ _SPEC: tuple[tuple[str, Column | None, str], ...] = (
     ("paid_eur", Column("Итог цена, EUR", Kind.MONEY, 11), EXTRA),
     ("indexed_at", Column("Индексация проверена", Kind.DATE, 12), EXTRA),
     ("homepage", Column("Анонс на главной", width=9), EXTRA),
+    # Регион размещения и трафик его страны (ADR-076) — в листе их нет, тоже в конце.
+    ("region", Column("Region", width=8), EXTRA),
+    ("region_traffic", Column("Region Traff", Kind.INT, 12), EXTRA),
     # Счёт продавца (E1-14, ADR-055); счетов у размещения два — через «;».
     ("invoice", Column("Счёт", width=30), INVOICE),
     ("invoice_status", Column("Счёт: статус", width=12), INVOICE),
@@ -142,6 +151,12 @@ FROM v_site_latest l
 LEFT JOIN v_site_country_latest us ON us.site_id = l.id AND us.country = 'us'
 WHERE l.id = ANY(%s)
 """
+# Трафик площадок по странам — последний замер Ahrefs по стране (ADR-076).
+_REGION_SQL = """
+SELECT site_id, country, organic_traffic
+FROM v_site_country_latest
+WHERE site_id = ANY(%s) AND country = ANY(%s)
+"""
 
 
 @dataclass(frozen=True)
@@ -191,6 +206,8 @@ def sheets(queryset: QuerySet[Placement], wanted: Set[str]) -> list[Sheet]:
     links = _links(ids)
     bills = _invoices(ids)
     sites = _sites_today(site_ids)
+    region_of = regions.placement_regions(ids)
+    traffic_of = region_traffic(site_ids, {code for code in region_of.values() if code})
     articles = _published_articles(site_ids)
     rates = latest_rates()
 
@@ -223,7 +240,17 @@ def sheets(queryset: QuerySet[Placement], wanted: Set[str]) -> list[Sheet]:
             for product_id, _ in others
         ]
         found = links.get(row["pk"], [])
-        cells = _row(row, site, found, pairs, examples, status, service, paid_eur)
+        cells = _row(
+            row,
+            site,
+            found,
+            pairs,
+            examples,
+            status,
+            service,
+            paid_eur,
+            _region(row, region_of, traffic_of),
+        )
         table.append(cells + _invoice_values(bills.get(row["pk"], [])))
     columns, values = narrow(layout, table, wanted)
     return [Sheet("Размещения", columns, list(values)), _totals_sheet(totals)]
@@ -266,6 +293,7 @@ def _row(
     status: str,
     service: str,
     paid_eur: int | None,
+    region: tuple[str | None, int | None] = (None, None),
 ) -> list[Value]:
     today = site or SiteToday(None, None, None, None, None, None, None, None, None, None)
     values: list[Value] = [
@@ -311,8 +339,19 @@ def _row(
         paid_eur,
         row["indexed_checked_at"],
         row["announce_on_homepage"],
+        *region,
     ]
     return values
+
+
+def _region(
+    row: dict[str, Any],
+    region_of: dict[int, str | None],
+    traffic_of: dict[tuple[int, str], int | None],
+) -> tuple[str | None, int | None]:
+    """Регион размещения и трафик его страны; регион не известен — оба пусто."""
+    code = region_of.get(row["pk"])
+    return (code, traffic_of.get((row["site_id"], code))) if code else (None, None)
 
 
 def _employee(row: dict[str, Any]) -> str | None:
@@ -361,6 +400,15 @@ def _links(ids: list[int]) -> dict[int, list[tuple[str, str]]]:
     for placement_id, anchor, target in links:
         found[placement_id].append((anchor, target))
     return found
+
+
+def region_traffic(site_ids: list[int], codes: Set[str]) -> dict[tuple[int, str], int | None]:
+    """Трафик площадок по странам — последний замер Ahrefs: (площадка, страна) → трафик."""
+    if not codes:
+        return {}
+    with connection.cursor() as cursor:
+        cursor.execute(_REGION_SQL, [site_ids, sorted(codes)])
+        return {(site_id, country): traffic for site_id, country, traffic in cursor.fetchall()}
 
 
 def _sites_today(site_ids: list[int]) -> dict[int, SiteToday]:

@@ -50,6 +50,8 @@ from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+from config.admin import PER_PAGE_PARAM
+
 Value = str | int | Decimal | bool | dt.date | Sequence[str] | None
 
 
@@ -121,6 +123,13 @@ _HUNDRED = Decimal(100)
 class ExportChangeList(ChangeList):
     """Тот же отбор и порядок, что у списка, но без страниц: выгрузке нужна вся
     выборка (`queryset`), а не строки одной страницы и их подсчёт."""
+
+    def get_filters_params(self, params: Any = None) -> Any:
+        # Адрес выгрузки — адрес списка: размер страницы (`per_page`) не отбор,
+        # иначе Django ищет такое поле и падает (как `PerPageChangeList`).
+        found = super().get_filters_params(params)
+        found.pop(PER_PAGE_PARAM, None)
+        return found
 
     def get_results(self, request: HttpRequest) -> None:
         self.result_list: list[Any] = []

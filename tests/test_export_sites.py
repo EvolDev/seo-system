@@ -95,6 +95,11 @@ def _by_domain(rows: list[list[Any]]) -> dict[str, dict[str, Any]]:
     return {row[0]: dict(zip(header, row, strict=True)) for row in rows[1:]}
 
 
+def test_list_page_size_in_address(admin_client: Client, base: dict[str, Any]) -> None:
+    """«На странице: 500» в адресе списка — не отбор: выгрузка не падает (20.10.2026)."""
+    assert _xlsx(admin_client, list="all", per_page="500") == _xlsx(admin_client, list="all")
+
+
 def test_all_pages_and_screen_order(admin_client: Client, base: dict[str, Any]) -> None:
     """Все отобранные строки, а не сотня первой страницы; порядок — как на экране."""
     rows = _xlsx(admin_client, list="all")

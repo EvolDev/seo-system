@@ -35,7 +35,7 @@ def test_constructor_profile_drag_and_files(
     page = admin_page
     page.goto(live_server.url + URL)
     expect(page.locator("#server-status")).to_contain_text("Готово: 7 строк")
-    expect(page.locator("#columns tr")).to_have_count(34)
+    expect(page.locator("#columns tr")).to_have_count(35)
     assert page.locator("#unlock-drag").count() == 0
     page.locator('[data-preset="anchors"]').click()
     expect(page.locator("#server-status")).to_contain_text("5 колонок")

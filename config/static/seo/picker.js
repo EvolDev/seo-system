@@ -63,6 +63,9 @@
     select.hidden = true;
     select.tabIndex = -1;
     input.value = labelOf(select);
+    // Выключенный список (колонка снята галочкой) — и поле поиска выключено.
+    input.disabled = select.disabled;
+    toggle.disabled = select.disabled;
 
     var picker = { select: select, input: input, list: list, index: -1 };
     select.seoPicker = picker;
@@ -84,7 +87,9 @@
       var text = (query || "").trim().toLowerCase();
       var found = options(select).filter(function (option) {
         if (!option.value) return !text; // «— выберите —» — только в полном списке
-        return !text || option.textContent.toLowerCase().indexOf(text) !== -1;
+        // data-search у варианта — по чему ещё искать (заголовок поля выгрузки).
+        var words = (option.textContent + " " + (option.dataset.search || "")).toLowerCase();
+        return !text || words.indexOf(text) !== -1;
       });
       list.textContent = "";
       found.slice(0, MAX_SHOWN).forEach(function (option) {
