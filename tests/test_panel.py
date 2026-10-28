@@ -217,8 +217,9 @@ class TestRowOutsideFilters:
         placement = Placement.objects.create(site=_site(), product=_product())
         url = reverse("admin:placements_placement_changelist")
         # Запросы — как у обычной страницы списка (сессия, фильтры, «Мои фильтры»,
-        # фишки статусов — ADR-073), а «всего N» — по одной строке.
-        with django_assert_max_num_queries(21):
+        # фишки статусов — ADR-073, списки анкоров фильтра «Регион» — ADR-076), а
+        # «всего N» — по одной строке.
+        with django_assert_max_num_queries(22):
             response = admin_client.get(url, {"_seo_row": str(placement.pk)})
         assert response.context["cl"].full_result_count == 1
 
