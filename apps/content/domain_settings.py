@@ -41,6 +41,8 @@ SETTING_KEYS: dict[str, str] = {
     "UPLOAD_PRICE_CAP": "Цена из файла похожа на ошибку, если больше: eur",
     # Экономика — 13-CONFIG.md §2.6
     "MONTHLY_BUDGET": "Бюджет на размещения в месяц, EUR: eur",
+    # Совместная работа — 13-CONFIG.md §2.7
+    "EDIT_LOCK": "Блокировка правки площадки: idle_minutes",
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
@@ -203,6 +205,25 @@ class GrayZones:
         return cls(float(value["green"]), float(value["yellow"]))
 
 
+@dataclass(frozen=True)
+class EditLockTimeout:
+    """Через сколько минут без правок блокировка площадки снимается — `EDIT_LOCK` (ADR-077).
+
+    Ушёл, не закрыв панель, — площадка снова свободна для других.
+    """
+
+    idle_minutes: int
+
+    @classmethod
+    def parse(cls, value: Any) -> "EditLockTimeout":
+        if not isinstance(value, dict) or set(value) != {"idle_minutes"}:
+            raise ValueError("Нужен объект ровно с полем idle_minutes.")
+        number = value["idle_minutes"]
+        if not isinstance(number, int) or isinstance(number, bool) or not 1 <= number <= 1440:
+            raise ValueError("idle_minutes — целое число минут, от 1 до 1440.")
+        return cls(number)
+
+
 # Настройки с проверкой формы значения: ошибку видно в админке при вводе,
 # а не в упавшей ночью задаче.
 SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
@@ -212,6 +233,7 @@ SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "GRAY_ZONES": GrayZones.parse,
     "ANCHOR_RECOMMEND": AnchorRecommend.parse,
     "MONTHLY_BUDGET": MonthlyBudget.parse,
+    "EDIT_LOCK": EditLockTimeout.parse,
 }
 
 
@@ -280,6 +302,18 @@ def monthly_budget(product_id: int | None) -> MonthlyBudget:
         return MonthlyBudget.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"MONTHLY_BUDGET: {error}") from error
+
+
+def edit_lock_minutes() -> int:
+    """Действующий простой, после которого блокировка правки снимается: общее значение."""
+    value = get_setting("EDIT_LOCK", None)
+    if value is None:
+        # Общее значение заводит миграция content.0010 — его стёрли руками.
+        raise ImproperlyConfigured("Нет настройки EDIT_LOCK — заведите общее значение.")
+    try:
+        return EditLockTimeout.parse(value).idle_minutes
+    except ValueError as error:
+        raise ImproperlyConfigured(f"EDIT_LOCK: {error}") from error
 
 
 def gray_zones() -> GrayZones | None:

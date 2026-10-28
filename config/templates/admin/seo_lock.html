@@ -1,0 +1,7 @@
+{% comment %}
+Метка блокировки правки (ADR-077): что блокирует эта запись, держит ли её кто-то
+другой и держит ли сам человек. seo/edit-lock.js находит метку в панели или на
+странице: показывает окошко «Площадку правит Анна с 14:05 — пока только
+просмотр», берёт блокировку при первой правке, спрашивает, не освободилась ли
+запись, и снимает её, когда панель закрыли. Контекст — locks.marker().
+{% endcomment %}{% if seo_lock %}<div hidden data-seo-lock="{{ seo_lock.key }}" data-seo-lock-url="{{ seo_lock.url }}"{% if seo_lock.mine %} data-seo-lock-mine{% endif %}{% if seo_lock.text %} data-seo-lock-text="{{ seo_lock.text }}"{% endif %}></div>{% endif %}

@@ -19,6 +19,7 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
 <link rel="stylesheet" href="{% asset 'seo/site-card.css' %}">
 <link rel="stylesheet" href="{% asset 'seo/placement-tabs.css' %}">{% endif %}
 <div class="seo-card" data-site-card data-sections-url="{% url 'admin:card_sections' %}">
+{% include "admin/seo_lock.html" %}
 <header class="seo-panel-head seo-card-head">
   <div class="seo-card-titlerow">
     {# В панели — h2 (h1 у списка под ней), отдельной страницей — h1. #}
@@ -169,8 +170,9 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
       <h3><button type="button" class="seo-card-toggle" aria-expanded="{% if 'notes' in closed %}false{% else %}true{% endif %}" aria-controls="card-notes-body"><span class="seo-card-chev" aria-hidden="true"></span><span class="seo-card-sec-name">Заметки{% if notes %} <span class="seo-card-count">{{ notes|length }}</span>{% endif %}</span><span class="seo-card-sec-summary">{{ notes_summary }}</span></button></h3>
     </div>
     <div class="seo-card-sec-body" id="card-notes-body">
-      {% if can_change %}
-      <form method="post" action="{{ note_url }}" data-card-form class="seo-note-form">{% csrf_token %}
+      {# Заметка — лента, не правка: и под чужой блокировкой карточки (ADR-077). #}
+      {% if can_note %}
+      <form method="post" action="{{ note_url }}" data-card-form data-lock-free class="seo-note-form">{% csrf_token %}
         <textarea name="body" rows="2" required placeholder="Написать заметку… Ctrl+Enter — добавить" aria-label="Текст заметки"></textarea>
         <div class="seo-note-row">
           <select name="product" aria-label="Продукт заметки">

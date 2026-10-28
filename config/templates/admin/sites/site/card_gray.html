@@ -23,7 +23,7 @@ closed — свёрнутые разделы пользователя.
   </div>
   <div class="seo-card-sec-body" id="card-gray-body">
     <div class="seo-gray-set">
-      <form method="post" action="{{ gray.language_url }}" data-card-form class="seo-gray-pick">{% csrf_token %}
+      <form method="post" action="{{ gray.language_url }}" data-card-form data-lock-free class="seo-gray-pick">{% csrf_token %}
         <span class="seo-gray-set-label">Набор условий</span>
         <div class="seo-country seo-gray-picker" data-country-picker data-auto data-label="Набор условий серости" data-placeholder="Язык набора">
           <select name="language" data-gray-language aria-label="Набор условий серости">
@@ -40,19 +40,19 @@ closed — свёрнутые разделы пользователя.
       {% if gray.current %}<span class="seo-sub" data-gray-reason>{{ gray.reason }} · условий: {{ gray.current.count }}</span>{% endif %}
     </div>
     {% if gray.can_add_set %}
-    <form method="post" action="{{ gray.set_url }}" data-card-form class="seo-gray-editor" data-gray-editor="add"{% if not gray.add_editor.errors %} hidden{% endif %}>{% csrf_token %}
+    <form method="post" action="{{ gray.set_url }}" data-card-form data-lock-free class="seo-gray-editor" data-gray-editor="add"{% if not gray.add_editor.errors %} hidden{% endif %}>{% csrf_token %}
       <b>Новый набор</b>
       {% include "admin/sites/site/card_gray_set_fields.html" with original="" editor=gray.add_editor %}
     </form>
     {% endif %}
     {% if gray.current and gray.can_change_set %}
-    <form method="post" action="{{ gray.set_url }}" data-card-form class="seo-gray-editor" data-gray-editor="edit"{% if not gray.edit_editor.errors %} hidden{% endif %}>{% csrf_token %}
+    <form method="post" action="{{ gray.set_url }}" data-card-form data-lock-free class="seo-gray-editor" data-gray-editor="edit"{% if not gray.edit_editor.errors %} hidden{% endif %}>{% csrf_token %}
       <b>Набор «{{ gray.current.name }}»</b>
       {% include "admin/sites/site/card_gray_set_fields.html" with original=gray.current.language editor=gray.edit_editor %}
     </form>
     {% endif %}
     {% if gray.current and gray.can_delete_set %}
-    <form method="post" action="{{ gray.set_delete_url }}" data-card-form class="seo-gray-editor" data-gray-editor="delete" hidden>{% csrf_token %}
+    <form method="post" action="{{ gray.set_delete_url }}" data-card-form data-lock-free class="seo-gray-editor" data-gray-editor="delete" hidden>{% csrf_token %}
       <input type="hidden" name="language" value="{{ gray.current.language }}">
       <span>Удалить набор «{{ gray.current.name }}» (условий: {{ gray.current.count }})? Прошлые замеры останутся: запрос сохранён в каждом.</span>
       <span class="seo-gray-editor-buttons"><button type="submit" class="seo-btn seo-btn-danger seo-btn-small">Удалить</button> <button type="button" class="seo-btn seo-btn-small" data-gray-toggle="">Отмена</button></span>

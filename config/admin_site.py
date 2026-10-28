@@ -18,7 +18,7 @@ from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, URLResolver, path, reverse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 # «Экономика» — свой экран, не таблица: пункт меню собирается в get_app_list.
 ECONOMICS = ("placements", "economics")
@@ -160,6 +160,13 @@ class SeoAdminSite(admin.AdminSite):
                 "card-sections/",
                 self.admin_view(require_POST(views.card_sections_view)),
                 name="card_sections",
+            ),
+            # Блокировка правки площадки и размещений (ADR-077): GET — чья, POST — взять,
+            # продлить, снять.
+            path(
+                "edit-lock/",
+                self.admin_view(require_http_methods(["GET", "POST"])(views.edit_lock_view)),
+                name="edit_lock",
             ),
         ]
         return own + super().get_urls()

@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="{% asset 'seo/placement-tabs.css' %}">
 {% include "admin/panel_head.html" %}
 <form method="post" action="{{ action_url }}" class="seo-decision-form" data-decision-form>
-  {% csrf_token %}
+  {% csrf_token %}{% include "admin/seo_lock.html" %}
   {% if form.non_field_errors %}<div class="errornote">{{ form.non_field_errors|join:" " }}</div>{% endif %}
   {% if placement_chips %}
   <div class="seo-decision-row">

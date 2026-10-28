@@ -28,6 +28,10 @@
  * Esc, ✕, щелчок мимо панели, ↑/↓ (соседняя запись) и переход по ссылке при
  * несохранённых правках их не теряют: внизу панели вопрос «Сохранить ·
  * Не сохранять · Остаться».
+ *
+ * Блокировка правки (ADR-077) — seo/edit-lock.js: показали запись — attach,
+ * закрыли — detach. Запись поверх чужой блокировки сервер не принимает (JSON
+ * с locked): сообщение и запись заново — только для просмотра.
  */
 (function () {
   "use strict";
@@ -253,6 +257,15 @@
     if (response.ok && type.indexOf("json") !== -1) {
       var data = await response.json();
       if (controller !== mine) return;
+      if (data.locked) {
+        // Запись правит другой (ADR-077): изменения не записаны — сказать и
+        // показать запись заново, только для просмотра.
+        var nav = seoNav();
+        if (nav) nav.toast(data.message);
+        afterSave = null;
+        setTimeout(reload, 0);
+        return;
+      }
       if (data.saved) {
         saved(data);
         return;
@@ -293,6 +306,7 @@
     var added = await window.seoNav.mount(body, doc, source);
     styles = styles.concat(added);
     snapshot = serialize(mainForm());
+    if (window.seoLock) window.seoLock.attach(body);
     body.scrollTop = keepScroll ? top : 0;
     reveal();
     if (!panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
@@ -413,6 +427,20 @@
     }
     styles = [];
     changed = false;
+    // Своя блокировка записи — снять; запись страницей под панелью — снова её.
+    if (window.seoLock) {
+      window.seoLock.detach();
+      if (!options.unload) window.seoLock.attachPage();
+    }
+  }
+
+  // Та же запись заново, без вопроса о правках: её взял или освободил другой
+  // человек (seo/edit-lock.js), или запись не прошла из-за его блокировки.
+  function reload() {
+    if (!isOpen() || !current) return;
+    snapshot = null;
+    hideAsk();
+    request(current.url, {});
   }
 
   // ---------- Правки и вопрос о них ----------
@@ -771,5 +799,6 @@
   window.seoPanel = {
     isOpen: isOpen,
     open: function (url) { open(document.body, url, false); },
+    reload: reload,
   };
 })();

@@ -1,6 +1,6 @@
 """«Мои фильтры»: сохранить, удалить и вернуть набор (E9-10, ADR-050);
 рабочий продукт из шапки (E9-12, ADR-057); свёрнутые разделы карточки
-площадки (E9-13, ADR-058).
+площадки (E9-13, ADR-058); блокировка правки площадки и размещений (ADR-077).
 
 Блок над колонкой фильтров (`seo/saved-filters.js`) шлёт POST и получает JSON:
 подпись для сообщения и наборы списка заново — селектор перерисовывается без
@@ -29,9 +29,9 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.sites.models import Product
-from apps.workspace import card
+from apps.workspace import card, locks
 from apps.workspace.models import SavedFilter
-from apps.workspace.products import choose_product, without_product
+from apps.workspace.products import choose_product, without_product, working_product_id
 from apps.workspace.saved_filters import NAME_MAX, as_json, clean_query, sets_of
 
 
@@ -184,6 +184,51 @@ def card_sections_view(request: HttpRequest) -> JsonResponse | HttpResponseBadRe
     closed = request.POST.get("closed") == "1"
     keys = card.set_closed(request.user, sections, closed)  # type: ignore[arg-type]
     return JsonResponse({"closed": keys})
+
+
+def edit_lock_view(request: HttpRequest) -> JsonResponse:
+    """Блокировка правки из панели (seo/edit-lock.js, ADR-077).
+
+    GET — чья блокировка у ключа сейчас; POST `action` — `take` (первая правка
+    в форме), `touch` (человек ещё правит), `release` (панель закрыли). Ответ —
+    `mine` (держит сам) и `text` чужой блокировки для окошка, иначе пусто.
+    """
+    data = request.POST if request.method == "POST" else request.GET
+    key = data.get("key", "")
+    parsed = locks.parse_key(key)
+    if parsed is None:
+        return JsonResponse({"error": "Неизвестно, что блокировать."}, status=400)
+    action = data.get("action", "")
+    if request.method != "POST" and action:
+        return JsonResponse({"error": "Только POST."}, status=405)
+    if action == "release":
+        locks.release(request.user, key)
+        return JsonResponse({"mine": False, "text": ""})
+    if action == "take":
+        if not _may_edit(request, parsed):
+            raise PermissionDenied
+        holder = locks.take(request.user, key)
+        return _lock_answer(key, holder, mine=holder is None)
+    if action == "touch" and locks.touch(request.user, key):
+        return _lock_answer(key, None, mine=True)
+    holder, mine = locks.state(request.user, key)
+    return _lock_answer(key, holder, mine)
+
+
+def _may_edit(request: HttpRequest, parsed: tuple[str, int, int | None]) -> bool:
+    """Право взять блокировку — то же, что право менять запись (ADR-073)."""
+    kind, _, product_id = parsed
+    if kind == locks.SITE:
+        return bool(request.user.has_perm("sites.change_site"))
+    # Размещения — только рабочего продукта шапки: чужой продукт — просмотр.
+    return bool(request.user.has_perm("placements.change_placement")) and (
+        product_id == working_product_id(request)
+    )
+
+
+def _lock_answer(key: str, holder: locks.Holder | None, mine: bool) -> JsonResponse:
+    text = f"{locks.busy_text(key, holder)} — пока только просмотр." if holder else ""
+    return JsonResponse({"mine": mine, "text": text})
 
 
 def _number(value: str | None) -> int:

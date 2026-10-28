@@ -140,3 +140,34 @@ class ExportProfile(models.Model):
 
     def __str__(self) -> str:
         return self.name or "Последняя выгрузка"
+
+
+class EditLock(models.Model):
+    """Кто сейчас правит площадку (пользователь, 28.10.2026; ADR-077).
+
+    `key` — что правят: `site:<площадка>` — карточка площадки, одна на все
+    продукты; `placements:<площадка>:<продукт>` — размещения продукта на
+    площадке. Строка одна на ключ: блокировку берёт первая правка, продлевает
+    каждая следующая (`seen_at`), снимает закрытие панели. Простой дольше
+    настройки `EDIT_LOCK` — блокировка не считается, строку забирает следующая
+    правка (`apps/workspace/locks.py`).
+    """
+
+    key = models.TextField("что правят", primary_key=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.CASCADE,
+        verbose_name="кто правит",
+        related_name="+",
+        db_index=False,
+    )
+    started_at = models.DateTimeField("правит с", db_default=PgNow())
+    seen_at = models.DateTimeField("последняя правка", db_default=PgNow())
+
+    class Meta:
+        db_table = "edit_locks"
+        verbose_name = "блокировка правки"
+        verbose_name_plural = "блокировки правки"
+
+    def __str__(self) -> str:
+        return f"{self.key} · {self.user}"

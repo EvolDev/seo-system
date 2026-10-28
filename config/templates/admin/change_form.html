@@ -21,3 +21,5 @@
 {% block content_subtitle %}{% if not seo_panel %}{{ block.super }}{% endif %}{% endblock %}
 {% block object-tools %}{% if not seo_panel %}{{ block.super }}{% endif %}{% endblock %}
 {% block submit_buttons_bottom %}{% if seo_panel %}{% include "admin/panel_foot.html" %}{% else %}{{ block.super }}{% endif %}{% endblock %}
+{# Блокировка правки (ADR-077): метку читает seo/edit-lock.js — и в панели, и на странице. #}
+{% block form_top %}{{ block.super }}{% include "admin/seo_lock.html" %}{% endblock %}

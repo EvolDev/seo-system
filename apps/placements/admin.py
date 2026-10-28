@@ -23,6 +23,11 @@
 продавца выбором «Через кого», сотрудник — тот, кто вошёл. Удаляют размещение
 красной корзиной на его вкладке, по одному: «Удалить выбранные» в списке нет.
 Размещение другого продукта, чем рабочий в шапке, — только просмотр.
+
+Блокировка правки (ADR-077): размещения продукта на площадке правит один
+человек — первая правка берёт блокировку (`apps/workspace/locks.py`), у
+второго они только для просмотра, запись поверх чужой блокировки не проходит;
+действия по отмеченным пропускают такие размещения.
 """
 
 from collections.abc import Iterator, Sequence
@@ -84,6 +89,7 @@ from apps.sites.models import (
 )
 from apps.sites.offers import describe, money, set_working_price
 from apps.sites.status_history import placement_history
+from apps.workspace import locks
 from apps.workspace.products import FrameProductFilter, working_product_id
 from config import export
 from config.admin import MultiChoiceFilter, PerPageChangeList, RecordAdmin, StackedInline
@@ -242,15 +248,16 @@ class PlacementLinkInline(StackedInline):
         # У нового размещения сразу два слота: ссылок в статье одна-две.
         return 2 if obj is None else 0
 
-    # Ссылки размещения другого продукта — только просмотр, как и само размещение.
+    # Ссылки размещения другого продукта или под чужой блокировкой — только
+    # просмотр, как и само размещение.
     def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return own_product(request, obj) and super().has_add_permission(request, obj)
+        return editable(request, obj) and super().has_add_permission(request, obj)
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return own_product(request, obj) and super().has_change_permission(request, obj)
+        return editable(request, obj) and super().has_change_permission(request, obj)
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return own_product(request, obj) and super().has_delete_permission(request, obj)
+        return editable(request, obj) and super().has_delete_permission(request, obj)
 
 
 def own_product(request: HttpRequest, obj: Any = None) -> bool:
@@ -260,6 +267,15 @@ def own_product(request: HttpRequest, obj: Any = None) -> bool:
     чтобы не задеть случайно (просьба пользователя 18.10.2026).
     """
     return obj is None or obj.product_id == working_product_id(request)
+
+
+def editable(request: HttpRequest, obj: Any = None) -> bool:
+    """Размещение рабочего продукта, и его размещения на площадке не правит сейчас
+    другой человек (ADR-077)."""
+    if obj is None:
+        return True
+    key = locks.placements_key(obj.site_id, obj.product_id)
+    return own_product(request, obj) and locks.blocker(request, key) is None
 
 
 def _initial_product(context: dict[str, Any]) -> int | None:
@@ -663,13 +679,63 @@ class PlacementAdmin(RecordAdmin):
             )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    # ---------- Чужой продукт — только просмотр (ADR-073) ----------
+    # ---------- Чужой продукт и чужая блокировка — только просмотр (ADR-073, ADR-077) ----------
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return own_product(request, obj) and super().has_change_permission(request, obj)
+        return editable(request, obj) and super().has_change_permission(request, obj)
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return own_product(request, obj) and super().has_delete_permission(request, obj)
+        return editable(request, obj) and super().has_delete_permission(request, obj)
+
+    def _lock_key(self, request: HttpRequest, object_id: str | None) -> str | None:
+        """Что заблокирует запись формы; None — записать и так нельзя (права, продукт).
+
+        У новой записи площадка и продукт — из отправленной формы: вкладка «+ Ещё
+        размещение», «Добавить» над списком.
+        """
+        if object_id is None:
+            site, product = _int(request.POST.get("site")), _int(request.POST.get("product"))
+            if site is None or product is None or product != working_product_id(request):
+                return None
+            return locks.placements_key(site, product) if self.has_add_permission(request) else None
+        placement = Placement.objects.filter(pk=_int(object_id) or 0).first()
+        if placement is None or not own_product(request, placement):
+            return None
+        if not super().has_change_permission(request, placement):
+            return None
+        return locks.placements_key(placement.site_id, placement.product_id)
+
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, Any] | None = None,
+    ) -> Any:
+        # Запись берёт блокировку размещений продукта на площадке; её держит
+        # другой — изменения не записываются (ADR-077).
+        if request.method == "POST":
+            key = self._lock_key(request, object_id)
+            holder = locks.claim(request, key) if key is not None else None
+            if key is not None and holder is not None:
+                return locks.refused(request, key, holder, request.get_full_path())
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def delete_view(
+        self, request: HttpRequest, object_id: str, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        placement = Placement.objects.filter(pk=_int(object_id) or 0).first()
+        if placement is not None and own_product(request, placement):
+            key = locks.placements_key(placement.site_id, placement.product_id)
+            # Подтверждение удаления — запись: берёт блокировку; страница вопроса — нет.
+            if request.method == "POST":
+                holder = locks.claim(request, key)
+            else:
+                holder = locks.blocker(request, key)
+            if holder is not None:
+                back = reverse("admin:placements_placement_change", args=[placement.pk])
+                return locks.refused(request, key, holder, back)
+        return super().delete_view(request, object_id, extra_context)
 
     def get_actions(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         # Удаляют по одному — корзиной на вкладке размещения, с подтверждением:
@@ -986,6 +1052,9 @@ class PlacementAdmin(RecordAdmin):
             ]
         target = _tabs_target(request, obj)
         if target is not None:
+            # Кто правит размещения продукта на этой площадке — окошко и опрос
+            # (admin/seo_lock.html, seo/edit-lock.js, ADR-077).
+            context["seo_lock"] = locks.marker(request, locks.placements_key(*target))
             site_id, product_id = target
             own = product_id == working_product_id(request)
             context["panel_tabs"] = repeat.tabs(
@@ -1204,13 +1273,26 @@ class PlacementAdmin(RecordAdmin):
         # Только рабочий продукт шапки (ADR-073): чужие размещения не трогаем.
         working = working_product_id(request)
         queryset = queryset.filter(product_id=working) if working is not None else queryset.none()
+        # Размещения, которые сейчас правит другой человек, — пропускаем (ADR-077).
+        free, busy = locks.split(request, queryset.exclude(status=status), _lock_key_of)
         with stamped(source=StatusSource.FORM):
-            for placement in queryset.exclude(status=status):
+            for placement in free:
                 placement.status = WorkStatus(status)
                 placement.save(update_fields=["status", "updated_at"])
                 changed += 1
         label = WorkStatus(status).label
         self.message_user(request, f"Статус «{label}» поставлен: {changed}.", messages.SUCCESS)
+        self._report_busy(request, busy)
+
+    def _report_busy(
+        self, request: HttpRequest, busy: list[tuple[Placement, locks.Holder]]
+    ) -> None:
+        if busy:
+            self.message_user(
+                request,
+                locks.skipped_text([(placement.site.domain, holder) for placement, holder in busy]),
+                messages.WARNING,
+            )
 
     @admin.action(description="Проверить индексацию")
     def check_indexation_action(self, request: HttpRequest, queryset: QuerySet[Placement]) -> None:
@@ -1235,17 +1317,21 @@ class PlacementAdmin(RecordAdmin):
 
     @admin.action(description="Не проверять по расписанию")
     def skip_checks_action(self, request: HttpRequest, queryset: QuerySet[Placement]) -> None:
-        count = queryset.filter(skip_checks=False).update(
+        free, busy = locks.split(request, queryset.filter(skip_checks=False), _lock_key_of)
+        count = Placement.objects.filter(pk__in=[placement.pk for placement in free]).update(
             skip_checks=True, updated_at=timezone.now()
         )
         self.message_user(request, f"Убрано из проверок по расписанию: {count}.")
+        self._report_busy(request, busy)
 
     @admin.action(description="Снова проверять по расписанию")
     def resume_checks_action(self, request: HttpRequest, queryset: QuerySet[Placement]) -> None:
-        count = queryset.filter(skip_checks=True).update(
+        free, busy = locks.split(request, queryset.filter(skip_checks=True), _lock_key_of)
+        count = Placement.objects.filter(pk__in=[placement.pk for placement in free]).update(
             skip_checks=False, updated_at=timezone.now()
         )
         self.message_user(request, f"Снова проверяется по расписанию: {count}.")
+        self._report_busy(request, busy)
 
     @admin.display(description="продавец", ordering="seller__name")
     def seller_cell(self, obj: Placement) -> SafeString | str:
@@ -1446,6 +1532,10 @@ def _deal_offer(obj: Placement) -> SitePrice | None:
     продавца (рабочую цену площадки) не показываем."""
     offer: SitePrice | None = getattr(obj, "page_offer", None)
     return offer
+
+
+def _lock_key_of(placement: Placement) -> str:
+    return locks.placements_key(placement.site_id, placement.product_id)
 
 
 def _tabs_target(request: HttpRequest, obj: Placement | None) -> tuple[int, int] | None:

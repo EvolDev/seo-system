@@ -1,0 +1,11 @@
+/* Окошко блокировки правки (ADR-077, seo/edit-lock.js): в правом нижнем углу,
+ * среди сообщений (seo/soft-nav.css), но висит, пока запись открыта. */
+.seo-lock-alert {
+  max-width: min(380px, calc(100vw - 32px));
+  border-width: 1px 1px 1px 4px;
+  font-weight: 500;
+}
+.seo-lock-alert::before {
+  content: "🔒";
+  flex: none;
+}

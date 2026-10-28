@@ -11,7 +11,7 @@ ADR-043; правила смены цены — `apps/sites/offers.py`. Серо
 
 import datetime as dt
 import math
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from collections.abc import Set as AbstractSet
 from contextlib import suppress
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -103,6 +103,7 @@ from apps.sites.site_card import STATUS_TONES, euros, fields_text, note_rows, no
 from apps.sites.site_card import price_summary as card_price_summary
 from apps.sites.status_history import site_history
 from apps.workspace import card as card_sections
+from apps.workspace import locks
 from apps.workspace.filters import Remembering
 from apps.workspace.products import (
     FrameProductFilter,
@@ -258,6 +259,75 @@ class SiteAdmin(RecordAdmin):
         # DeletedFilter, чтобы пометку можно было снять.
         return Site.all_objects.select_related("price__seller")
 
+    # ---------- Блокировка правки (ADR-077) ----------
+    # Карточку площадки правит один человек, для всех продуктов: у второго она
+    # только для просмотра, запись поверх чужой блокировки не проходит. Заметка
+    # и своя звёздочка — можно: они ничего не перетирают (`_may_change`).
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        if not super().has_change_permission(request, obj):
+            return False
+        return obj is None or locks.blocker(request, locks.site_key(obj.pk)) is None
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        if not super().has_delete_permission(request, obj):
+            return False
+        return obj is None or locks.blocker(request, locks.site_key(obj.pk)) is None
+
+    def _may_change(self, request: HttpRequest, site: Site) -> bool:
+        """Право менять площадку, без оглядки на блокировку: заметка, звёздочка."""
+        return super().has_change_permission(request, site)
+
+    def _claim(self, request: HttpRequest, site: Site) -> HttpResponse | None:
+        """Запись в карточку: блокировка — за этим человеком; держит другой — отказ."""
+        key = locks.site_key(site.pk)
+        holder = locks.claim(request, key)
+        return locks.refused(request, key, holder, card_url(site.pk)) if holder else None
+
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, Any] | None = None,
+    ) -> Any:
+        # «Факты о площадке» — тоже карточка: запись берёт её блокировку.
+        if request.method == "POST" and object_id is not None:
+            site = Site.all_objects.filter(pk=_number(object_id)).first()
+            if site is not None and self._may_change(request, site):
+                refusal = self._claim(request, site)
+                if refusal is not None:
+                    return refusal
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def render_change_form(
+        self,
+        request: HttpRequest,
+        context: dict[str, Any],
+        add: bool = False,
+        change: bool = False,
+        form_url: str = "",
+        obj: Any = None,
+    ) -> HttpResponse:
+        if obj is not None:
+            context["seo_lock"] = locks.marker(request, locks.site_key(obj.pk))
+        return super().render_change_form(request, context, add, change, form_url, obj)
+
+    def delete_view(
+        self, request: HttpRequest, object_id: str, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        site = Site.all_objects.filter(pk=_number(object_id)).first()
+        if site is not None:
+            key = locks.site_key(site.pk)
+            # Подтверждение удаления — запись: берёт блокировку; страница вопроса — нет.
+            if request.method == "POST":
+                holder = locks.claim(request, key)
+            else:
+                holder = locks.blocker(request, key)
+            if holder is not None:
+                return locks.refused(request, key, holder, card_url(site.pk))
+        return super().delete_view(request, object_id, extra_context)
+
     def get_search_results(
         self, request: HttpRequest, queryset: models.QuerySet[Site], search_term: str
     ) -> tuple[models.QuerySet[Site], bool]:
@@ -378,7 +448,7 @@ class SiteAdmin(RecordAdmin):
         скрипт, без перезагрузки.
         """
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if not self.has_change_permission(request, site):
+        if not self._may_change(request, site):
             return JsonResponse({"error": "Нет прав на изменение."}, status=403)
         try:
             value = rating.clean_value(request.POST.get("value"))
@@ -412,6 +482,9 @@ class SiteAdmin(RecordAdmin):
         site = get_object_or_404(Site.all_objects.select_related("price__seller"), pk=object_id)
         if not self.has_view_permission(request, site):
             return HttpResponse(status=403)
+        # Кто правит карточку — окошко и опрос (admin/seo_lock.html, ADR-077);
+        # чужая блокировка — карточка только для просмотра (has_change_permission).
+        seo_lock = locks.marker(request, locks.site_key(site.pk))
         partial = is_partial(request)
         gray = _gray_context(site, gray_form, request, set_form)
         working = working_product_id(request)
@@ -447,6 +520,8 @@ class SiteAdmin(RecordAdmin):
             "subtitle": "Карточка площадки",
             "opts": self.model._meta,
             "can_change": self.has_change_permission(request, site),
+            "can_note": self._may_change(request, site),
+            "seo_lock": seo_lock,
             "can_change_type": self.has_change_permission(request, site)
             and request.user.has_perm("sites.change_siteprice"),
             "panel": partial,
@@ -466,18 +541,24 @@ class SiteAdmin(RecordAdmin):
 
     def card_fix_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if self.has_change_permission(request, site):
+        if self._may_change(request, site):
+            refusal = self._claim(request, site)
+            if refusal is not None:
+                return refusal
             offer = get_object_or_404(SitePrice, pk=request.POST.get("offer"), site=site)
             offers.set_working_price(offer, author=request.user)
         return self._back_to_card(request, object_id)
 
     def card_price_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if not self.has_change_permission(request, site) or not all(
+        if not self._may_change(request, site) or not all(
             request.user.has_perm(permission)
             for permission in ("sites.add_siteprice", "sites.change_siteprice")
         ):
             return HttpResponse(status=403)
+        refusal = self._claim(request, site)
+        if refusal is not None:
+            return refusal
         form = OfferPriceForm(request.POST)
         if form.is_valid():
             offer = get_object_or_404(SitePrice, pk=form.cleaned_data["offer"], site=site)
@@ -498,10 +579,13 @@ class SiteAdmin(RecordAdmin):
     def card_extra_price_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         """Цена написания или анонса у предложения — карандашом в карточке."""
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if not self.has_change_permission(request, site) or not request.user.has_perm(
+        if not self._may_change(request, site) or not request.user.has_perm(
             "sites.change_siteprice"
         ):
             return HttpResponse(status=403)
+        refusal = self._claim(request, site)
+        if refusal is not None:
+            return refusal
         form = OfferExtraPriceForm(request.POST)
         if form.is_valid():
             offer = get_object_or_404(SitePrice, pk=form.cleaned_data["offer"], site=site)
@@ -521,10 +605,13 @@ class SiteAdmin(RecordAdmin):
 
     def card_link_type_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if not self.has_change_permission(request, site) or not request.user.has_perm(
+        if not self._may_change(request, site) or not request.user.has_perm(
             "sites.change_siteprice"
         ):
             return HttpResponse(status=403)
+        refusal = self._claim(request, site)
+        if refusal is not None:
+            return refusal
         value = request.POST.get("link_type") or None
         if value is not None and value not in LinkType.values:
             return JsonResponse({"error": "Неизвестный тип ссылки."}, status=400)
@@ -534,14 +621,18 @@ class SiteAdmin(RecordAdmin):
 
     def card_keep_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if self.has_change_permission(request, site):
+        if self._may_change(request, site):
+            refusal = self._claim(request, site)
+            if refusal is not None:
+                return refusal
             offers.keep_current_for_sites([site.pk])
         return self._back_to_card(request, object_id)
 
     def card_note_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        # Заметка — лента, а не правка: пишется и под чужой блокировкой (ADR-077).
         site = get_object_or_404(Site.all_objects, pk=object_id)
         body = (request.POST.get("body") or "").strip()
-        if body and self.has_change_permission(request, site):
+        if body and self._may_change(request, site):
             product = Product.objects.filter(pk=_posted_id(request, "product")).first()
             offers.add_note(site, body, product=product, author=request.user)
         return self._back_to_card(request, object_id)
@@ -549,8 +640,11 @@ class SiteAdmin(RecordAdmin):
     def card_gray_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
         """Замер серости из карточки: числа «About N results» двух запросов (E2-06)."""
         site = get_object_or_404(Site.all_objects, pk=object_id)
-        if not self.has_change_permission(request, site):
+        if not self._may_change(request, site):
             return self._back_to_card(request, object_id)
+        refusal = self._claim(request, site)
+        if refusal is not None:
+            return refusal
         form = GrayReadingForm(request.POST)
         if not form.is_valid():
             if is_partial(request):
@@ -1150,11 +1244,47 @@ class ProductSiteAdmin(RecordAdmin):
         return False
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        # Решение — часть карточки площадки: под её блокировкой (ADR-077) — только
+        # просмотр, как и у чужого продукта.
+        if not self._may_change(request, obj):
+            return False
+        return obj is None or locks.blocker(request, locks.site_key(obj.site_id)) is None
+
+    def _may_change(self, request: HttpRequest, obj: Any = None) -> bool:
         # Решение другого продукта — только просмотр (ADR-073): меняют, переключив
         # продукт в шапке, — чтобы не задеть его случайно.
         if obj is not None and obj.product_id != working_product_id(request):
             return False
         return super().has_change_permission(request, obj)
+
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, Any] | None = None,
+    ) -> Any:
+        if request.method == "POST" and object_id is not None:
+            row = ProductSite.objects.filter(pk=_number(object_id)).first()
+            if row is not None and self._may_change(request, row):
+                key = locks.site_key(row.site_id)
+                holder = locks.claim(request, key)
+                if holder is not None:
+                    return locks.refused(request, key, holder, request.get_full_path())
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def render_change_form(
+        self,
+        request: HttpRequest,
+        context: dict[str, Any],
+        add: bool = False,
+        change: bool = False,
+        form_url: str = "",
+        obj: Any = None,
+    ) -> HttpResponse:
+        if obj is not None:
+            context["seo_lock"] = locks.marker(request, locks.site_key(obj.site_id))
+        return super().render_change_form(request, context, add, change, form_url, obj)
 
     def formfield_for_dbfield(
         self, db_field: "models.Field[Any, Any]", request: HttpRequest, **kwargs: Any
@@ -1188,9 +1318,20 @@ class ProductSiteAdmin(RecordAdmin):
         change_url = reverse("admin:sites_productsite_change", args=[row.pk])
         if not is_partial(request):
             return HttpResponseRedirect(change_url)
-        if not self.has_change_permission(request, row):
+        if not self._may_change(request, row):
             return HttpResponse(status=403)
+        # Решение — часть карточки площадки: её блокировка (ADR-077). Держит
+        # другой — запись не проходит, форма — только для просмотра.
+        key = locks.site_key(row.site_id)
+        if request.method == "POST":
+            holder = locks.claim(request, key)
+            if holder is not None:
+                return locks.refused(request, key, holder, change_url)
+        seo_lock = locks.marker(request, key)
         form = DecisionForm(request.POST or None, instance=row)
+        if seo_lock["text"]:
+            for field in form.fields.values():
+                field.disabled = True
         if request.method == "POST" and form.is_valid():
             form.save()
             _note_rejection(request, row, form.changed_data)
@@ -1222,7 +1363,8 @@ class ProductSiteAdmin(RecordAdmin):
             else "",
             "take_url": other_products.add_url(row.site_id, row.product_id) if may_take else "",
             "panel_full_url": change_url,
-            "panel_can_save": True,
+            "panel_can_save": not seo_lock["text"],
+            "seo_lock": seo_lock,
         }
         # Ошибка в форме — та же форма с подсказками, код 200, как у формы записи.
         return TemplateResponse(request, "admin/sites/productsite/decision_body.html", context)
@@ -2790,7 +2932,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
     def accept_new_prices_action(
         self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
     ) -> None:
-        result = offers.accept_new_prices(_site_ids(queryset), author=request.user)
+        result = offers.accept_new_prices(self._free_sites(request, queryset), author=request.user)
         self._report(request, result, "новой цены того же продавца нет")
 
     @admin.action(description="Зафиксировать продавца…", permissions=["fix_price"])
@@ -2801,7 +2943,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         if seller is None:
             self.message_user(request, "Выберите продавца рядом с действием.", messages.WARNING)
             return
-        result = offers.fix_seller(_site_ids(queryset), seller, author=request.user)
+        result = offers.fix_seller(self._free_sites(request, queryset), seller, author=request.user)
         self._report(request, result, f"нет предложения {seller} или оно уже рабочее")
 
     @admin.display(description="тип ссылки", ordering="link_type", empty_value="")
@@ -2828,6 +2970,8 @@ class ProductSiteLatestAdmin(RecordAdmin):
         if request.POST.get("post") != "yes":
             return self._take_confirmation(request, queryset, sites, working)
         again = {int(value) for value in request.POST.getlist("again") if value.isdigit()}
+        # Размещения продукта на площадке сейчас правит другой — не заводим (ADR-077).
+        sites = self._free_sites(request, sites, lambda site: locks.placements_key(site, working))
         result = repeat.take(sites, working, again=again, employee=request.user)
         parts = [f"Взято в размещение: {len(result.created)}"]
         if result.again:
@@ -2900,7 +3044,9 @@ class ProductSiteLatestAdmin(RecordAdmin):
                 f"Пропущено строк другого продукта: {other} — переключите продукт в шапке.",
                 messages.WARNING,
             )
-        sites = list(queryset.filter(product_id=working).values_list("site_id", flat=True))
+        sites = self._free_sites(
+            request, list(queryset.filter(product_id=working).values_list("site_id", flat=True))
+        )
         busy: set[int] = set()
         if status not in status_chips.STOPS:
             busy = set(
@@ -2944,7 +3090,9 @@ class ProductSiteLatestAdmin(RecordAdmin):
                 messages.WARNING,
             )
             return
-        result = offers.set_writing_for_sites(_site_ids(queryset), cents, author=request.user)
+        result = offers.set_writing_for_sites(
+            self._free_sites(request, queryset), cents, author=request.user
+        )
         text = f"Цена написания {offers.money(cents, 'EUR')} поставлена: {result.changed}."
         skipped = [
             (result.same, "уже стояла эта цена"),
@@ -2963,9 +3111,31 @@ class ProductSiteLatestAdmin(RecordAdmin):
     def keep_current_action(
         self, request: HttpRequest, queryset: models.QuerySet[ProductSiteLatest]
     ) -> None:
-        sites = offers.keep_current_for_sites(_site_ids(queryset))
+        sites = offers.keep_current_for_sites(self._free_sites(request, queryset))
         text = f"Разобрано: {sites}. Рабочие цены не менялись."
         self.message_user(request, text, messages.SUCCESS)
+
+    def _free_sites(
+        self,
+        request: HttpRequest,
+        rows: "models.QuerySet[ProductSiteLatest] | list[int]",
+        key_of: Callable[[int], str] = locks.site_key,
+    ) -> list[int]:
+        """Площадки отмеченных строк, которые сейчас не правит другой человек (ADR-077).
+
+        Остальные пропускаются — о них сообщение: кто правит какую площадку.
+        """
+        sites = rows if isinstance(rows, list) else _site_ids(rows)
+        free, busy = locks.split(request, sites, key_of)
+        if busy:
+            domains = dict(
+                Site.all_objects.filter(pk__in=[site for site, _ in busy]).values_list(
+                    "pk", "domain"
+                )
+            )
+            named = [(domains.get(site, str(site)), holder) for site, holder in busy]
+            self.message_user(request, locks.skipped_text(named), messages.WARNING)
+        return free
 
     def _report(self, request: HttpRequest, result: offers.Outcome, skip_reason: str) -> None:
         text = f"Рабочая цена изменена: {result.changed}."
@@ -2981,6 +3151,11 @@ def _chosen_product(changelist: ChangeList) -> str:
             names = dict(spec.lookup_choices)
             return str(names.get(str(spec.working), ""))
     return ""
+
+
+def _number(value: str | None) -> int:
+    """Номер записи из адреса; не номер — 0: такой записи нет."""
+    return int(value) if value and value.isdigit() else 0
 
 
 def _posted_id(request: HttpRequest, name: str) -> int:
