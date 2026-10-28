@@ -2,16 +2,18 @@
 
 Размещения площадки правит другой человек — панель открывает их только для
 просмотра, в углу окошко «кто и с какого времени правит»; освободились — панель
-перечитывает запись, можно править. Первая правка берёт блокировку, закрытие
+перечитывает запись, можно править. Открытие записи берёт блокировку, закрытие
 панели её снимает. Запись поверх чужой блокировки не проходит: сообщение и
 запись заново. Серверную часть проверяет tests/test_edit_locks.py.
 """
 
+import datetime as dt
 import time
 from collections.abc import Callable
 
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 from playwright.sync_api import Page, expect
 from pytest_django.live_server_helper import LiveServer
 
@@ -85,15 +87,13 @@ def test_locked_by_other_then_free(
     expect(page.locator(f"{PANEL} [data-panel-save]")).to_be_visible()
 
 
-def test_first_edit_takes_and_close_releases(
+def test_open_takes_and_close_releases(
     admin_page: Page, live_server: LiveServer, placement: Placement, admin_user: User
 ) -> None:
     page = admin_page
     _open(page, live_server)
     key = _key(placement)
-    assert not EditLock.objects.filter(key=key).exists()
-    page.locator(f"{PANEL} textarea[name=comment]").fill("Договорились на 120 €")
-    assert _until(lambda: EditLock.objects.filter(key=key, user=admin_user).exists())
+    assert EditLock.objects.filter(key=key, user=admin_user).exists()
     page.locator(f"{PANEL} [data-panel-cancel]").click()
     expect(page.locator(PANEL)).to_be_hidden()
     assert _until(lambda: not EditLock.objects.filter(key=key).exists())
@@ -102,9 +102,11 @@ def test_first_edit_takes_and_close_releases(
 def test_save_over_others_lock_is_refused(
     admin_page: Page, live_server: LiveServer, placement: Placement, anna: User
 ) -> None:
-    """Панель открыли, пока было свободно; Анна взяла раньше записи — отказ и просмотр."""
+    """Своя блокировка простояла, её забрала Анна — запись не проходит, просмотр."""
     page = admin_page
     _open(page, live_server)
+    stale = timezone.now() - dt.timedelta(minutes=16)
+    EditLock.objects.filter(key=_key(placement)).update(seen_at=stale)
     locks.take(anna, _key(placement))
     page.locator(f"{PANEL} [data-panel-save]").click()
     expect(page.locator(".seo-toast", has_text="изменения не записаны")).to_be_visible()

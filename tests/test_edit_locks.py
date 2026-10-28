@@ -1,10 +1,11 @@
 """Блокировка правки площадки и размещений (ADR-077).
 
 Карточку площадки правит один человек — для всех продуктов; размещения
-продукта на площадке — один человек внутри продукта. У второго запись только
-для просмотра, с окошком «кто и с какого времени правит»; запись поверх чужой
-блокировки не проходит; действия по отмеченным пропускают такие площадки.
-Заметка — можно. Простой дольше EDIT_LOCK — блокировка не считается.
+продукта на площадке — один человек внутри продукта. Блокировку берёт тот, кто
+открыл запись. У второго запись только для просмотра, с окошком «кто и с какого
+времени правит»; запись поверх чужой блокировки не проходит; действия по
+отмеченным пропускают такие площадки. Заметка — можно. Простой дольше EDIT_LOCK
+— блокировка не считается.
 """
 
 import datetime as dt
@@ -162,6 +163,24 @@ class TestRules:
 
 
 class TestPlacements:
+    def test_open_takes_the_lock(
+        self, anna: User, boris: User, site: Site, convertio: Product, placement: Placement
+    ) -> None:
+        """Пользователь 28.10: «зашёл в карточку, которую трогает другой» — уже занята."""
+        _client(boris).get(_change(placement), headers=PARTIAL)
+        key = locks.placements_key(site.pk, convertio.pk)
+        assert EditLock.objects.get(key=key).user_id == boris.pk
+        page = _client(anna).get(_change(placement), headers=PARTIAL).content.decode()
+        assert "data-panel-save" not in page
+        assert "на этой площадке правит Борис с" in page
+
+    def test_view_only_opening_takes_nothing(
+        self, boris: User, site: Site, clideo: Product
+    ) -> None:
+        theirs = Placement.objects.create(site=site, product=clideo, status=PlacementStatus.IN_WORK)
+        _client(boris).get(_change(theirs), headers=PARTIAL)
+        assert not EditLock.objects.exists()
+
     def test_second_sees_view_only_and_who(
         self, anna: User, boris: User, site: Site, convertio: Product, placement: Placement
     ) -> None:
@@ -266,6 +285,13 @@ class TestPlacements:
 
 
 class TestSiteCard:
+    def test_open_card_takes_the_lock(self, anna: User, boris: User, site: Site) -> None:
+        card = reverse("admin:sites_site_card", args=[site.pk])
+        _client(boris).get(card, headers=PARTIAL)
+        assert EditLock.objects.get(key=locks.site_key(site.pk)).user_id == boris.pk
+        page = _client(anna).get(card, headers=PARTIAL).content.decode()
+        assert 'data-seo-lock-text="Площадку правит Борис с' in page
+
     def test_second_sees_view_only_but_may_note(self, anna: User, boris: User, site: Site) -> None:
         locks.take(anna, locks.site_key(site.pk))
         card = reverse("admin:sites_site_card", args=[site.pk])

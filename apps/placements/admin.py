@@ -25,7 +25,7 @@
 Размещение другого продукта, чем рабочий в шапке, — только просмотр.
 
 Блокировка правки (ADR-077): размещения продукта на площадке правит один
-человек — первая правка берёт блокировку (`apps/workspace/locks.py`), у
+человек — открывший запись берёт блокировку (`apps/workspace/locks.py`), у
 второго они только для просмотра, запись поверх чужой блокировки не проходит;
 действия по отмеченным пропускают такие размещения.
 """
@@ -688,13 +688,14 @@ class PlacementAdmin(RecordAdmin):
         return editable(request, obj) and super().has_delete_permission(request, obj)
 
     def _lock_key(self, request: HttpRequest, object_id: str | None) -> str | None:
-        """Что заблокирует запись формы; None — записать и так нельзя (права, продукт).
+        """Что блокирует эта запись; None — менять её и так нельзя (права, продукт).
 
-        У новой записи площадка и продукт — из отправленной формы: вкладка «+ Ещё
-        размещение», «Добавить» над списком.
+        У новой записи площадка и продукт — из адреса вкладки «+ Ещё размещение»
+        (`?site=&product=`) или из отправленной формы («Добавить» над списком).
         """
         if object_id is None:
-            site, product = _int(request.POST.get("site")), _int(request.POST.get("product"))
+            data = request.POST if request.method == "POST" else request.GET
+            site, product = _int(data.get("site")), _int(data.get("product"))
             if site is None or product is None or product != working_product_id(request):
                 return None
             return locks.placements_key(site, product) if self.has_add_permission(request) else None
@@ -712,12 +713,13 @@ class PlacementAdmin(RecordAdmin):
         form_url: str = "",
         extra_context: dict[str, Any] | None = None,
     ) -> Any:
-        # Запись берёт блокировку размещений продукта на площадке; её держит
-        # другой — изменения не записываются (ADR-077).
-        if request.method == "POST":
-            key = self._lock_key(request, object_id)
-            holder = locks.claim(request, key) if key is not None else None
-            if key is not None and holder is not None:
+        # Открыли запись — размещения продукта на площадке за этим человеком; их
+        # держит другой — запись только для просмотра, изменения не записываются
+        # (ADR-077).
+        key = self._lock_key(request, object_id)
+        if key is not None:
+            holder = locks.claim(request, key)
+            if request.method == "POST" and holder is not None:
                 return locks.refused(request, key, holder, request.get_full_path())
         return super().changeform_view(request, object_id, form_url, extra_context)
 

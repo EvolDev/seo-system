@@ -291,13 +291,17 @@ class SiteAdmin(RecordAdmin):
         form_url: str = "",
         extra_context: dict[str, Any] | None = None,
     ) -> Any:
-        # «Факты о площадке» — тоже карточка: запись берёт её блокировку.
-        if request.method == "POST" and object_id is not None:
+        # «Факты о площадке» — тоже карточка: открыли — её блокировка за этим
+        # человеком; держит другой — только просмотр, запись не проходит.
+        if object_id is not None:
             site = Site.all_objects.filter(pk=_number(object_id)).first()
             if site is not None and self._may_change(request, site):
-                refusal = self._claim(request, site)
-                if refusal is not None:
-                    return refusal
+                if request.method != "POST":
+                    locks.claim(request, locks.site_key(site.pk))
+                else:
+                    refusal = self._claim(request, site)
+                    if refusal is not None:
+                        return refusal
         return super().changeform_view(request, object_id, form_url, extra_context)
 
     def render_change_form(
@@ -482,8 +486,11 @@ class SiteAdmin(RecordAdmin):
         site = get_object_or_404(Site.all_objects.select_related("price__seller"), pk=object_id)
         if not self.has_view_permission(request, site):
             return HttpResponse(status=403)
-        # Кто правит карточку — окошко и опрос (admin/seo_lock.html, ADR-077);
-        # чужая блокировка — карточка только для просмотра (has_change_permission).
+        # Открыли карточку — её блокировка за этим человеком (ADR-077); держит
+        # другой — карточка только для просмотра (has_change_permission), окошко
+        # и опрос — admin/seo_lock.html.
+        if self._may_change(request, site):
+            locks.claim(request, locks.site_key(site.pk))
         seo_lock = locks.marker(request, locks.site_key(site.pk))
         partial = is_partial(request)
         gray = _gray_context(site, gray_form, request, set_form)
@@ -1264,12 +1271,12 @@ class ProductSiteAdmin(RecordAdmin):
         form_url: str = "",
         extra_context: dict[str, Any] | None = None,
     ) -> Any:
-        if request.method == "POST" and object_id is not None:
+        if object_id is not None:
             row = ProductSite.objects.filter(pk=_number(object_id)).first()
             if row is not None and self._may_change(request, row):
                 key = locks.site_key(row.site_id)
                 holder = locks.claim(request, key)
-                if holder is not None:
+                if holder is not None and request.method == "POST":
                     return locks.refused(request, key, holder, request.get_full_path())
         return super().changeform_view(request, object_id, form_url, extra_context)
 
@@ -1320,13 +1327,13 @@ class ProductSiteAdmin(RecordAdmin):
             return HttpResponseRedirect(change_url)
         if not self._may_change(request, row):
             return HttpResponse(status=403)
-        # Решение — часть карточки площадки: её блокировка (ADR-077). Держит
-        # другой — запись не проходит, форма — только для просмотра.
+        # Решение — часть карточки площадки: открыли — её блокировка за этим
+        # человеком (ADR-077). Держит другой — форма только для просмотра, запись
+        # не проходит.
         key = locks.site_key(row.site_id)
-        if request.method == "POST":
-            holder = locks.claim(request, key)
-            if holder is not None:
-                return locks.refused(request, key, holder, change_url)
+        holder = locks.claim(request, key)
+        if holder is not None and request.method == "POST":
+            return locks.refused(request, key, holder, change_url)
         seo_lock = locks.marker(request, key)
         form = DecisionForm(request.POST or None, instance=row)
         if seo_lock["text"]:

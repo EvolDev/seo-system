@@ -189,8 +189,9 @@ def card_sections_view(request: HttpRequest) -> JsonResponse | HttpResponseBadRe
 def edit_lock_view(request: HttpRequest) -> JsonResponse:
     """Блокировка правки из панели (seo/edit-lock.js, ADR-077).
 
-    GET — чья блокировка у ключа сейчас; POST `action` — `take` (первая правка
-    в форме), `touch` (человек ещё правит), `release` (панель закрыли). Ответ —
+    GET — чья блокировка у ключа сейчас; POST `action` — `take` (правка в форме,
+    когда своя блокировка простояла), `touch` (человек ещё работает в записи),
+    `release` (панель закрыли). Ответ —
     `mine` (держит сам) и `text` чужой блокировки для окошка, иначе пусто.
     """
     data = request.POST if request.method == "POST" else request.GET
