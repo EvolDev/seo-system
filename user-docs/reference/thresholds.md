@@ -4,7 +4,7 @@ description: Текущие числа, на которые опирается �
 section: reference
 status: draft
 tasks: [E1-01, E1-02, E1-05, E5-02, E2-03, E1-08, E1-09, E2-06, E3-05, E1-14]
-updated: 2026-10-14
+updated: 2026-10-28
 screens: [site_card, audit_queue, product_card, settings, upload_review, upload_new, placement_card, anchors, economics]
 tags: [пороги, настройки]
 ---
@@ -129,6 +129,12 @@ essay, viagra, cialis, levitra, ed pills, xanax. Google читает тольк�
 Сроки считаются от полуночи: проверка, сделанная днём, повторится не
 раньше, чем в 06:00 следующего срока. Как пользоваться —
 [Как проверить индексацию статьи](../how-to/check-indexation.md).
+
+## Блокировка правки {#edit-lock}
+
+Площадку или размещения, открытые и забытые в панели, система освобождает сама
+после **15 минут** без работы в записи — настройка **EDIT_LOCK** в разделе
+**Настройки** ([Если запись сейчас правит другой](../how-to/edit-in-panel.md#lock)).
 
 ## Анкоры {#anchors}
 

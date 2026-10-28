@@ -1,0 +1,9 @@
+{% extends "admin/change_list.html" %}
+{% load admin_urls %}
+{% comment %}
+Пользователи (ADR-078): «Добавить пользователя» — штатная кнопка пишет «Добавить
+пользователь». Форма открывается панелью справа, как у остальных списков.
+{% endcomment %}
+{% block object-tools-items %}
+{% if has_add_permission %}<li><a href="{% url cl.opts|admin_urlname:'add' %}" class="addlink">Добавить пользователя</a></li>{% endif %}
+{% endblock %}

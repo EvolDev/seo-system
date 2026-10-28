@@ -378,16 +378,16 @@ def test_every_menu_screen_opens_softly(
     assert same_document(page)
 
 
-def test_two_list_selector_after_soft_navigation(admin_page: Page, live_server: LiveServer) -> None:
-    """Права пользователя — выбор из двух списков: ровно по одному на поле."""
+def test_user_card_after_soft_navigation(admin_page: Page, live_server: LiveServer) -> None:
+    """Пользователи (ADR-078): после подгрузки списка карточка — панелью, таблица прав одна."""
     page = admin_page
     page.goto(f"{live_server.url}/admin/")
     mark(page)
     with soft_load(page):
         page.locator("a", has_text="Пользователи").first.click()
-    with soft_load(page):
-        page.locator("#result_list a", has_text="admin").first.click()
-    expect(page.locator(".selector")).to_have_count(2)  # группы и права
+    page.locator("#result_list a", has_text="admin").first.click()
+    expect(page.locator(".seo-panel [data-perm-table]")).to_have_count(1)
+    expect(page.locator(".seo-panel .seo-choice")).to_have_count(1)
     assert same_document(page)
 
 

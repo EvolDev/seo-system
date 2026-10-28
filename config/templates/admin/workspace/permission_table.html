@@ -1,0 +1,34 @@
+{% comment %}
+Особые права пользователя (ADR-078) — таблицей по разделам меню: экран в строке,
+«Смотреть · Добавлять · Менять · Удалять» в колонках. Галочка в заголовке
+колонки раздела отмечает её во всём разделе; поиск — по названию экрана.
+Права роли — отмечены и серые (seo/user-perms.js по выбранной роли, role_perms),
+отдельно их не дают. Раздел «Система» свёрнут.
+{% endcomment %}<div class="seo-perms" data-perm-table data-role-perms="{{ role_perms }}">
+  <div class="seo-perms-admin" data-perm-admin hidden>Полный доступ — особые права не нужны.</div>
+  <div class="seo-perms-body" data-perm-body>
+    <div class="seo-perms-tools">
+      <input type="search" class="vTextField" placeholder="Найти экран…" aria-label="Найти экран" data-perm-search>
+      <span class="seo-sub" data-perm-total></span>
+    </div>
+    {% for section in sections %}
+    <details class="seo-perms-section" data-perm-section{% if section.open %} open{% endif %}>
+      <summary><span class="seo-perms-title">{{ section.title }}</span> <span class="seo-sub" data-perm-count></span>{% if section.hint %} <span class="seo-sub seo-perms-hint">{{ section.hint }}</span>{% endif %}</summary>
+      <table class="seo-perms-table">
+        <thead><tr>
+          <th scope="col">Экран</th>
+          {% for code, title in actions %}<th scope="col"><label title="{{ title }} — весь раздел"><input type="checkbox" data-perm-column="{{ code }}"> {{ title }}</label></th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for row in section.rows %}
+          <tr data-perm-row data-search="{{ row.search }}">
+            <th scope="row">{{ row.label }}</th>
+            {% for cell in row.cells %}<td>{% if cell %}<input type="checkbox" name="{{ widget.name }}" value="{{ cell.id }}" data-action="{{ cell.action }}"{% if cell.checked %} checked{% endif %} aria-label="{{ row.label }}: {{ cell.title }}">{% endif %}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endfor %}
+  </div>
+</div>

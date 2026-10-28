@@ -1,0 +1,70 @@
+/* Карточка пользователя (ADR-078): роль кнопками, особые права таблицей по разделам. */
+.seo-perms { display: flex; flex-direction: column; gap: 10px; }
+.seo-perms-admin {
+  padding: 10px 12px;
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 8px;
+  color: var(--body-quiet-color, #666);
+}
+.seo-perms-body { display: flex; flex-direction: column; gap: 8px; }
+.seo-perms-tools { display: flex; align-items: center; gap: 12px; }
+.seo-perms-tools input[type=search] { width: 260px; }
+.seo-perms-section {
+  border: 1px solid var(--hairline-color, #ddd);
+  border-radius: 8px;
+  background: var(--body-bg, #fff);
+}
+.seo-perms-section > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.seo-perms-section > summary::-webkit-details-marker { display: none; }
+.seo-perms-section > summary::before { content: "▸"; color: var(--body-quiet-color, #666); }
+.seo-perms-section[open] > summary::before { content: "▾"; }
+.seo-perms-title { font-weight: 600; }
+.seo-perms-hint { flex-basis: 100%; padding-left: 18px; }
+.seo-perms-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.seo-perms-table th,
+.seo-perms-table td {
+  padding: 5px 12px;
+  border-top: 1px solid var(--hairline-color, #eee);
+  background: none;
+  text-align: center;
+  vertical-align: middle;
+}
+.seo-perms-table th[scope=row] { text-align: left; font-weight: 400; }
+.seo-perms-table thead th { color: var(--body-quiet-color, #666); font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.seo-perms-table thead th:first-child { text-align: left; }
+/* Подписи формы в админке — колонкой 160px (.aligned label); в таблице — по тексту. */
+.aligned .seo-perms-table thead label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.seo-perms-table tbody tr:hover { background: var(--darkened-bg, rgba(127, 127, 127, 0.06)); }
+.seo-perms-table input[type=checkbox] { margin: 0; cursor: pointer; }
+.seo-perms-table thead th:not(:first-child),
+.seo-perms-table td { width: 92px; }
+/* Право роли — отмечено и серое: отдельно его не дают. */
+.seo-perms-table td.seo-perm-role { opacity: 0.4; }
+.seo-perms-table td.seo-perm-role input { cursor: not-allowed; }
+.seo-perms-table tr[hidden] { display: none; }
+
+/* Роль и особые права — во всю ширину: заголовок раздела уже говорит, что это. */
+.form-row.field-role .flex-container > label,
+.form-row.field-user_permissions .flex-container > label { display: none; }
+.form-row.field-role .flex-container,
+.form-row.field-user_permissions .flex-container { display: block; }
+.form-row.field-role .help,
+.form-row.field-user_permissions .help { margin-left: 0; padding-left: 0; }
+.seo-role-hint { display: block; }
+.seo-role-hint[hidden] { display: none; }

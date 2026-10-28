@@ -178,7 +178,8 @@ def test_placements_upload_form_and_path(
     mark(page)
     product_row = page.locator(".form-row", has=page.locator("select[name=product]"))
     employee_row = page.locator(".form-row", has=page.locator("select[name=employee]"))
-    country_row = page.locator(".form-row", has=page.locator("[data-country-picker]"))
+    # Страна выгрузки Ahrefs; у анкоров — свой выбор региона списка (ADR-075).
+    country_row = page.locator('.form-row[data-kinds="ahrefs_batch"]')
     date_label = page.locator("label[for=id_prices_date]")
 
     # Прайс — продавец, без продукта и сотрудника.

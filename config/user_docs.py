@@ -75,6 +75,9 @@ SCREENS = {
     "admin:observability_taskrun_changelist": "task_runs",
     "admin:observability_taskrun_change": "task_runs",
     "admin:observability_apiusage_changelist": "api_usage",
+    "admin:auth_user_changelist": "user_list",
+    "admin:auth_user_change": "user_card",
+    "admin:auth_user_add": "user_card",
 }
 
 

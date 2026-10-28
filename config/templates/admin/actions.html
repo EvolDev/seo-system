@@ -23,7 +23,7 @@
   title="Скопировать выбранные анкоры; выбор всех охватывает все страницы">Скопировать анкоры</button>
 <a class="seo-btn" href="{{ anchor_export_url }}" data-no-soft
   title="Все анкоры по текущим фильтрам, со всех страниц">Экспорт в Excel</a>
-{% else %}
+{% elif not hide_copy_domains %}
 <button type="button" class="seo-btn seo-copy-domains" data-copy-domains
   title="Скопировать домены отмеченных строк — по одному на строке">Скопировать домены</button>
 {% endif %}

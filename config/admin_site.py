@@ -49,7 +49,8 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "productrefdomain"),
         ],
     ),
-    ("Настройки", "settings", [("content", "domainsetting"), ("auth", "user"), ("auth", "group")]),
+    # Группы — без экрана: группы ролей ведёт код (apps/workspace/roles.py, ADR-078).
+    ("Настройки", "settings", [("content", "domainsetting"), ("auth", "user")]),
     (
         "Служебное",
         "service",
