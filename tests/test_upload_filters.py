@@ -16,12 +16,14 @@ from apps.sites.models import (
     MetricSource,
     Product,
     ProductSite,
+    ReviewGroup,
     Seller,
     Site,
     SiteListItem,
     SiteMetric,
     SitePrice,
     Upload,
+    UploadItem,
     UploadKind,
     UploadStatus,
 )
@@ -289,6 +291,45 @@ class TestRuns:
         assert (site.source, site.topics, site.language) == ("Collaborator", None, None)
         assert site.price is not None
         assert not SiteMetric.objects.filter(site=site).exists()
+
+    def test_second_press_adds_no_review_rows(self, base: Site) -> None:
+        before = base.price_id
+        waiting = Site.objects.create(domain="usa-weak.com")
+        waiting.price = SitePrice.objects.create(
+            site=waiting,
+            seller=Seller.objects.create(name="LinkHub"),
+            placement_cents=5000,
+            source=MetricSource.CSV_IMPORT,
+            checked_at=start_of_day(dt.date(2026, 9, 27)),
+        )
+        waiting.save(update_fields=["price"])
+        upload = _run(_catalog_upload(), "known", ["prices"])
+        first = UploadItem.objects.get(upload=upload, site=base)
+        assert (first.ref_price_id, first.review_group) == (before, ReviewGroup.CHANGED)
+
+        upload = _run(upload, "known", ["prices"])
+        # Строк столько же, первая на месте: рабочая цена до загрузки в ней не потерялась.
+        assert UploadItem.objects.filter(upload=upload).count() == 2
+        again = UploadItem.objects.get(upload=upload, site=base)
+        assert (again.pk, again.ref_price_id, again.review_group) == (
+            first.pk,
+            before,
+            ReviewGroup.CHANGED,
+        )
+        # История кнопок по-прежнему говорит, сколько площадок ждут решения.
+        runs = (upload.result or {})["runs"]
+        assert [run["counts"]["items"] for run in runs] == [2, 0]
+        assert [run["counts"]["needs_decision"] for run in runs] == [1, 1]
+
+    def test_metrics_only_fills_new_sites_without_review_rows(self, base: Site) -> None:
+        upload = _run(_catalog_upload(), "new", ["prices", "card"])
+        total = UploadItem.objects.filter(upload=upload).count()
+        fresh = Site.objects.get(domain="usa-strong.com")
+        assert not SiteMetric.objects.filter(site=fresh).exists()
+
+        upload = _run(upload, "known", ["metrics"])
+        assert SiteMetric.objects.get(site=fresh).dr == 55
+        assert UploadItem.objects.filter(upload=upload).count() == total
 
     def test_count_new(self, base: Site) -> None:
         upload = _catalog_upload()

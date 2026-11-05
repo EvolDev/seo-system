@@ -450,8 +450,14 @@ class Writer:
         return site_list
 
     def _items(self, prices: Sequence[SitePrice]) -> None:
+        # Кнопки каталога можно нажимать снова. На цену — одна строка разбора,
+        # первая: в ней положение на момент записи и рабочая цена до загрузки,
+        # по которой отмена загрузки возвращает прежнюю.
+        written = set(UploadItem.objects.filter(upload=self.upload).values_list("price", flat=True))
         items = []
         for item, price in zip(self.plan.items, prices, strict=True):
+            if price.pk in written:
+                continue
             working = item.site.working if item.site else None
             items.append(
                 UploadItem(
@@ -469,7 +475,7 @@ class Writer:
             )
         UploadItem.objects.bulk_create(items, batch_size=BATCH)
         self.counts["items"] = len(items)
-        self.counts["needs_decision"] = sum(item.needs_decision for item in items)
+        self.counts["needs_decision"] = sum(i.decision.needs_decision for i in self.plan.items)
 
 
 def _label(name: str) -> str:
