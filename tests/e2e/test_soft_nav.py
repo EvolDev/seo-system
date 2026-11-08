@@ -190,10 +190,15 @@ def test_admin_scripts_work_after_soft_navigation(
         page.keyboard.press("Escape")
 
         # «+» у продукта — окно темы поверх страницы, а не новое окно браузера.
+        page.evaluate(
+            "() => { window.__opened = 0;"
+            " window.open = () => { window.__opened += 1; return { focus() {} }; }; }"
+        )
         page.locator("#add_id_product").click()
         expect(page.locator("#related-modal-iframe")).to_have_count(1)
         page.locator(".mfp-close").click()
         expect(page.locator("#related-modal-iframe")).to_have_count(0)
+        assert page.evaluate("window.__opened") == 0
 
         with soft_load(page):
             page.locator("input[name=_continue]").click()

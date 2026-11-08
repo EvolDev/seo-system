@@ -653,8 +653,26 @@
     if (typeof window.onload === "function") window.onload(new Event("load"));
   }
 
+  // Окно связанной записи («✎», «+», «👁» у поля) — одно, окно темы поверх
+  // страницы. Щелчок по значку ловят двое: Django — делегированием на <body>
+  // (открывает окно браузера), тема — на document. На значки, которые были при
+  // загрузке страницы, тема вешается сама и дальше щелчок не пускает; значки,
+  // появившиеся позже (переход без перезагрузки, панель записи, новая строка
+  // инлайна), Django ловит первым — и окон было два. Перед своим окном Django
+  // спрашивает событием, не отменят ли его, — отменяем, когда окно темы есть.
+  function oneRelatedWindow() {
+    if (!hasJQuery()) return;
+    var $ = window.django.jQuery;
+    if ($.seoOneRelatedWindow) return;
+    $.seoOneRelatedWindow = true;
+    $(document).on("django:show-related django:lookup-related", function (event) {
+      if (typeof window.presentRelatedObjectModal === "function") event.preventDefault();
+    });
+  }
+
   // Виджеты полей формы внутри scope (страница или панель записи).
   function restartWidgets(scope, loadedBefore) {
+    oneRelatedWindow();
     var $ = hasJQuery() ? window.django.jQuery : null;
     var was = function (path) { return wasLoaded(loadedBefore, path); };
     // Автодополнение: его скрипт слушает document — выполнять заново нельзя.
@@ -1135,6 +1153,8 @@
   window.addEventListener("pagehide", rememberScroll);
 
   function start() {
+    // И во всплывающем окне темы: строки инлайнов там тоже добавляются позже.
+    oneRelatedWindow();
     if (!off) {
       remember();
       var current = window.history.state;

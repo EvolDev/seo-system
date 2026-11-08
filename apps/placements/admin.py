@@ -989,6 +989,22 @@ class PlacementAdmin(RecordAdmin):
         if obj is not None and obj.extra:
             # Прочие данные из файла размещений — перед «Служебным», только если есть.
             fieldsets.insert(len(fieldsets) - 1, (FROM_FILE, {"fields": ("extra_data",)}))
+        if obj is not None and self._offer_switch(request, obj)[1] is not None:
+            # Продавец сменил цену услуги — «Предложение продавца» выбором: прежняя
+            # цена размещения или новая (пользователь 30.10.2026).
+            fieldsets = [
+                (
+                    name,
+                    {
+                        **options,
+                        "fields": tuple(
+                            "offer" if field == "offer_info" else field
+                            for field in options["fields"]
+                        ),
+                    },
+                )
+                for name, options in fieldsets
+            ]
         if obj is None:
             # Новое размещение на площадке с ценами (ADR-073): «Через кого» вместо
             # продавца, услуги и типа ссылки — их даёт выбранное предложение.
@@ -1075,6 +1091,8 @@ class PlacementAdmin(RecordAdmin):
         if obj is None and _offer_site(request) is not None:
             # Класс формы свой на каждый запрос (modelform_factory) — метка только у него.
             form.offer_shown = True  # type: ignore[attr-defined]
+        if obj is not None:
+            form.offer_switch = self._offer_switch(request, obj)  # type: ignore[attr-defined]
         if obj is None and self.in_panel(request) and _tabs_target(request, None) is not None:
             # Новое размещение из вкладок площадки: площадка и продукт уже заданы —
             # в панели они не поля, а заголовок.
@@ -1082,6 +1100,22 @@ class PlacementAdmin(RecordAdmin):
                 if name in form.base_fields:
                     form.base_fields[name].widget = forms.HiddenInput()
         return form
+
+    def _offer_switch(
+        self, request: HttpRequest, obj: Placement
+    ) -> tuple[SitePrice | None, SitePrice | None]:
+        """Цена размещения и новая того же продавца (`repeat.offer_switch`) — если
+        размещение можно править; иначе новой нет. Один раз на запрос: форма и
+        её поля спрашивают по нескольку раз."""
+        found: tuple[SitePrice | None, SitePrice | None] | None = getattr(
+            obj, "seo_offer_switch", None
+        )
+        if found is None:
+            found = (None, None)
+            if self.has_change_permission(request, obj):
+                found = repeat.offer_switch(obj)
+            obj.seo_offer_switch = found  # type: ignore[attr-defined]
+        return found
 
     def panel_add_title(self, request: HttpRequest) -> str:
         site_id = _int(request.GET.get("site"))

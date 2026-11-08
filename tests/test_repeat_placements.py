@@ -79,6 +79,31 @@ def _new(site: Site, product: Product, **fields: Any) -> Placement:
     return Placement.objects.create(site=site, product=product, **fields)
 
 
+def _card_form(**fields: str) -> dict[str, str]:
+    """Форма карточки размещения (услуга — публикация), как её отправляет браузер."""
+    data = {
+        "status": "in_work",
+        "placement_type": "guest_post",
+        "seller": str(Seller.collaborator().pk),
+        "employee": "",
+        "collaborator_order_id": "",
+        "ordered_at": "",
+        "price_paid_cents": "",
+        "currency": "EUR",
+        "article_url": "",
+        "published_at": "",
+        "announce_on_homepage": "unknown",
+        "clicks_from_homepage": "",
+        "comment": "",
+        "links-TOTAL_FORMS": "0",
+        "links-INITIAL_FORMS": "0",
+        "links-MIN_NUM_FORMS": "0",
+        "links-MAX_NUM_FORMS": "1000",
+    }
+    data.update(fields)
+    return data
+
+
 def _add_form(site: Site, product: Product, **fields: str) -> dict[str, str]:
     """Форма нового размещения из вкладок, как её отправляет браузер."""
     data = {
@@ -492,29 +517,89 @@ class TestOwnSeller:
         placement = _new(
             site, convertio, seller=working.seller, placement_type="guest_post", price=working
         )
-        data = {
-            "status": "in_work",
-            "placement_type": "guest_post",
-            "seller": str(cheaper.seller_id),
-            "employee": "",
-            "collaborator_order_id": "",
-            "ordered_at": "",
-            "price_paid_cents": "",
-            "currency": "EUR",
-            "article_url": "",
-            "published_at": "",
-            "announce_on_homepage": "unknown",
-            "clicks_from_homepage": "",
-            "comment": "",
-            "links-TOTAL_FORMS": "0",
-            "links-INITIAL_FORMS": "0",
-            "links-MIN_NUM_FORMS": "0",
-            "links-MAX_NUM_FORMS": "1000",
-        }
+        data = _card_form(seller=str(cheaper.seller_id))
         response = admin_client.post(_change(placement), data, headers=PARTIAL)
         assert response.status_code == 200 and response.json()["saved"]
         placement.refresh_from_db()
         assert (placement.seller_id, placement.price_id) == (cheaper.seller_id, cheaper.pk)
+
+    @pytest.fixture
+    def dollars(self, site: Site, offer: OfferFactory, working: SitePrice) -> SitePrice:
+        """Тот же продавец и услуга, прайс поправили на доллары — рабочая цена."""
+        later = working.checked_at + dt.timedelta(days=6)
+        return offer(site, 12650, currency="USD", checked_at=later)
+
+    def test_new_price_of_seller_can_be_taken(
+        self,
+        admin_client: Client,
+        site: Site,
+        convertio: Product,
+        working: SitePrice,
+        dollars: SitePrice,
+    ) -> None:
+        """Пользователь 30.10.2026: прайс продавца переделали в доллары, а размещение
+        держит евро — в карточке выбор между прежней ценой и новой."""
+        placement = _new(
+            site, convertio, seller=working.seller, placement_type="guest_post", price=working
+        )
+        page = admin_client.get(_change(placement), headers=PARTIAL)
+        form = page.context["adminform"].form
+        assert [value for value, _ in form.fields["offer"].choices] == [working.pk, dollars.pk]
+        assert form.fields["offer"].initial == working.pk
+        html = page.content.decode()
+        assert "сейчас у размещения" in html
+        assert "$126.50 · прайс от" in html and "новая цена продавца, рабочая" in html
+        assert "Рабочая цена площадки сейчас другая" not in html
+
+        response = admin_client.post(
+            _change(placement), _card_form(offer=str(dollars.pk)), headers=PARTIAL
+        )
+        assert response.status_code == 200 and response.json()["saved"]
+        placement.refresh_from_db()
+        assert (placement.seller_id, placement.price_id) == (working.seller_id, dollars.pk)
+
+    def test_untouched_choice_keeps_price(
+        self,
+        admin_client: Client,
+        site: Site,
+        convertio: Product,
+        working: SitePrice,
+        dollars: SitePrice,
+    ) -> None:
+        placement = _new(
+            site, convertio, seller=working.seller, placement_type="guest_post", price=working
+        )
+        response = admin_client.post(
+            _change(placement), _card_form(offer=str(working.pk)), headers=PARTIAL
+        )
+        assert response.status_code == 200 and response.json()["saved"]
+        placement.refresh_from_db()
+        assert placement.price_id == working.pk
+
+    def test_no_choice_without_new_price(
+        self, admin_client: Client, site: Site, convertio: Product, working: SitePrice
+    ) -> None:
+        placement = _new(
+            site, convertio, seller=working.seller, placement_type="guest_post", price=working
+        )
+        page = admin_client.get(_change(placement), headers=PARTIAL)
+        assert 'name="offer"' not in page.content.decode()
+        assert "прайс от" in page.content.decode()
+
+    def test_no_choice_for_other_product(
+        self,
+        admin_client: Client,
+        site: Site,
+        clideo: Product,
+        working: SitePrice,
+        dollars: SitePrice,
+    ) -> None:
+        # Чужой продукт — только просмотр (ADR-073): цену не выбирают.
+        placement = _new(
+            site, clideo, seller=working.seller, placement_type="guest_post", price=working
+        )
+        page = admin_client.get(_change(placement), headers=PARTIAL)
+        assert 'name="offer"' not in page.content.decode()
 
     def test_working_price_change_keeps_seller(
         self, site: Site, convertio: Product, working: SitePrice, cheaper: SitePrice

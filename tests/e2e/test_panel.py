@@ -171,6 +171,35 @@ def test_placement_status_from_list(
     assert decision.status == SiteStatus.PLACED
 
 
+def test_related_record_opens_one_window(
+    admin_page: Page, live_server: LiveServer, placements: list[Placement]
+) -> None:
+    """«✎» и «+» у поля в панели — одно окно темы поверх страницы, без окна браузера.
+
+    Значки в панели появились после загрузки страницы: и Django, и тема ловят щелчок
+    по ним — окно браузера открывал Django, а тема рядом — своё (пользователь, 30.10).
+    """
+    placement = placements[0]
+    placement.seller = Seller.objects.create(name="Morgan Hugh")
+    placement.save(update_fields=["seller"])
+    page = admin_page
+    page.goto(f"{live_server.url}/admin/placements/placement/")
+    # Окно браузера, которое открыл бы Django, — считаем вместо открытия.
+    page.evaluate(
+        "() => { window.__opened = 0;"
+        " window.open = () => { window.__opened += 1; return { focus() {} }; }; }"
+    )
+    page.locator("#result_list tbody tr", has_text="alpha.com").locator("a.seo-st").click()
+    panel = page.locator(PANEL)
+    for link in ("#change_id_seller", "#add_id_employee"):
+        panel.locator(link).click()
+        expect(page.locator("#related-modal-iframe")).to_have_count(1)
+        page.locator(".mfp-close").click()
+        expect(page.locator("#related-modal-iframe")).to_have_count(0)
+    assert page.evaluate("window.__opened") == 0
+    expect(panel).to_be_visible()
+
+
 def test_status_history_in_panel_and_card(
     admin_page: Page, live_server: LiveServer, placements: list[Placement]
 ) -> None:

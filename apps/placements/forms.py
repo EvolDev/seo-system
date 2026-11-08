@@ -17,6 +17,9 @@
 и само предложение берутся из выбранного. «Сделать эту цену рабочей» — по
 желанию. Площадку из чёрного списка продукта форма не берёт.
 
+Карточка размещения: продавец сменил цену той же услуги (сумму, валюту) —
+«Предложение продавца» выбором: прежняя цена размещения или новая.
+
 Ссылка размещения (E3-05, ADR-059, ADR-069): анкор — одно поле с поиском по
 анкорам продукта (seo/anchors.js), «куда ведёт» подставляется из анкора и
 правится; текст на сайте — свой (разбавленный анкор) или текст анкора, вид
@@ -109,6 +112,9 @@ class PlacementForm(DayFieldsForm):
     # «Через кого» на экране: форма из вкладок площадки (адрес с ?site=) —
     # ставит админка. В обычной «Добавить» поля нет, продавец и услуга — полями.
     offer_shown = False
+    # Карточка размещения: его предложение и новая цена того же продавца
+    # (`repeat.offer_switch`) — ставит админка, когда в форме выбор между ними.
+    offer_switch: tuple[SitePrice | None, SitePrice | None] = (None, None)
 
     class Meta:
         model = Placement
@@ -147,6 +153,8 @@ class PlacementForm(DayFieldsForm):
         self.offers: dict[int, SitePrice] = {}
         if self.instance.pk is None and self.offer_shown:
             self._offer_choices()
+        elif self.instance.pk is not None and self.offer_switch[1] is not None:
+            self._switch_choices()
 
     def _offer_choices(self) -> None:
         """Предложения площадки для «Через кого»: рабочая — первой и выбрана заранее."""
@@ -180,12 +188,41 @@ class PlacementForm(DayFieldsForm):
         if working in self.offers:
             field.initial = working
 
+    def _switch_choices(self) -> None:
+        """«Предложение продавца» в карточке: цена размещения или новая того же продавца."""
+        held, current = self.offer_switch
+        assert current is not None
+        working = self.instance.site.price_id
+        choices = []
+        if held is not None:
+            choices.append(
+                (held.pk, _switch_label(held, held.pk == working, "сейчас у размещения"))
+            )
+        choices.append(
+            (current.pk, _switch_label(current, current.pk == working, "новая цена продавца"))
+        )
+        self.offers = {offer.pk: offer for offer in (held, current) if offer is not None}
+        field = self.fields["offer"]
+        assert isinstance(field, forms.TypedChoiceField)
+        field.label = "Предложение продавца"
+        field.help_text = (
+            "План «Экономики» — по выбранной цене, пока нет «Заплачено»."
+            " Другой продавец — полем «Продавец»."
+        )
+        field.choices = choices
+        field.initial = held.pk if held is not None else None
+
     def clean(self) -> dict[str, Any] | None:
         cleaned = super().clean()
         if cleaned is None:
             return None
         if self.instance.pk is None:
             self._clean_new(cleaned)
+        elif self.offers and "offer" in self.changed_data:
+            # Взяли новую цену продавца — по ней строка и план «Экономики».
+            offer = self.offers.get(cleaned.get("offer") or 0)
+            if offer is not None:
+                self.instance.price = offer
         if "anchor_list" in self.data:
             self._clean_anchor_list(cleaned)
         copywriter = cleaned.get("copywriter")
@@ -269,6 +306,12 @@ def _offer_label(price: SitePrice, working: bool, work_eur: int | None, eur: int
     if work_eur is not None and eur is not None and eur < work_eur:
         return f"{text} — ▼ дешевле рабочей на {money(work_eur - eur, 'EUR')}"
     return text
+
+
+def _switch_label(price: SitePrice, working: bool, note: str) -> str:
+    """«Morgan Hugh · публикация · $360 · прайс от 30.10.2026 — новая цена продавца, рабочая»."""
+    marks = f"{note}, рабочая" if working else note
+    return f"{_offer_label(price, False, None, None)} — {marks}"
 
 
 def _currency_choices(

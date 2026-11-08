@@ -13,7 +13,7 @@
   ещё одно — только явно;
 - предложение размещения — его продавец и цена, зафиксированные при заведении:
   смена рабочей цены площадки размещения не трогает, продавца меняют только
-  в карточке размещения.
+  в карточке размещения; там же — новую цену того же продавца.
 
 Статус площадки у продукта ведётся как прежде (`apps.sites.statuses`): на нём
 стоят отчёты, импорт таблицы и фильтры.
@@ -197,7 +197,24 @@ def current_offer(
         .values_list("pk", flat=True)
         .first()
     )
-    return SitePrice.objects.filter(pk=found).first() if found is not None else None
+    if found is None:
+        return None
+    return SitePrice.objects.select_related("seller").filter(pk=found).first()
+
+
+def offer_switch(placement: Placement) -> tuple[SitePrice | None, SitePrice | None]:
+    """Предложение размещения и новая цена того же продавца на ту же услугу.
+
+    Новая — текущее предложение продавца, если оно не то, что у размещения:
+    продавец сменил сумму или валюту (пользователь 30.10.2026: прайс поправили
+    на доллары, а размещение держит евро). Её можно взять в карточке
+    размещения; нет — None.
+    """
+    held = placement.price or offers_of([placement]).get(placement.pk)
+    current = current_offer(placement.site_id, placement.seller_id, placement.placement_type)
+    if current is not None and held is not None and held.pk == current.pk:
+        current = None
+    return held, current
 
 
 def status_at() -> Coalesce:
