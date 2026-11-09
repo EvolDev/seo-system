@@ -20,3 +20,17 @@ screens/
 
 # Снимки и трассы браузерных проверок (make e2e)
 test-results/
+
+# Данные — не код: в образ (и на сервер вместе с ним) не попадают. Дампы базы,
+# загруженные файлы, выгрузки и прайсы с ценами и контактами (ADR-041, ADR-081).
+backups/
+uploads/
+my_source/
+import_examples/
+import-reports/
+useful-things/
+source/
+*.xlsx
+*.csv
+.agents/
+staticfiles/

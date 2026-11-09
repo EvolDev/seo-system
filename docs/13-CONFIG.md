@@ -35,6 +35,16 @@ POSTGRES_DB=seo
 POSTGRES_USER=seo
 POSTGRES_PASSWORD=
 
+# --- Вход и сессия --- ADR-081
+SESSION_DAYS=14                  # не заходил столько дней — входит заново
+LOGIN_FAIL_LIMIT=10              # столько неверных паролей подряд — вход закрыт
+LOGIN_FAIL_MINUTES=15            # на столько минут после последней неудачи
+
+# --- Прод: адрес и веб-сервер --- compose.prod.yaml, ADR-081; локально не нужны
+SITE_ADDRESS=                    # домен системы для Caddy: seo.example.com
+SECURE_HSTS_SECONDS=0            # «только HTTPS» в браузере; после проверки HTTPS — 31536000
+WEB_WORKERS=3                    # процессов gunicorn
+
 # --- Очереди ---
 REDIS_URL=redis://redis:6379/0
 CELERY_TASK_ALWAYS_EAGER=false   # true — задачи сразу, без воркера; тесты включают сами
@@ -84,6 +94,16 @@ PRIMARY_PRODUCT_DOMAIN=convertio.co
 
 **Правила:**
 - в репозитории только `.env.example` с пустыми значениями;
+- `SESSION_DAYS`, `LOGIN_FAIL_LIMIT`, `LOGIN_FAIL_MINUTES` — вход (ADR-081):
+  сессия кончается через столько дней без захода; столько неверных паролей
+  подряд — вход для логина с этого адреса закрыт на столько минут после
+  последней неудачи;
+- `SITE_ADDRESS`, `SECURE_HSTS_SECONDS`, `WEB_WORKERS` — только прод
+  (`compose.prod.yaml`): домен для Caddy, срок «только HTTPS» в браузере
+  (0, пока HTTPS на сервере не проверен; запомненное браузером не отменить),
+  число процессов gunicorn. На тестовой копии прода ещё `ENV_FILE`,
+  `HTTPS_BIND`, `HTTP_BIND`, `APP_VERSION` — подстановки compose, не настройки
+  приложения;
 - `AHREFS_ENABLED=false` по умолчанию — чтобы случайно не сжечь юниты
   на этапе разработки;
 - `COLLABORATOR_API_KEY` — личный токен пользователя Collaborator: все методы

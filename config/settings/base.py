@@ -7,6 +7,7 @@
 """
 
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from celery.schedules import crontab
@@ -58,6 +59,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Сессия — 14 дней от последнего захода, а не от входа (ADR-081).
+    "config.session_refresh.SessionRefreshMiddleware",
     # Кто и откуда меняет статусы — для истории статусов (ADR-049). После
     # AuthenticationMiddleware: ему нужен request.user.
     "config.changes.ChangeContextMiddleware",
@@ -96,7 +99,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
+DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "HOST": env_str("POSTGRES_HOST"),
@@ -125,6 +128,18 @@ LANGUAGES = [("ru", "Русский")]
 TIME_ZONE = env_str("TIME_ZONE", default="Europe/Moscow")
 USE_I18N = True
 USE_TZ = True
+
+# --- Вход и сессия (ADR-081) ---
+# Не заходил столько дней — входит заново; заходит регулярно — не выкидывает
+# (config/session_refresh.py).
+SESSION_COOKIE_AGE = env_int("SESSION_DAYS", default=14) * 24 * 60 * 60
+# Столько неверных паролей подряд — вход для логина с этого адреса закрыт на
+# столько минут после последней неудачи (config/login_limit.py).
+LOGIN_FAIL_LIMIT = env_int("LOGIN_FAIL_LIMIT", default=10)
+LOGIN_FAIL_MINUTES = env_int("LOGIN_FAIL_MINUTES", default=15)
+# Перед приложением — прокси, который ставит X-Forwarded-For (Caddy в проде).
+# Локально прокси нет, и заголовку из запроса верить нельзя.
+BEHIND_PROXY = False
 
 STATIC_URL = "static/"
 # Статика уровня проекта: расцветки админки (ADR-038).

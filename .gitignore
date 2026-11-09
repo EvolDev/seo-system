@@ -22,6 +22,8 @@ test-results/
 
 # Сборка пользовательской документации (mkdocs build)
 /site/
+# Статика прода — collectstatic при сборке образа (E10-01)
+/staticfiles/
 
 # Скриншоты для агента
 screens/

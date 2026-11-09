@@ -1,4 +1,5 @@
-FROM python:3.12-slim AS base
+# Общее у всех целей: Python, uv, пользователь, файлы зависимостей.
+FROM python:3.12-slim AS runtime
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /uvx /bin/
 
@@ -24,8 +25,11 @@ ARG APP_GID=1000
 RUN (getent group "$APP_GID" || groupadd --gid "$APP_GID" app) \
     && (getent passwd "$APP_UID" || useradd --uid "$APP_UID" --gid "$APP_GID" --no-create-home app)
 
-# Сначала только зависимости: слой кэшируется, пока не менялся uv.lock.
 COPY pyproject.toml uv.lock .python-version ./
+
+# Локальная версия, проверки и документация: все группы зависимостей. Сначала
+# только зависимости: слой кэшируется, пока не менялся uv.lock.
+FROM runtime AS base
 RUN uv sync --frozen --no-install-project
 
 # Браузерные проверки экранов — make e2e (E9-09, ADR-046): тот же образ плюс
@@ -52,6 +56,29 @@ RUN mkdocs build --strict --site-dir /opt/user-docs \
     && python tools/check_user_docs.py \
         --screens-out /opt/user-docs/screens.json \
         --whatsnew-out /opt/user-docs/whatsnew.json
+
+# Прод (E10-01, ADR-081): без групп dev и docs, код и статика — в образе,
+# gunicorn вместо сервера разработки. Собирает compose.prod.yaml. Работает не
+# от root: папки загрузок и расписания beat заведены на пользователя, и
+# пустые тома Docker при первом подключении получают их владельца.
+FROM runtime AS prod
+# ARG живёт в своей стадии: без повтора здесь номера пусты, и USER ниже
+# оставил бы root.
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN uv sync --frozen --no-install-project --no-default-groups
+COPY --from=docs /opt/user-docs /opt/user-docs
+COPY . .
+# Настройкам при импорте нужны переменные окружения — для сборки статики
+# хватает заглушек: к базе collectstatic не обращается.
+RUN DJANGO_ENV=prod DJANGO_SECRET_KEY=build ALLOWED_HOSTS=build REDIS_URL=redis://build \
+        POSTGRES_HOST=build POSTGRES_DB=build POSTGRES_USER=build POSTGRES_PASSWORD=build \
+        python manage.py collectstatic --noinput \
+    && mkdir -p /app/uploads /var/lib/celery \
+    && chown "$APP_UID:$APP_GID" /app/uploads /var/lib/celery
+USER $APP_UID:$APP_GID
+EXPOSE 8000
+CMD ["gunicorn", "config.wsgi:application", "-c", "config/gunicorn.py"]
 
 # Приложение — последняя цель, её собирает `docker build` без --target.
 FROM base AS app

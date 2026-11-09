@@ -14,11 +14,14 @@ from typing import Any
 
 from django.contrib import admin
 from django.contrib.admin.apps import AdminConfig
+from django.contrib.auth.signals import user_logged_in
 from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, URLResolver, path, reverse
 from django.views.decorators.http import require_http_methods, require_POST
+
+from config.session_refresh import mark_login
 
 # «Экономика» — свой экран, не таблица: пункт меню собирается в get_app_list.
 ECONOMICS = ("placements", "economics")
@@ -84,6 +87,15 @@ class SeoAdminSite(admin.AdminSite):
     index_title = "Главная"
     # «Открыть сайт» в шапке: публичного сайта у системы нет.
     site_url = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Неверные пароли подряд закрывают вход на время (ADR-081). Импорт здесь:
+        # модуль сайта грузится вместе с приложениями, до моделей, а форма входа
+        # тянет модель пользователя.
+        from config.login_limit import LimitedLoginForm
+
+        self.login_form = LimitedLoginForm
 
     def get_app_list(
         self, request: HttpRequest, app_label: str | None = None
@@ -330,3 +342,7 @@ def _home_numbers() -> dict[str, Any]:
 
 class SeoAdminConfig(AdminConfig):
     default_site = "config.admin_site.SeoAdminSite"
+
+    def ready(self) -> None:
+        super().ready()
+        user_logged_in.connect(mark_login, dispatch_uid="seo-session-refresh")

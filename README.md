@@ -117,6 +117,34 @@ Analysis и Referring domains) и файлы размещений загружа
 `DJANGO_ENV` приложение не стартует. Всё, что различается между машинами,
 берётся из переменных окружения.
 
+### Прод и тестовая копия прода
+
+Прод — `compose.prod.yaml` (E10-01, ADR-081): образ цели `prod` (код и
+статика внутри, без dev-зависимостей), gunicorn за Caddy с HTTPS, данные —
+в именованных томах, `restart: unless-stopped`, лимиты памяти, журналы
+контейнеров по 5 × 20 МБ. Переменные — `.env` сервера; кроме общих нужны
+`DJANGO_ENV=prod`, `SITE_ADDRESS` (домен), `ALLOWED_HOSTS` (тот же домен).
+
+```bash
+docker compose -f compose.prod.yaml up -d --build    # поднять всё
+docker compose -f compose.prod.yaml run --rm app python manage.py migrate
+curl https://<домен>/healthz                         # «ok» — сайт и база живы
+```
+
+**Тестовая копия прода в локальной версии** — тот же файл со своим именем
+проекта и своим файлом окружения (`ENV_FILE`, `SITE_ADDRESS=localhost`,
+`HTTPS_BIND=127.0.0.1:8003`): `https://localhost:8003`, сертификат от
+внутреннего центра Caddy — браузер предупредит, что не доверяет ему. Рабочую
+базу локальной версии копия только читает (`pg_dump` → `pg_restore` в свою
+базу). Куки сессии у прода — `seo_session`, поэтому вход на 8003 не выкидывает
+из 8000.
+
+```bash
+C="docker compose -p seo-rehearsal -f compose.prod.yaml --env-file <путь>/rehearsal.env"
+$C up -d --no-build      # образ: docker build --target prod -t seo-system-prod:rehearsal .
+$C down -v               # убрать копию вместе с её томами
+```
+
 ### Логи и ошибки
 
 Три слоя, не смешиваются (ADR-011):

@@ -35,9 +35,41 @@ class TestProd:
         prod = _load_prod()
         assert prod.SESSION_COOKIE_SECURE is True
         assert prod.CSRF_COOKIE_SECURE is True
+        # Не «sessionid» локальной версии: куки localhost общие у портов.
+        assert prod.SESSION_COOKIE_NAME == "seo_session"
 
     def test_logs_as_json(self) -> None:
         assert _load_prod().LOGGING["handlers"]["stdout"]["formatter"] == "json"
+
+    def test_behind_caddy(self) -> None:
+        """HTTPS снимает Caddy: схема запроса и адрес человека — из его заголовков."""
+        prod = _load_prod()
+        assert prod.SECURE_PROXY_SSL_HEADER == ("HTTP_X_FORWARDED_PROTO", "https")
+        assert prod.BEHIND_PROXY is True
+        # Проверка контейнера ходит по 127.0.0.1 — без него контейнер «болен».
+        assert {"127.0.0.1", "localhost"} <= set(prod.ALLOWED_HOSTS)
+
+    def test_hsts_off_until_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert _load_prod().SECURE_HSTS_SECONDS == 0
+        monkeypatch.setenv("SECURE_HSTS_SECONDS", "31536000")
+        assert _load_prod().SECURE_HSTS_SECONDS == 31536000
+
+    def test_static_from_image(self) -> None:
+        prod = _load_prod()
+        assert prod.MIDDLEWARE[:2] == [
+            "django.middleware.security.SecurityMiddleware",
+            "whitenoise.middleware.WhiteNoiseMiddleware",
+        ]
+        # Без отпечатка в именах: переходы без перезагрузки узнают скрипты по пути.
+        backend = prod.STORAGES["staticfiles"]["BACKEND"]
+        assert backend == "whitenoise.storage.CompressedStaticFilesStorage"
+        # Локальная версия без WhiteNoise: статику отдаёт сервер разработки.
+        assert "whitenoise.middleware.WhiteNoiseMiddleware" not in base.MIDDLEWARE
+
+    def test_database_connection_reused(self) -> None:
+        database = _load_prod().DATABASES["default"]
+        assert database["CONN_MAX_AGE"] == 60
+        assert database["CONN_HEALTH_CHECKS"] is True
 
 
 def test_local_logs_readable() -> None:

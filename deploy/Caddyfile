@@ -1,0 +1,29 @@
+# Caddy перед приложением (E10-01, ADR-081): HTTPS с сертификатом Let's Encrypt,
+# который он получает и продлевает сам, сжатие, журнал запросов в stdout.
+# SITE_ADDRESS — домен системы (seo.example.com). Для «localhost» на тестовой
+# копии сертификат выпускает внутренний центр Caddy: браузер предупредит, что
+# не доверяет ему, — на сервере с доменом предупреждения нет.
+
+{
+	# HTTP/3 идёт по UDP — этот порт не открыт; без него браузер не пробует
+	# напрасно другой протокол.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Файлы каталога Collaborator и прайсов — до 100 МБ.
+	request_body {
+		max_size 100MB
+	}
+
+	reverse_proxy app:8000
+
+	log {
+		output stdout
+		format json
+	}
+}

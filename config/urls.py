@@ -2,10 +2,12 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, include, path
 
-from config import user_docs
+from config import health, user_docs
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path("admin/", admin.site.urls),
+    # Жив ли сайт — для проверки контейнера и выкладки (E10-01).
+    path("healthz", health.healthz, name="healthz"),
     # Раздел «Документация» — собранный сайт MkDocs, только для вошедших (E9-07).
     path("docs/", user_docs.page, name="user_docs"),
     path("docs/<path:path>", user_docs.page, name="user_docs_page"),

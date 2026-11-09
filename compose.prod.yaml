@@ -1,0 +1,151 @@
+# Прод (E10-01, ADR-081): одна команда поднимает всё —
+#   docker compose -f compose.prod.yaml up -d --build
+# Отличия от локального compose.yaml: код и статика — в образе (цель prod), а не
+# с диска; gunicorn за Caddy с HTTPS; данные — только в именованных томах;
+# после перезагрузки сервера Docker поднимает всё сам; лимиты памяти; журналы
+# контейнеров не растут без конца. Тестовая копия в локальной версии — тот же
+# файл со своим именем проекта и файлом окружения (README, «Прод»).
+
+# Общее у приложения, воркера и beat: один образ, те же переменные.
+x-app: &app
+  build:
+    context: .
+    target: prod
+  image: seo-system-prod:${APP_VERSION:-latest}
+  # Файл окружения сервера; тестовая копия передаёт свой.
+  env_file: ${ENV_FILE:-.env}
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *app
+    # Загруженные файлы продавцов и каталога (ADR-044): их разбирает воркер.
+    volumes:
+      - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  # Выполняет задачи очереди (ADR-039). Начатые задачи дорабатывают при
+  # остановке; не успели — выполнятся снова (acks_late).
+  worker:
+    <<: *app
+    command: celery -A config worker --concurrency=2
+    volumes:
+      - uploads:/app/uploads
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Будильник: ровно один, иначе задачи по расписанию уходили бы дважды.
+  # Состояние — на томе: пропущенный запуск догоняется и после пересоздания.
+  beat:
+    <<: *app
+    command: celery -A config beat --schedule=/var/lib/celery/beat-schedule
+    volumes:
+      - beat:/var/lib/celery
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?задайте POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?задайте POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}
+    # Память под сервер с 8 ГБ: кеш базы — 1 ГБ, остальное читает с диска ОС.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=4GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+    # Параллельные запросы держат данные в /dev/shm; штатных 64 МБ Docker мало.
+    shm_size: 1g
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+
+  # Очередь и кеш. Журнал AOF на томе: очередь переживает перезапуск.
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    logging: *logging
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # HTTPS и вход снаружи: сертификат получает и продлевает сам (deploy/Caddyfile).
+  # Наружу открыт только он; приложение, база и Redis — во внутренней сети.
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "${HTTP_BIND:-80}:80"
+      - "${HTTPS_BIND:-443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?задайте SITE_ADDRESS — домен системы}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  beat:
+  caddy_data:
+  caddy_config:
