@@ -45,6 +45,8 @@ SETTING_KEYS: dict[str, str] = {
     "EDIT_LOCK": "Блокировка правки площадки: idle_minutes",
     # Сверка с Collaborator — 13-CONFIG.md §2.8
     "COLLABORATOR_PROJECTS": "Проекты Collaborator продукта: номера проектов",
+    # Экраны — 13-CONFIG.md §2.9
+    "SITE_LIST_FILTER": "Фильтр «Список» в «Площадках»: recent",
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
@@ -232,6 +234,27 @@ class EditLockTimeout:
         return cls(number)
 
 
+@dataclass(frozen=True)
+class SiteListFilterSize:
+    """Сколько последних рабочих списков в фильтре «Список» «Площадок» — `SITE_LIST_FILTER`.
+
+    Каждая загрузка заводит список, и выпадающий список фильтра рос бы без
+    конца, а нужны обычно один-два последних. Остальные — в «Справочники →
+    Рабочие списки».
+    """
+
+    recent: int
+
+    @classmethod
+    def parse(cls, value: Any) -> "SiteListFilterSize":
+        if not isinstance(value, dict) or set(value) != {"recent"}:
+            raise ValueError("Нужен объект ровно с полем recent.")
+        number = value["recent"]
+        if not isinstance(number, int) or isinstance(number, bool) or not 1 <= number <= 500:
+            raise ValueError("recent — целое число списков, от 1 до 500.")
+        return cls(number)
+
+
 def parse_projects(value: Any) -> list[int]:
     """Номера проектов Collaborator — `COLLABORATOR_PROJECTS` продукта (ADR-080).
 
@@ -260,6 +283,7 @@ SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "MONTHLY_BUDGET": MonthlyBudget.parse,
     "EDIT_LOCK": EditLockTimeout.parse,
     "COLLABORATOR_PROJECTS": parse_projects,
+    "SITE_LIST_FILTER": SiteListFilterSize.parse,
 }
 
 
@@ -340,6 +364,19 @@ def edit_lock_minutes() -> int:
         return EditLockTimeout.parse(value).idle_minutes
     except ValueError as error:
         raise ImproperlyConfigured(f"EDIT_LOCK: {error}") from error
+
+
+def site_list_filter_recent() -> int | None:
+    """Сколько последних списков в фильтре «Список»; нет настройки — все, как было до неё."""
+    value = get_setting("SITE_LIST_FILTER", None)
+    if value is None:
+        # Общее значение заводит миграция content.0011. Без него экран работает,
+        # как раньше: главный рабочий экран из-за настройки не падает.
+        return None
+    try:
+        return SiteListFilterSize.parse(value).recent
+    except ValueError as error:
+        raise ImproperlyConfigured(f"SITE_LIST_FILTER: {error}") from error
 
 
 def gray_zones() -> GrayZones | None:

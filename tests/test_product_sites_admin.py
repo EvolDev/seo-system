@@ -18,7 +18,7 @@ from pytest_django import DjangoAssertNumQueries
 from apps.content.models import DomainSetting
 from apps.placements.models import Placement, PlacementStatus
 from apps.sites import latest
-from apps.sites.admin import SellerFilter, _euros
+from apps.sites.admin import SellerFilter, SiteListFilter, _euros
 from apps.sites.models import (
     AuditAuthor,
     AuditVerdict,
@@ -80,6 +80,15 @@ def _sellers(client: Client, **params: str) -> list[str]:
     return [str(choice["display"]) for choice in spec.choices(changelist)]
 
 
+def _list_choices(client: Client, **params: str) -> list[tuple[str, str]]:
+    """Пункты фильтра «Список»: подпись и адрес, который откроет выбор."""
+    response = client.get(URL, params)
+    assert response.status_code == 200
+    changelist: ChangeList = response.context["cl"]
+    spec = next(s for s in changelist.filter_specs if isinstance(s, SiteListFilter))
+    return [(str(c["display"]), str(c["query_string"])) for c in spec.choices(changelist)]
+
+
 def _status(site: Site, product: Product, status: SiteStatus) -> None:
     ProductSite.objects.filter(site=site, product=product).update(status=status)
 
@@ -127,6 +136,53 @@ class TestProductAndList:
         assert _domains(admin_client) == {"old.com"}
         assert _domains(admin_client, list="all") == everything
         assert _domains(admin_client) == everything
+
+    def test_filter_shows_recent_lists_and_link_to_older(
+        self, admin_client: Client, convertio: Product
+    ) -> None:
+        """В выпадающем — последние списки по настройке, остальные — «Старые списки…»."""
+        DomainSetting.objects.filter(key="SITE_LIST_FILTER").update(value={"recent": 2})
+        for name in ("Июль", "Август", "Сентябрь", "Октябрь"):
+            SiteList.objects.create(name=name)
+        choices = _list_choices(admin_client, list="all")
+        assert [display for display, _ in choices] == [
+            "Октябрь",
+            "Сентябрь",
+            "Все площадки",
+            "Старые списки…",
+        ]
+        assert choices[-1][1] == reverse("admin:sites_sitelist_changelist")
+
+    def test_chosen_old_list_stays_in_filter(
+        self, admin_client: Client, convertio: Product
+    ) -> None:
+        DomainSetting.objects.filter(key="SITE_LIST_FILTER").update(value={"recent": 1})
+        old = SiteList.objects.create(name="Август")
+        SiteList.objects.create(name="Сентябрь")
+        SiteList.objects.create(name="Октябрь")
+        SiteListItem.objects.create(site_list=old, site=_site("old.com"))
+        _site("new.com")
+        assert _domains(admin_client, list=str(old.pk)) == {"old.com"}
+        expected = ["Октябрь", "Август", "Все площадки", "Старые списки…"]
+        assert [display for display, _ in _list_choices(admin_client, list=str(old.pk))] == (
+            expected
+        )
+        # Запомненный старый список тоже не теряется: экран открывается с ним.
+        assert [display for display, _ in _list_choices(admin_client)] == expected
+        assert _domains(admin_client) == {"old.com"}
+
+    def test_without_setting_filter_shows_all_lists(
+        self, admin_client: Client, convertio: Product
+    ) -> None:
+        DomainSetting.objects.filter(key="SITE_LIST_FILTER").delete()
+        for name in ("Август", "Сентябрь", "Октябрь"):
+            SiteList.objects.create(name=name)
+        assert [display for display, _ in _list_choices(admin_client, list="all")] == [
+            "Октябрь",
+            "Сентябрь",
+            "Август",
+            "Все площадки",
+        ]
 
     def test_without_lists_shows_all(self, admin_client: Client, convertio: Product) -> None:
         _site("a.com")
@@ -373,7 +429,7 @@ def test_query_count(
     offer: OfferFactory,
     django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
-    """Критерий приёмки: страница — не больше 17 запросов при любом числе строк.
+    """Критерий приёмки: страница — не больше 18 запросов при любом числе строк.
 
     С E1-07 — ещё и с продавцами, предложениями, заметками и их фильтрами.
     С E1-10 — с выбранным регионом и его «от/до»: список регионов — 11-й
@@ -384,7 +440,8 @@ def test_query_count(
     продавцов. С E1-19 — размещения площадок страницы (колонка «другие продукты»
     и дверь в карточку): 15-й, один на страницу. С ADR-073 — статус фишками:
     размещения рабочего продукта с датами статусов — 16-й, решения по
-    площадкам с датами — 17-й.
+    площадкам с датами — 17-й. С настройкой `SITE_LIST_FILTER` — сколько
+    последних списков в фильтре «Список»: 18-й.
     """
     site_list = SiteList.objects.create(name="Сентябрь")
     seller = Seller.objects.create(name="LinkHub Media", currency="USD")
@@ -417,7 +474,7 @@ def test_query_count(
     # Тема Admin Interface при первом открытии заводит свою строку и кладёт её
     # в кеш; в работающем приложении она там уже есть, считаем без неё.
     admin_client.get(URL)
-    with django_assert_max_num_queries(17):
+    with django_assert_max_num_queries(18):
         response = admin_client.get(URL, params)
     assert response.status_code == 200
     assert len(response.context["cl"].result_list) == 50

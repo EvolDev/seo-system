@@ -41,7 +41,7 @@ from apps.content.admin import (
     ProductOtherSettingsInline,
     ProductSettingsForm,
 )
-from apps.content.domain_settings import gray_zones
+from apps.content.domain_settings import gray_zones, site_list_filter_recent
 from apps.content.models import DomainSetting
 from apps.placements import invoices, other_products, repeat, status_chips
 from apps.placements.models import Invoice, InvoiceStatus, Placement
@@ -2013,15 +2013,28 @@ class ProductFrameFilter(FrameProductFilter):
 class SiteListFilter(Remembering, admin.SimpleListFilter):
     """Рабочий список (ADR-033). Без выбора — тот, что выбирали в прошлый раз,
     а не выбирали ни разу — все площадки (E1-19).
+
+    В выпадающем — последние списки по настройке `SITE_LIST_FILTER`: каждая
+    загрузка заводит список, и он рос бы без конца. Выбранный старый список
+    остаётся в выпадающем, остальные — пунктом «Старые списки…» на экране
+    «Рабочие списки».
     """
 
     title = "список"
     parameter_name = "list"
     ALL = "all"
+    older_url: str | None = None
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
-        lists = SiteList.objects.order_by("-created_at", "-pk").values_list("pk", "name")
-        return [*((str(pk), name) for pk, name in lists), (self.ALL, "Все площадки")]
+        # Списков — десятки за месяц: все одним запросом, отбор — здесь же.
+        lists = list(SiteList.objects.order_by("-created_at", "-pk").values_list("pk", "name"))
+        recent = site_list_filter_recent()
+        shown = lists if recent is None else lists[:recent]
+        if len(shown) < len(lists):
+            chosen = self.last_choice()
+            shown += [item for item in lists[len(shown) :] if str(item[0]) == chosen]
+            self.older_url = reverse("admin:sites_sitelist_changelist")
+        return [*((str(pk), name) for pk, name in shown), (self.ALL, "Все площадки")]
 
     def value(self) -> str:
         value = self.last_choice()
@@ -2048,6 +2061,9 @@ class SiteListFilter(Remembering, admin.SimpleListFilter):
         choices = super().choices(changelist)
         next(choices)
         yield from choices
+        if self.older_url is not None:
+            # Не фильтр, а переход: выпадающий открывает адрес пункта (soft-nav.js).
+            yield {"selected": False, "query_string": self.older_url, "display": "Старые списки…"}
 
 
 class WorkedFilter(admin.SimpleListFilter):

@@ -6,6 +6,7 @@ import pytest
 from playwright.sync_api import Page, expect
 from pytest_django.live_server_helper import LiveServer
 
+from apps.content.models import DomainSetting
 from apps.placements.models import Placement
 from apps.sites.models import (
     Product,
@@ -345,6 +346,23 @@ def test_sites_filters_without_reload(
         page.evaluate("history.back()")
     assert "p=2" not in page.url
     at(page, 300, slack=48)
+    assert same_document(page)
+
+
+def test_older_lists_open_reference_screen(admin_page: Page, live_server: LiveServer) -> None:
+    """«Старые списки…» в фильтре «Список» — переход на «Рабочие списки» без перезагрузки."""
+    DomainSetting.objects.filter(key="SITE_LIST_FILTER").update(value={"recent": 1})
+    for name in ("Август", "Сентябрь"):
+        SiteList.objects.create(name=name)
+    page = admin_page
+    page.goto(f"{live_server.url}{SITES}")
+    mark(page)
+    dropdown = page.locator(".list-filter-dropdown").filter(has_text="список").locator("select")
+    expect(dropdown.locator("option")).to_have_text(["Сентябрь", "Все площадки", "Старые списки…"])
+    with soft_load(page):
+        dropdown.select_option(label="Старые списки…")
+    assert page.url.endswith("/admin/sites/sitelist/")
+    expect(page.locator("#result_list")).to_contain_text("Август")
     assert same_document(page)
 
 

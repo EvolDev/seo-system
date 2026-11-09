@@ -16,6 +16,7 @@ from apps.content.domain_settings import (
     indexation_schedule,
     offer_recheck,
     set_product_setting,
+    site_list_filter_recent,
     upload_price_cap,
     validate_setting,
 )
@@ -261,3 +262,28 @@ class TestGraySettings:
     def test_without_zones_zone_is_not_counted(self) -> None:
         DomainSetting.objects.filter(key="GRAY_ZONES").delete()
         assert gray_zones() is None
+
+
+class TestSiteListFilterSetting:
+    """Сколько последних списков в фильтре «Список» — SITE_LIST_FILTER (09.11.2026)."""
+
+    def test_general_value_comes_from_migration(self) -> None:
+        assert site_list_filter_recent() == 10
+
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            (10, "ровно с полем"),
+            ({"recent": 10, "older": 1}, "ровно с полем"),
+            ({"recent": "10"}, "recent"),
+            ({"recent": 0}, "recent"),
+            ({"recent": True}, "recent"),
+        ],
+    )
+    def test_wrong_value_is_rejected(self, value: object, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            validate_setting("SITE_LIST_FILTER", value)
+
+    def test_without_setting_all_lists_are_shown(self) -> None:
+        DomainSetting.objects.filter(key="SITE_LIST_FILTER").delete()
+        assert site_list_filter_recent() is None
