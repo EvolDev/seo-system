@@ -5,6 +5,7 @@ import datetime as dt
 import io
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from openpyxl import load_workbook
@@ -27,6 +28,24 @@ def placements() -> None:
             product=product,
             price_paid_cents=10000 + number,
         )
+
+
+def _boxes(page: Page) -> tuple[Any, Any]:
+    """Ручка первой строки и четвёртая строка списка колонок — с размерами.
+
+    Ответ предпросмотра приходит с сервера и перерисовывает строки
+    (`renderColumns`): в этот миг у строки нет размеров. С записью трассы
+    (`make e2e`) браузер медленнее, и разовый замер падал примерно раз из
+    четырёх (09.11.2026) — ждём, пока размеры есть у обеих.
+    """
+    rows = page.locator("#columns tr")
+    for _ in range(50):
+        handle = rows.first.locator(".drag-handle").bounding_box()
+        target = rows.nth(3).bounding_box()
+        if handle is not None and target is not None:
+            return handle, target
+        page.wait_for_timeout(100)
+    raise AssertionError("строки списка колонок так и не получили размеров")
 
 
 def test_constructor_profile_drag_and_files(
@@ -52,9 +71,7 @@ def test_constructor_profile_drag_and_files(
     page.locator("#expand-columns").click()
     expect(page.locator("#columns-dialog")).to_be_visible()
     before = page.locator("#columns tr").evaluate_all("rs=>rs.map(r=>r.dataset.id)")
-    handle = page.locator("#columns tr").first.locator(".drag-handle").bounding_box()
-    target = page.locator("#columns tr").nth(3).bounding_box()
-    assert handle is not None and target is not None
+    handle, target = _boxes(page)
     page.mouse.move(handle["x"] + 8, handle["y"] + 8)
     page.mouse.down()
     page.mouse.move(handle["x"] + 8, target["y"] + target["height"] * 0.8, steps=18)
