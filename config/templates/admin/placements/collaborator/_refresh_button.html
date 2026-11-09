@@ -1,0 +1,8 @@
+{% comment %}
+«Обновить из Collaborator» (E11-01): все сделки из API в снимок — задачей очереди;
+ход и итог — окном внизу справа (seo/collaborator.js). Только кнопкой, по
+расписанию не запускается. Без ключа API сервер отвечает, чего не хватает.
+{% endcomment %}
+<li class="seo-collab-refresh"><button type="button" class="seo-btn" data-collab-refresh
+  data-url="{% url 'admin:collaborator_refresh' %}" data-status-url="{% url 'admin:collaborator_refresh_status' %}"
+  title="Забрать сделки через API Collaborator — только чтение">Обновить из Collaborator</button></li>

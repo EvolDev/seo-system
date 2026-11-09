@@ -1,0 +1,32 @@
+{% comment %}
+Блок «Collaborator» в панели размещения (E11-01): сделка из снимка — номер,
+статус, Total и его части, анонс, статья, анкоры против ссылок. «Заполнить из
+Collaborator» ставит значения в поля формы, но не сохраняет: дальше человек
+жмёт «Размещено» → «Сохранить» (seo/collaborator.js).
+{% endcomment %}
+<div class="seo-collab-block" data-collab-block>
+  <div class="seo-collab-line">
+    Заявка <b>{{ deal.id }}</b> · <span class="seo-chip">{{ deal.status }}</span>
+    {% if fetched %}<span class="seo-sub">забрали {{ fetched }}</span>{% endif %}
+  </div>
+  <div class="seo-collab-line">
+    Total <b>{{ total|default:"—" }}</b>{% if parts %} = {% for name, value in parts %}{{ value }} <span class="seo-sub">{{ name }}</span>{% if not forloop.last %} + {% endif %}{% endfor %}{% endif %}
+  </div>
+  <div class="seo-collab-line">Анонс: {% if announce %}платный, <b>{{ announce }}</b>{% else %}платного нет <span class="seo-sub">(бесплатный в API не виден)</span>{% endif %}</div>
+  <div class="seo-collab-line">Статья: {% if deal.article_url %}<a href="{{ deal.article_url }}" target="_blank" rel="noopener">{{ deal.article_url }}</a>{% else %}<span class="seo-sub">ещё нет</span>{% endif %}</div>
+  {% if deal.placed_at %}<div class="seo-collab-line seo-sub">Опубликовано на Collaborator: {{ deal.placed_at }} — для справки, дату ставит «Размещено».</div>{% endif %}
+  {% if links %}
+    <div class="seo-collab-line">Анкоры:</div>
+    {% include "admin/placements/collaborator/_links.html" with links=links %}
+  {% endif %}
+  {% if differs %}
+    <ul class="seo-collab-differ-list">
+      {% for item in differs %}<li>✗ <b>{{ item.label }}</b>: в системе {{ item.system }}, на Collaborator {{ item.collaborator }}{% if item.kept %} <span class="seo-sub">— оставлено как в системе</span>{% endif %}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  <div class="seo-collab-line seo-collab-tools">
+    {% if fill %}<button type="button" class="seo-btn seo-btn-small" data-collab-fill-form-panel data-values="{{ fill_json }}">Заполнить из Collaborator</button>{% endif %}
+    <a class="seo-sub" href="{{ screen_url }}">Сверка с Collaborator</a>
+    <span class="seo-sub">· {{ how }}</span>
+  </div>
+</div>

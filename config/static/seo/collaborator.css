@@ -1,0 +1,100 @@
+/* Сверка с Collaborator (E11-01): экран сверки, блок в панели размещения, окно
+   «Обновить из Collaborator» (окна — seo/indexation.css, чипы — seo/offers.css).
+   Цвета — переменные расцветок (admin-palettes.css). */
+
+.seo-collab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+.seo-collab-meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+.seo-collab-summary { font-size: 0.9375rem; margin: 4px 0 10px; }
+.seo-collab-empty { color: var(--body-quiet-color); margin: 12px 0; }
+
+.seo-collab-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+  border-bottom: 1px solid var(--hairline-color, var(--border-color));
+}
+.seo-collab-tabs a,
+.seo-collab-tabs a:link,
+.seo-collab-tabs a:visited {
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: var(--body-quiet-color);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.seo-collab-tabs a b { margin-left: 4px; color: var(--body-fg); }
+.seo-collab-tabs a.is-active {
+  border-color: var(--hairline-color, var(--border-color));
+  background: var(--body-bg);
+  color: var(--body-fg);
+  margin-bottom: -1px;
+}
+/* Без скрипта видны все группы подряд; со скриптом — по вкладке. */
+.seo-collab:not(.has-tabs) .seo-collab-group { margin-top: 24px; }
+.seo-collab-group { padding-top: 10px; }
+.seo-collab-group > .seo-sub { display: block; max-width: 72em; margin: 4px 0 10px; line-height: 1.5; }
+
+.seo-collab-table { width: 100%; border-collapse: collapse; }
+.seo-collab-table th,
+.seo-collab-table td { padding: 8px 10px; vertical-align: top; text-align: left; }
+.seo-collab-table tbody tr { border-top: 1px solid var(--hairline-color, var(--border-color)); }
+.seo-collab-differs tbody.seo-collab-deal { border-top: 2px solid var(--border-color); }
+.seo-collab-differs tbody.seo-collab-deal tr { border-top-style: dashed; }
+.seo-collab-domain { white-space: nowrap; }
+.seo-collab-check { width: 28px; }
+/* Кнопки строки — столбиком справа: таблица не шире экрана и на 1440. */
+.seo-collab-buttons { text-align: right; width: 1%; }
+.seo-collab-buttons .seo-btn { display: flex; width: max-content; margin: 0 0 6px auto; }
+/* Длинные адреса статей и ссылок переносятся, а не растягивают таблицу. */
+.seo-collab-table td { overflow-wrap: anywhere; }
+.seo-collab-table td.seo-collab-domain,
+.seo-collab-table td.seo-collab-what { overflow-wrap: normal; white-space: nowrap; }
+.seo-collab-table .seo-chip {
+  margin: 0 4px 4px 0;
+  border: 1px solid var(--hairline-color, var(--border-color));
+  white-space: normal;
+}
+.seo-collab-actions { display: flex; gap: 12px; align-items: center; margin: 12px 0 4px; }
+
+.seo-collab-links { margin: 0; padding: 0; list-style: none; }
+.seo-collab-links li { margin: 0 0 6px; padding: 0; list-style: none; line-height: 1.45; }
+.seo-collab-links .seo-collab-verdict { font-weight: 600; margin-right: 6px; }
+.seo-collab-links li.is-ok .seo-collab-verdict { color: var(--seo-down, #17803a); }
+.seo-collab-links li.is-bad .seo-collab-verdict { color: var(--seo-up, #c4302b); }
+.seo-collab-pair { display: flex; flex-direction: column; margin-left: 18px; }
+.seo-collab-links .seo-sub { word-break: break-all; }
+
+/* Блок «Collaborator» в панели размещения. */
+.seo-collab-block { line-height: 1.6; }
+.seo-collab-block .seo-collab-line { margin: 0 0 4px; }
+.seo-collab-block a { word-break: break-all; }
+.seo-collab-differ-list { margin: 6px 0; padding-left: 0; }
+.seo-collab-differ-list li { list-style: none; color: var(--seo-up, #c4302b); }
+.seo-collab-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+/* Поле, которое заполнила кнопка, — пока человек не сохранил. */
+.seo-collab-filled { box-shadow: 0 0 0 2px color-mix(in srgb, var(--seo-accent) 45%, transparent); }
+
+/* Ссылка в окне итога «Обновить из Collaborator». */
+.seo-collab-toast-link { display: block; margin-top: 4px; font-weight: 600; }
+
+/* Кнопка над «Размещениями» — в ряду с «Выгрузить ▾». */
+.object-tools li.seo-collab-refresh { margin-right: 6px; }
+
+/* Кнопки-ссылки в строках («Поставить «Отказ»», «Завести размещение») — того же
+   размера, что кнопки рядом: у ссылки своё правило темы сильнее .seo-btn-small. */
+body.admin-interface .seo-collab-table a.seo-btn.seo-btn-small:link,
+body.admin-interface .seo-collab-table a.seo-btn.seo-btn-small:visited {
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+}

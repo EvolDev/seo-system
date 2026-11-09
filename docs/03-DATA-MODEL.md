@@ -354,7 +354,7 @@ Ahrefs Batch Analysis под страну, позже — Ahrefs API (E2-07); US
 | Поле | Тип | Описание |
 |---|---|---|
 | id | bigserial PK | |
-| kind | enum | `price_list` — прайс продавца, `collaborator_catalog` — выгрузка каталога (встроенная разметка), `ahrefs_batch` — выгрузка Ahrefs Batch Analysis (ADR-045), `placements` — файл размещений продукта, `ahrefs_refdomains` — выгрузка Ahrefs «Referring domains» (ADR-051) |
+| kind | enum | `price_list` — прайс продавца, `collaborator_catalog` — выгрузка каталога (встроенная разметка), `ahrefs_batch` — выгрузка Ahrefs Batch Analysis (ADR-045), `placements` — файл размещений продукта, `ahrefs_refdomains` — выгрузка Ahrefs «Referring domains» (ADR-051), `anchors` — анкоры продукта (ADR-059), `collaborator` — не файл, а действие экрана сверки с Collaborator: «Заполнить отмеченные» или «Взять из Collaborator» с журналом, чтобы его можно было отменить (ADR-080); продавец — Collaborator, продукт — рабочий, файла нет (`file_path` пуст) |
 | seller_id | FK sellers | обязателен у прайса и каталога (у каталога — Collaborator; CHECK `uploads_seller_check`). У файла размещений — «от кого», если файл от продавца; у выгрузок Ahrefs — пусто |
 | product_id | FK products | у размещений и ссылающихся доменов — обязателен (CHECK `uploads_product_check`): чьи размещения, на кого ссылаются |
 | employee_id | FK auth_user | «от кого» у файла размещений, если файл от сотрудника: подставляется в строки без своей колонки |
@@ -588,6 +588,28 @@ Markdown не считаются, границы абзацев, заголов�
 **`lost_at` пишется один раз** — при первом подтверждении пропажи.
 Повторные проверки его не перезаписывают, вернувшаяся ссылка не
 стирает: площадка её удаляла, на это смотрит стоп `STOP_LINK_REMOVED`.
+
+### `collaborator_deals`
+Сделка Collaborator — снимок из официального API (E11-01, ADR-079). Пишет
+только кнопка «Обновить из Collaborator»: все страницы `deal/list` за одно
+нажатие одной транзакцией, сделки, которой в ответе нет, нет и здесь. По
+снимку работает сверка с размещениями (ADR-080) — без нового запроса к API.
+
+| Поле | Тип | Описание |
+|---|---|---|
+| id | bigserial PK | |
+| deal_id | bigint, unique | номер сделки на Collaborator — он же номер заявки размещения |
+| project_id | bigint | проект Collaborator; продукт — по `COLLABORATOR_PROJECTS` продукта, иначе по названию проекта |
+| status | text | как на Collaborator: Posted, Pending approval, In improvement, In progress, New task, Rejected, Rejected by the owner, Withdrawn |
+| data | jsonb | сделка как её отдал API, без текста нашей статьи (`task.contentHtml`): площадка (`creator`), анкоры, адрес статьи, цены строками «571.64 EUR» — Total и части |
+| kept | jsonb | «Оставить как в системе»: поле сверки → пара значений (в системе, на Collaborator), кто и когда; расхождение не показывается, пока пара та же |
+| fetched_at | timestamptz | когда забрали |
+| created_at | timestamptz | когда сделка впервые попала в снимок |
+
+**Размещение сделки не хранится**: сверка находит его заново при каждом
+показе — по номеру заявки, адресу статьи или единственному размещению
+площадки у Collaborator (ADR-080). Вписали номер заявки руками — сверка видит
+это сразу.
 
 ---
 

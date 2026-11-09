@@ -43,10 +43,18 @@ SETTING_KEYS: dict[str, str] = {
     "MONTHLY_BUDGET": "Бюджет на размещения в месяц, EUR: eur",
     # Совместная работа — 13-CONFIG.md §2.7
     "EDIT_LOCK": "Блокировка правки площадки: idle_minutes",
+    # Сверка с Collaborator — 13-CONFIG.md §2.8
+    "COLLABORATOR_PROJECTS": "Проекты Collaborator продукта: номера проектов",
 }
 
 # Эти настройки есть у каждого продукта — на его странице для них свои поля.
-PRODUCT_KEYS = ("PRICE_REFERENCE", "PROJECT_TOPICS", "TOOL_CATEGORIES", "AUTHORITY_DOMAINS")
+PRODUCT_KEYS = (
+    "PRICE_REFERENCE",
+    "PROJECT_TOPICS",
+    "TOOL_CATEGORIES",
+    "AUTHORITY_DOMAINS",
+    "COLLABORATOR_PROJECTS",
+)
 
 
 @dataclass(frozen=True)
@@ -224,6 +232,23 @@ class EditLockTimeout:
         return cls(number)
 
 
+def parse_projects(value: Any) -> list[int]:
+    """Номера проектов Collaborator — `COLLABORATOR_PROJECTS` продукта (ADR-080).
+
+    Сделка Collaborator принадлежит проекту, проект — продукту. Пусто — продукт
+    узнаёт свой проект по названию: «Convertio» на Collaborator — продукт
+    «Convertio».
+    """
+    if not isinstance(value, list) or not value:
+        raise ValueError("Нужен непустой список номеров проектов.")
+    for number in value:
+        if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
+            raise ValueError("Номер проекта — целое число больше нуля.")
+    if len(set(value)) != len(value):
+        raise ValueError("Номера проектов повторяются.")
+    return list(value)
+
+
 # Настройки с проверкой формы значения: ошибку видно в админке при вводе,
 # а не в упавшей ночью задаче.
 SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
@@ -234,6 +259,7 @@ SETTING_PARSERS: dict[str, Callable[[Any], object]] = {
     "ANCHOR_RECOMMEND": AnchorRecommend.parse,
     "MONTHLY_BUDGET": MonthlyBudget.parse,
     "EDIT_LOCK": EditLockTimeout.parse,
+    "COLLABORATOR_PROJECTS": parse_projects,
 }
 
 
@@ -325,6 +351,24 @@ def gray_zones() -> GrayZones | None:
         return GrayZones.parse(value)
     except ValueError as error:
         raise ImproperlyConfigured(f"GRAY_ZONES: {error}") from error
+
+
+def collaborator_projects() -> dict[int, int]:
+    """Проект Collaborator → продукт: у кого из продуктов он записан (ADR-080).
+
+    Значение, которое не читается, пропускается: его нельзя ввести через
+    админку, а сверка из-за него падать не должна.
+    """
+    result: dict[int, int] = {}
+    rows = DomainSetting.objects.filter(key="COLLABORATOR_PROJECTS", product__isnull=False)
+    for product_id, value in rows.order_by("product_id").values_list("product_id", "value"):
+        try:
+            projects = parse_projects(value)
+        except ValueError:
+            continue
+        for project in projects:
+            result.setdefault(project, product_id)
+    return result
 
 
 def set_product_setting(product_id: int, key: str, value: Any | None) -> None:

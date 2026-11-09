@@ -38,7 +38,7 @@ LIST_FIELDS = {
     "tool_categories": "TOOL_CATEGORIES",
     "authority_domains": "AUTHORITY_DOMAINS",
 }
-PRODUCT_SETTING_FIELDS = (*PRICE_FIELDS, *LIST_FIELDS)
+PRODUCT_SETTING_FIELDS = (*PRICE_FIELDS, *LIST_FIELDS, "collaborator_projects")
 
 
 def _show(value: Any) -> str:
@@ -104,8 +104,22 @@ class ProductSettingsForm(forms.ModelForm):  # type: ignore[type-arg]
         model = Product
         fields = ("name", "domain", "is_active")
 
+    collaborator_projects = forms.CharField(
+        label="Проекты Collaborator",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        required=False,
+        help_text=(
+            "Номера проектов на Collaborator, по одному на строку: сделки этих проектов"
+            " сверяются с размещениями продукта. Пусто — проект с тем же названием,"
+            " что у продукта."
+        ),
+    )
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        projects = self._local("COLLABORATOR_PROJECTS")
+        if isinstance(projects, list):
+            self.fields["collaborator_projects"].initial = "\n".join(str(p) for p in projects)
         local_price = self._local("PRICE_REFERENCE")
         for field, part in PRICE_FIELDS.items():
             if isinstance(local_price, dict):
@@ -144,6 +158,16 @@ class ProductSettingsForm(forms.ModelForm):  # type: ignore[type-arg]
                 domains.append(domain)
         return "\n".join(domains)
 
+    def clean_collaborator_projects(self) -> list[int]:
+        projects: list[int] = []
+        for line in _lines(self.cleaned_data["collaborator_projects"]):
+            number = line.removeprefix("#").strip()
+            if not number.isdigit() or int(number) <= 0:
+                raise forms.ValidationError(f"Номер проекта — целое число: «{line}».")
+            if int(number) not in projects:
+                projects.append(int(number))
+        return projects
+
     def save_settings(self, product: Product) -> None:
         """Записывает настройки продукта; пустое поле удаляет его значение."""
         price = {
@@ -154,6 +178,8 @@ class ProductSettingsForm(forms.ModelForm):  # type: ignore[type-arg]
         set_product_setting(product.pk, "PRICE_REFERENCE", price or None)
         for field, key in LIST_FIELDS.items():
             set_product_setting(product.pk, key, _lines(self.cleaned_data[field]) or None)
+        projects = self.cleaned_data["collaborator_projects"]
+        set_product_setting(product.pk, "COLLABORATOR_PROJECTS", projects or None)
 
 
 def _validate_value(cleaned: dict[str, Any] | None, form: forms.BaseForm) -> dict[str, Any] | None:

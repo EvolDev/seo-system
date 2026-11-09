@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.34 от 08.11.2026 — сделки Collaborator из API и сверка с размещениями (ADR-079, ADR-080)
 -- Версия 1.33 от 28.10.2026 — блокировка правки площадки и размещений (ADR-077)
 -- Версия 1.32 от 24.10.2026 — списки анкоров по регионам (ADR-075)
 -- Версия 1.31 от 24.10.2026 — наборы условий серости по языкам (ADR-074)
@@ -86,7 +87,8 @@ CREATE TYPE placement_type AS ENUM ('guest_post','link_insertion');
 CREATE TYPE review_verdict AS ENUM ('accepted','needs_revision','rejected');
 -- Загрузка файла (ADR-044): что за файл, где он в работе, вкладка разбора.
 CREATE TYPE upload_kind AS ENUM
-    ('price_list','collaborator_catalog','ahrefs_batch','placements','ahrefs_refdomains','anchors');
+    ('price_list','collaborator_catalog','ahrefs_batch','placements','ahrefs_refdomains','anchors',
+     'collaborator');
 CREATE TYPE upload_status AS ENUM ('new','checking','checked','writing','done','failed');
 CREATE TYPE review_group AS ENUM
     ('cheaper','changed','new','rejected','pricier','other_service','same');
@@ -567,6 +569,23 @@ CREATE TABLE invoice_items (
     UNIQUE (invoice_id, placement_id)
 );
 CREATE INDEX idx_invoice_items_placement ON invoice_items(placement_id);
+
+-- Сделка Collaborator — снимок из API (ADR-079): одна строка на сделку, пишет
+-- только «Обновить из Collaborator»; сделки, которой в ответе нет, нет и здесь.
+-- data — сделка как её отдал API, без текста статьи. Размещение сделки не
+-- хранится: сверка находит его при каждом показе (ADR-080). kept — «Оставить как
+-- в системе»: поле → пара значений (в системе, на Collaborator), при которой
+-- расхождение не показывается.
+CREATE TABLE collaborator_deals (
+    id            bigserial PRIMARY KEY,
+    deal_id       bigint NOT NULL UNIQUE,              -- номер сделки = номер заявки
+    project_id    bigint,                              -- проект на Collaborator → продукт
+    status        text NOT NULL,                       -- как на Collaborator: Posted, Pending approval…
+    data          jsonb NOT NULL,
+    kept          jsonb NOT NULL DEFAULT '{}',
+    fetched_at    timestamptz NOT NULL,                -- когда забрали
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE keywords (
     id           bigserial PRIMARY KEY,

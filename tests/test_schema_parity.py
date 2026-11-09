@@ -99,6 +99,8 @@ TABLES = [
     "gray_term_sets",
     # ADR-075
     "anchor_lists",
+    # E11-01, ADR-079
+    "collaborator_deals",
 ]
 
 VIEWS = [

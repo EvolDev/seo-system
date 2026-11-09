@@ -59,7 +59,8 @@ ALLOWED_SUFFIXES = (".xlsx", ".xlsm", ".csv", ".tsv", ".txt")
 class UploadForm(forms.Form):
     kind = forms.ChoiceField(
         label="Что загружаем",
-        choices=UploadKind.choices,
+        # «Сверка с Collaborator» — не файл, её записывает экран сверки (E11-01).
+        choices=[(k, label) for k, label in UploadKind.choices if k != UploadKind.COLLABORATOR],
         initial=UploadKind.PRICE_LIST,
         widget=forms.RadioSelect,
     )
@@ -287,6 +288,8 @@ class UploadAdmin(RecordAdmin):
             )
         if obj.kind == UploadKind.REF_DOMAINS:
             return format_html('Ahrefs<div class="seo-sub">ссылаются на {}</div>', obj.product)
+        if obj.kind == UploadKind.COLLABORATOR:
+            return format_html('Сверка с Collaborator<div class="seo-sub">{}</div>', obj.product)
         if obj.kind == UploadKind.ANCHORS:
             # Регион списка (ADR-075); загрузки до регионов — основной список, США.
             region = obj.country or DEFAULT_REGION
@@ -310,6 +313,7 @@ class UploadAdmin(RecordAdmin):
             UploadKind.REF_DOMAINS: "выгрузка",
             UploadKind.PLACEMENTS: "файл",
             UploadKind.ANCHORS: "файл",
+            UploadKind.COLLABORATOR: "сверка",
         }.get(UploadKind(obj.kind), "цены")
         return format_html('{}<div class="seo-sub">{}</div>', f"{obj.prices_date:%d.%m.%Y}", what)
 
@@ -1138,6 +1142,9 @@ def _step_url(upload: Upload) -> str:
     """
     if upload.status == UploadStatus.DONE and upload.kind == UploadKind.PRICE_LIST:
         return _url("review", upload)
+    if upload.kind == UploadKind.COLLABORATOR:
+        # Не файл, а действие экрана сверки (E11-01): его последние действия.
+        return reverse("admin:collaborator") + "#journal"
     if upload.status == UploadStatus.NEW and service.has_columns_step(upload):
         return _url("columns", upload)
     return _url("summary", upload)

@@ -13,6 +13,10 @@
   (E9-12): итог — в кеш на `URL_RESULT_TTL` под ключом, который выдала
   страница, только чтобы показать окошко. Никуда не пишется; повтор задачи
   перезапишет тот же ключ.
+- `collaborator_refresh` — кнопка «Обновить из Collaborator» (E11-01, ADR-079):
+  все сделки из API в снимок, ход и итог — в кеш под ключом страницы. По
+  расписанию не ставится — только кнопкой. Одна попытка: человек ждёт итог в
+  окне, повтор через минуту ему не поможет — он нажмёт ещё раз.
 
 Как логика проверки устроена — `apps/placements/indexation.py`.
 """
@@ -24,9 +28,12 @@ from celery import shared_task
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.integrations.collaborator import CollaboratorClient, CollaboratorError
 from apps.observability.models import TaskRun, TaskStatus
 from apps.placements import indexation
+from apps.placements.collaborator import deals, service
 from apps.placements.models import Placement
+from apps.sites.models import Product
 from config.queue import QueueTask
 from config.throttle import Throttle
 
@@ -87,3 +94,49 @@ def indexation_alerts() -> int:
         .first()
     )
     return indexation.report_alerts(previous, timezone.now())
+
+
+# Ход и итог «Обновить из Collaborator» ждут страницу столько; пока задача идёт,
+# второе нажатие получает её же ключ (`REFRESH_RUNNING`).
+REFRESH_TTL = 15 * 60
+REFRESH_RUNNING = "collaborator-refresh:running"
+
+
+def refresh_key(key: str) -> str:
+    return f"collaborator-refresh:{key}"
+
+
+@shared_task(base=QueueTask, name="collaborator_refresh", max_retries=0)
+def collaborator_refresh(key: str, product_id: int | None = None) -> dict[str, Any]:
+    def progress(page: int, pages: int) -> None:
+        state = {"state": "running", "page": page, "pages": pages}
+        cache.set(refresh_key(key), state, REFRESH_TTL)
+
+    cache.set(refresh_key(key), {"state": "running", "page": 0, "pages": 0}, REFRESH_TTL)
+    try:
+        refreshed = deals.refresh(CollaboratorClient.from_env(), on_page=progress)
+    except CollaboratorError as error:
+        cache.set(refresh_key(key), {"state": "failed", "error": str(error)}, REFRESH_TTL)
+        raise
+    finally:
+        if cache.get(REFRESH_RUNNING) == key:
+            cache.delete(REFRESH_RUNNING)
+    result: dict[str, Any] = {"state": "done", "deals": refreshed.deals}
+    product = Product.objects.filter(pk=product_id).first() if product_id else None
+    if product is not None:
+        found = service.report(product)
+        result.update(
+            text=found.summary,
+            ready=len(found.groups.ready),
+            fill=len(found.groups.fill),
+            differ=len(found.groups.differ),
+            missing=len(found.groups.missing),
+        )
+    else:
+        result["text"] = f"Забрано сделок: {refreshed.deals}."
+    cache.set(refresh_key(key), result, REFRESH_TTL)
+    logger.info(
+        "сделки Collaborator забраны",
+        extra={"deals": refreshed.deals, "added": refreshed.added, "removed": refreshed.removed},
+    )
+    return {"deals": refreshed.deals, "added": refreshed.added, "removed": refreshed.removed}

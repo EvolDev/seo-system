@@ -138,8 +138,10 @@ def undo(upload: Upload) -> Report:
         # отмена редка и уже тяжела, а полный пересчёт заведомо верен — список
         # затронутых площадок по журналу собирать надёжнее нечем.
         latest.refresh_all()
-        path = Path(settings.UPLOADS_DIR) / locked.file_path
-        transaction.on_commit(lambda: path.unlink(missing_ok=True))
+        # У записи сверки с Collaborator (E11-01) файла нет.
+        if locked.file_path:
+            path = Path(settings.UPLOADS_DIR) / locked.file_path
+            transaction.on_commit(lambda: path.unlink(missing_ok=True))
     db.analyze(tables)
     return report
 

@@ -1,0 +1,219 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Экран «Сверка с Collaborator» (Работа → Сверка с Collaborator, E11-01, ADR-080):
+сделки рабочего продукта из снимка по вкладкам-группам. Действия — кнопками без
+перезагрузки (seo/collaborator.js), после них экран перечитывается. Домен
+открывает размещение панелью справа. Данные — apps/placements/collaborator/views.py.
+{% endcomment %}
+{% load seo_assets %}
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% asset 'seo/offers.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/indexation.css' %}">
+<link rel="stylesheet" href="{% asset 'seo/collaborator.css' %}">
+{% endblock %}
+{% block extrahead %}{{ block.super }}
+<script src="{% asset 'seo/collaborator.js' %}" defer></script>
+{% endblock %}
+{% block bodyclass %}{{ block.super }} seo-collab-page{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Начало</a> › Сверка с Collaborator</div>{% endblock %}
+{% block content %}
+<div class="seo-collab" data-collab data-fill-url="{{ fill_url }}" data-take-url="{{ take_url }}" data-keep-url="{{ keep_url }}">
+  {% csrf_token %}
+  <div class="seo-collab-head">
+    <div class="seo-collab-meta">
+      {% if product %}<span>Продукт <b>{{ product.name }}</b></span>{% endif %}
+      {% if fetched %}<span>сделки забраны <b>{{ fetched }}</b></span>{% endif %}
+      <span class="seo-sub">только чтение: в Collaborator система ничего не пишет</span>
+    </div>
+    <button type="button" class="seo-btn seo-btn-primary" data-collab-refresh
+      data-url="{{ refresh_url }}" data-status-url="{{ status_url }}">Обновить из Collaborator</button>
+  </div>
+
+  {% if not has_key %}
+    <p class="errornote">Нет ключа API Collaborator: впишите COLLABORATOR_API_KEY в .env и перезапустите приложение и очередь. Сверка по уже забранным сделкам работает и так.</p>
+  {% endif %}
+
+  {% if not product %}
+    <p class="seo-collab-empty">Выберите рабочий продукт в шапке — сверка идёт по его сделкам.</p>
+  {% elif not report.fetched_at %}
+    <p class="seo-collab-empty">Сделок ещё нет — нажмите «Обновить из Collaborator».</p>
+  {% else %}
+    <p class="seo-collab-summary">{{ summary }}</p>
+    {% if foreign %}
+      <p class="seo-sub">Сделки проектов без продукта:
+        {% for item in foreign %}«{{ item.name }}» (№{{ item.project }}) — {{ item.count }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+        Номер проекта указывают на <a href="{{ product_url }}">странице продукта</a>.</p>
+    {% endif %}
+
+    <nav class="seo-collab-tabs" role="tablist">
+      <a href="#ready" data-collab-tab="ready" role="tab">Готовы к закрытию <b>{{ ready|length }}</b></a>
+      <a href="#fill" data-collab-tab="fill" role="tab">Можно заполнить <b>{{ fill|length }}</b></a>
+      <a href="#differ" data-collab-tab="differ" role="tab">Расходится <b>{{ differ|length }}</b></a>
+      <a href="#missing" data-collab-tab="missing" role="tab">Нет в системе <b>{{ missing|length }}</b></a>
+      <a href="#kept" data-collab-tab="kept" role="tab">Оставлено как в системе <b>{{ kept|length }}</b></a>
+      <a href="#journal" data-collab-tab="journal" role="tab" title="Последние действия сверки и их отмена">Журнал <b>{{ journal|length }}</b></a>
+    </nav>
+
+    <section id="collab-ready" class="seo-collab-group" data-collab-panel="ready">
+      <p class="seo-sub">На Collaborator статья готова (Pending approval), в системе — «Заявка отправлена» или «Написание статьи». Откройте размещение, нажмите «Заполнить из Collaborator», потом «Размещено» → «Сохранить»: дата публикации — сегодняшняя.</p>
+      {% if ready %}
+      <table class="seo-collab-table">
+        <thead><tr><th>Площадка</th><th>Сделка</th><th>Статья</th><th>В системе</th><th>При закрытии заполнится</th></tr></thead>
+        <tbody>
+        {% for line in ready %}
+          <tr>
+            <td class="seo-collab-domain">{{ line.domain_html }}</td>
+            <td>{{ line.deal.id }} <div class="seo-sub">{{ line.status }}</div></td>
+            <td>{% if line.article_url %}<a href="{{ line.article_url }}" target="_blank" rel="noopener">открыть ↗</a>{% endif %}</td>
+            <td>{{ line.system }}</td>
+            <td>{% for item in line.fills %}<span class="seo-chip">{{ item }}</span> {% empty %}<span class="seo-sub">всё заполнено</span>{% endfor %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="seo-collab-empty">Нечего закрывать.</p>{% endif %}
+    </section>
+
+    <section id="collab-fill" class="seo-collab-group" data-collab-panel="fill">
+      <p class="seo-sub">В системе поле пустое, на Collaborator значение есть. Заполняется только пустое: {% for name, count in fill_counts %}{{ name }} — {{ count }}{% if not forloop.last %}, {% endif %}{% endfor %}. «Заплачено» — только у размещений «Размещено»: у заявки его ставит закрытие в панели. Анонс — только у сделок с готовой статьёй. «Заплачено» из счёта не трогается.</p>
+      {% if fill %}
+      <form class="seo-collab-fill" data-collab-fill-form>
+        <table class="seo-collab-table">
+          <thead><tr>
+            <th class="seo-collab-check"><input type="checkbox" data-collab-all aria-label="Отметить все"></th>
+            <th>Площадка</th><th>Сделка</th><th>В системе</th><th>Что заполнится</th>
+          </tr></thead>
+          <tbody>
+          {% for line in fill %}
+            <tr>
+              <td class="seo-collab-check"><input type="checkbox" name="deal" value="{{ line.deal.id }}" aria-label="Отметить {{ line.domain }}"></td>
+              <td class="seo-collab-domain">{{ line.domain_html }}</td>
+              <td>{{ line.deal.id }} <div class="seo-sub">{{ line.status }}</div></td>
+              <td>{{ line.system }}</td>
+              <td>{% for item in line.fills %}<span class="seo-chip">{{ item }}</span> {% endfor %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if can_change %}
+        <div class="seo-collab-actions">
+          <button type="submit" class="seo-btn seo-btn-primary" data-collab-fill>Заполнить отмеченные</button>
+          <span class="seo-sub" data-collab-picked></span>
+        </div>
+        {% endif %}
+      </form>
+      {% else %}<p class="seo-collab-empty">Заполнять нечего.</p>{% endif %}
+    </section>
+
+    <section id="collab-differ" class="seo-collab-group" data-collab-panel="differ">
+      <p class="seo-sub">Значение есть и в системе, и на Collaborator, но разное. «Взять из Collaborator» перепишет поле размещения, анкоры — все ссылки разом. «Оставить как в системе» спрячет расхождение, пока одно из значений не изменится. Статус меняете вы в панели размещения.{% if differ_counts %} Расходится: {% for name, count in differ_counts %}{{ name }} — {{ count }}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}</p>
+      {% if differ %}
+      <table class="seo-collab-table seo-collab-differs">
+        <thead><tr><th>Площадка</th><th>Сделка</th><th>Что</th><th>В системе</th><th>На Collaborator</th><th></th></tr></thead>
+        {% for line in differ %}
+        <tbody class="seo-collab-deal">
+          {% for item in line.differs %}
+          <tr>
+            {% if forloop.first %}
+              <td class="seo-collab-domain" rowspan="{{ line.differs|length }}">{{ line.domain_html }}</td>
+              <td rowspan="{{ line.differs|length }}">{{ line.deal.id }} <div class="seo-sub">{{ line.status }}</div></td>
+            {% endif %}
+            <td class="seo-collab-what"><b>{{ item.label }}</b></td>
+            {% if item.links %}
+              <td colspan="2">{% include "admin/placements/collaborator/_links.html" with links=item.links %}</td>
+            {% else %}
+              <td>{{ item.system }}</td>
+              <td>{{ item.collaborator }}</td>
+            {% endif %}
+            <td class="seo-collab-buttons">
+              {% if can_change %}
+                {% if item.target_status %}
+                  <a class="seo-btn seo-btn-small" href="{{ line.placement_url }}" data-panel data-collab-status="{{ item.target_status }}">Поставить «{{ item.target_label }}»</a>
+                {% elif item.takeable %}
+                  <button type="button" class="seo-btn seo-btn-small" data-collab-take data-deal="{{ line.deal.id }}" data-field="{{ item.field }}">Взять из Collaborator</button>
+                {% else %}
+                  <span class="seo-sub">сумма из счёта — правится в счёте</span>
+                {% endif %}
+                <button type="button" class="seo-btn seo-btn-small" data-collab-keep data-deal="{{ line.deal.id }}" data-field="{{ item.field }}">Оставить как в системе</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+      {% else %}<p class="seo-collab-empty">Расхождений нет.</p>{% endif %}
+    </section>
+
+    <section id="collab-missing" class="seo-collab-group" data-collab-panel="missing">
+      <p class="seo-sub">Заказ на Collaborator есть, а размещения в системе нет. «Завести размещение» открывает новое размещение с номером заявки, «Заплачено» и адресом статьи — проверьте и сохраните. Анкоры после этого — «Взять из Collaborator» в «Расходится». Отменённые сделки сюда не попадают.</p>
+      {% if missing %}
+      <table class="seo-collab-table">
+        <thead><tr><th>Площадка</th><th>Сделка</th><th>Total</th><th>Почему</th><th></th></tr></thead>
+        <tbody>
+        {% for line in missing %}
+          <tr>
+            <td class="seo-collab-domain">{{ line.domain_html }}</td>
+            <td>{{ line.deal.id }} <div class="seo-sub">{{ line.status|default:line.deal.status }}</div></td>
+            <td>{{ line.total }}</td>
+            <td>{{ line.reason }}{% if line.candidates %}: {% for link in line.candidates %}{{ link }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+            <td class="seo-collab-buttons">{% if can_change and line.add_url %}<a class="seo-btn seo-btn-small" href="{{ line.add_url }}" data-panel>Завести размещение</a>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="seo-collab-empty">У всех живых сделок есть размещение.</p>{% endif %}
+    </section>
+
+    <section id="collab-kept" class="seo-collab-group" data-collab-panel="kept">
+      <p class="seo-sub">Расхождения, которые вы решили оставить как в системе. Изменится значение в системе или на Collaborator — расхождение вернётся само.</p>
+      {% if kept %}
+      <table class="seo-collab-table seo-collab-differs">
+        <thead><tr><th>Площадка</th><th>Сделка</th><th>Что</th><th>В системе</th><th>На Collaborator</th><th>Оставлено</th><th></th></tr></thead>
+        {% for line in kept %}
+        <tbody class="seo-collab-deal">
+          {% for item in line.differs %}
+          <tr>
+            {% if forloop.first %}
+              <td class="seo-collab-domain" rowspan="{{ line.differs|length }}">{{ line.domain_html }}</td>
+              <td rowspan="{{ line.differs|length }}">{{ line.deal.id }}</td>
+            {% endif %}
+            <td class="seo-collab-what"><b>{{ item.label }}</b></td>
+            {% if item.links %}
+              <td colspan="2">{% include "admin/placements/collaborator/_links.html" with links=item.links %}</td>
+            {% else %}
+              <td>{{ item.system }}</td>
+              <td>{{ item.collaborator }}</td>
+            {% endif %}
+            <td class="seo-sub">{{ item.kept }}</td>
+            <td class="seo-collab-buttons">{% if can_change %}<button type="button" class="seo-btn seo-btn-small" data-collab-keep data-back="1" data-deal="{{ line.deal.id }}" data-field="{{ item.field }}">Вернуть в сверку</button>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+      {% else %}<p class="seo-collab-empty">Ничего не оставлено.</p>{% endif %}
+    </section>
+
+    <section id="collab-journal" class="seo-collab-group" data-collab-panel="journal">
+      <p class="seo-sub">«Заполнить отмеченные» и «Взять из Collaborator» записываются как загрузка «Сверка с Collaborator»: «Отменить» возвращает размещения как было. Более позднее действие над теми же размещениями отменяют первым.</p>
+      {% if journal %}
+      <table class="seo-collab-table">
+        <thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Размещений</th><th></th></tr></thead>
+        <tbody>
+        {% for line in journal %}
+          <tr>
+            <td>{{ line.when }}</td>
+            <td>{{ line.who }}</td>
+            <td>{{ line.title }}</td>
+            <td>{{ line.placements }}</td>
+            <td class="seo-collab-buttons">{% if can_change %}<a class="seo-btn seo-btn-small" href="{{ line.undo_url }}">Отменить…</a>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="seo-collab-empty">Действий ещё не было.</p>{% endif %}
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

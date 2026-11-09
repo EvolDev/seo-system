@@ -91,6 +91,9 @@ class UploadKind(models.TextChoices):
     PLACEMENTS = "placements", "Размещения продукта"
     REF_DOMAINS = "ahrefs_refdomains", "Ссылающиеся домены Ahrefs"
     ANCHORS = "anchors", "Анкоры продукта"
+    # Не файл: «Заполнить отмеченные» и «Взять из Collaborator» на экране сверки
+    # (E11-01, ADR-080) пишутся с журналом загрузки — их отменяют, как загрузку.
+    COLLABORATOR = "collaborator", "Сверка с Collaborator"
 
 
 # Загрузки без продавца: замер Ahrefs наш, у файла размещений продавец — в
@@ -103,7 +106,12 @@ UPLOADS_WITHOUT_SELLER = (
     UploadKind.ANCHORS,
 )
 # Загрузки под продукт: чьи это размещения и на кого ссылаются домены.
-UPLOADS_FOR_PRODUCT = (UploadKind.PLACEMENTS, UploadKind.REF_DOMAINS, UploadKind.ANCHORS)
+UPLOADS_FOR_PRODUCT = (
+    UploadKind.PLACEMENTS,
+    UploadKind.REF_DOMAINS,
+    UploadKind.ANCHORS,
+    UploadKind.COLLABORATOR,
+)
 
 
 class UploadStatus(models.TextChoices):
@@ -1143,6 +1151,8 @@ class Upload(models.Model):
             return f"{name} · {source}" if source else name
         if self.kind == UploadKind.REF_DOMAINS:
             return f"Ahrefs · ссылаются на {self.product}"
+        if self.kind == UploadKind.COLLABORATOR:
+            return f"Сверка с Collaborator · {self.product}"
         if self.seller is not None:
             return self.seller.name
         return f"Ahrefs · {self.country.upper()}" if self.country else "Ahrefs · все страны"

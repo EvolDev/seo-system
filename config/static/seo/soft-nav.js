@@ -279,7 +279,7 @@
       else showDocument(html);
       return;
     }
-    var finalUrl = response.url || url;
+    var finalUrl = withHash(response.url || url, url, method);
     var push = options.push;
     if (push === undefined) {
       // POST без переадресации (ошибки в форме, промежуточная страница
@@ -294,6 +294,19 @@
   function sameUrl(a, b) {
     var x = new URL(a, window.location.href), y = new URL(b, window.location.href);
     return x.pathname === y.pathname && x.search === y.search;
+  }
+
+  // Адрес ответа (response.url) приходит без #…, а браузер при обычном переходе
+  // её сохраняет. Сохраняем и мы, если сервер ответил тем же адресом: по ней
+  // экран помнит вкладку — «Расходится» в сверке с Collaborator остаётся
+  // открытой, когда экран перечитали после записи (E11-01).
+  function withHash(finalUrl, asked, method) {
+    var wanted = new URL(asked, window.location.href);
+    if (method !== "GET" || !wanted.hash) return finalUrl;
+    var answer = new URL(finalUrl, window.location.href);
+    if (answer.hash || !sameUrl(answer.href, wanted.href)) return finalUrl;
+    answer.hash = wanted.hash;
+    return answer.href;
   }
 
   function csrfToken() {

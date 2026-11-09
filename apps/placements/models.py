@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import F
+from django.db.models import F, Value
 from django.utils import timezone
 
 from apps.keywords.models import AnchorType
@@ -574,3 +574,39 @@ class PlacementLink(models.Model):
         )
         self.refresh_from_db(fields=["lost_at"])
         return updated == 1
+
+
+class CollaboratorDeal(models.Model):
+    """Сделка Collaborator — снимок из API, одна строка на сделку (E11-01, ADR-079).
+
+    Пишет только «Обновить из Collaborator» (`apps.placements.collaborator.deals`):
+    поля сделки как их отдал API (`data`, без текста статьи), статус отдельной
+    колонкой. Сделки, которой в ответе больше нет, нет и в снимке. Сверка
+    работает по снимку без нового запроса; размещение сделки не хранится, а
+    находится заново при каждом показе (ADR-080): вписали номер заявки руками —
+    сверка видит это сразу.
+
+    `kept` — «Оставить как в системе»: поле → пара значений (в системе, на
+    Collaborator), при которой расхождение не показывается. Изменилось любое из
+    двух — расхождение снова в сверке.
+    """
+
+    deal_id = models.BigIntegerField("сделка", unique=True)
+    project_id = models.BigIntegerField("проект Collaborator", null=True, blank=True)
+    status = models.TextField("статус на Collaborator")
+    data = models.JSONField("сделка из API")
+    kept = models.JSONField(
+        "оставлено как в системе",
+        default=dict,
+        db_default=Value({}, output_field=models.JSONField()),
+    )
+    fetched_at = models.DateTimeField("забрали")
+    created_at = models.DateTimeField("впервые", db_default=PgNow())
+
+    class Meta:
+        db_table = "collaborator_deals"
+        verbose_name = "сделка Collaborator"
+        verbose_name_plural = "сделки Collaborator"
+
+    def __str__(self) -> str:
+        return f"{self.deal_id} · {self.status}"

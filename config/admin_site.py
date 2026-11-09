@@ -22,6 +22,8 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 # «Экономика» — свой экран, не таблица: пункт меню собирается в get_app_list.
 ECONOMICS = ("placements", "economics")
+# «Сверка с Collaborator» (E11-01) — тоже свой экран.
+COLLABORATOR = ("placements", "collaborator")
 
 # Группы меню: (название, код группы, [(приложение, модель)]). Порядок — как в меню.
 MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
@@ -32,6 +34,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("sites", "productsitelatest"),
             ("sites", "upload"),
             ("placements", "placement"),
+            COLLABORATOR,
             ("placements", "invoice"),
             ECONOMICS,
         ],
@@ -95,15 +98,18 @@ class SeoAdminSite(admin.AdminSite):
             for model in app["models"]
         }
         if request.user.has_perm("placements.view_placement"):
-            url = reverse("admin:economics")
-            models[ECONOMICS] = {
-                "name": "Экономика",
-                "object_name": "Economics",
-                "admin_url": url,
-                "view_only": True,
-                "add_url": None,
-                "perms": {"view": True},
-            }
+            for key, name, object_name, url_name in (
+                (ECONOMICS, "Экономика", "Economics", "admin:economics"),
+                (COLLABORATOR, "Сверка с Collaborator", "Collaborator", "admin:collaborator"),
+            ):
+                models[key] = {
+                    "name": name,
+                    "object_name": object_name,
+                    "admin_url": reverse(url_name),
+                    "view_only": True,
+                    "add_url": None,
+                    "perms": {"view": True},
+                }
         groups: list[dict[str, Any]] = []
         placed = set(HIDDEN)
         for name, code, keys in MENU:
@@ -130,11 +136,39 @@ class SeoAdminSite(admin.AdminSite):
         # не у одной модели, поэтому адреса у сайта. Импорт здесь: модуль сайта
         # загружается вместе с приложением админки, раньше моделей.
         from apps.placements import economics_view
+        from apps.placements.collaborator import views as collaborator
         from apps.workspace import views
 
         own = [
             # Экономика: бюджет, траты, план и ссылки по месяцам (Работа → Экономика).
             path("economics/", self.admin_view(economics_view.view), name="economics"),
+            # Сверка с Collaborator (E11-01): экран, «Обновить из Collaborator», действия.
+            path("collaborator/", self.admin_view(collaborator.page_view), name="collaborator"),
+            path(
+                "collaborator/refresh/",
+                self.admin_view(require_POST(collaborator.refresh_view)),
+                name="collaborator_refresh",
+            ),
+            path(
+                "collaborator/refresh/status/",
+                self.admin_view(collaborator.refresh_status_view),
+                name="collaborator_refresh_status",
+            ),
+            path(
+                "collaborator/fill/",
+                self.admin_view(require_POST(collaborator.fill_view)),
+                name="collaborator_fill",
+            ),
+            path(
+                "collaborator/take/",
+                self.admin_view(require_POST(collaborator.take_view)),
+                name="collaborator_take",
+            ),
+            path(
+                "collaborator/keep/",
+                self.admin_view(require_POST(collaborator.keep_view)),
+                name="collaborator_keep",
+            ),
             path(
                 "saved-filters/save/",
                 self.admin_view(require_POST(views.save_view)),
@@ -236,6 +270,10 @@ def _home_cards(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         from apps.placements import economics_view
 
         notes["economics"] = economics_view.home_card(product)
+    if any(model["object_name"] == "Collaborator" for model in models):
+        from apps.placements.collaborator.views import home_card
+
+        notes["collaborator"] = home_card()
     cards = []
     for model in models:
         value, note = notes.get(model["object_name"].lower(), ("", ""))

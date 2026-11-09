@@ -64,10 +64,14 @@ from apps.placements import (
     repeat,
     status_chips,
 )
+from apps.placements.collaborator import service as collaborator_service
+from apps.placements.collaborator import views as collaborator_views
+from apps.placements.collaborator.deals import parse as parse_deal
 from apps.placements.forms import PlacementForm, PlacementLinkForm, PlacementLinkFormSet
 from apps.placements.indexation import CHECK_TYPE, ENTITY_TYPE, page_url
 from apps.placements.models import (
     STATUS_STAMPS,
+    CollaboratorDeal,
     InvoiceItem,
     InvoiceStatus,
     Placement,
@@ -334,6 +338,7 @@ CHECKS = "Проверки"
 COMMENT = "Комментарий"
 FROM_FILE = "Из файла размещений"
 SERVICE = "Служебное"
+COLLABORATOR = "Collaborator"
 AFTER_LINKS = (CHECKS, COMMENT, SERVICE)
 
 
@@ -499,6 +504,26 @@ class PlacementSellerFilter(MultiChoiceFilter):
                 yield {**choice, "display": f"{choice['display']} ({count})"}
 
 
+class CollaboratorFilter(admin.SimpleListFilter):
+    """Сделки Collaborator рабочего продукта (E11-01): по снимку, без запроса к API."""
+
+    title = "Collaborator"
+    parameter_name = "collaborator"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [("ready", "готовы к закрытию"), ("differ", "есть расхождения")]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Placement]) -> Any:
+        value = self.value()
+        if value not in ("ready", "differ"):
+            return queryset
+        product = Product.objects.filter(pk=working_product_id(request) or 0).first()
+        if product is None:
+            return queryset.none()
+        ids = collaborator_service.report(product).groups.placements(value)
+        return queryset.filter(pk__in=ids)
+
+
 @admin.register(Placement)
 class PlacementAdmin(RecordAdmin):
     """Размещения. Проверка индексации без перезагрузки страницы — кнопка ↻ в
@@ -545,6 +570,7 @@ class PlacementAdmin(RecordAdmin):
         # Статус и «Период ▾» — полосой над списком (ADR-073).
         status_chips.PlacementStatusFilter,
         InvoiceFilter,
+        CollaboratorFilter,
         "placement_type",
         "link_type",
         "is_indexed",
@@ -571,6 +597,7 @@ class PlacementAdmin(RecordAdmin):
         "extra_data",
         "paid_from_invoice",
         "offer_info",
+        "collaborator_block",
     )
     fieldsets = (
         (None, {"fields": ("site", "product")}),
@@ -635,6 +662,8 @@ class PlacementAdmin(RecordAdmin):
             Js("seo/country-picker.js"),
             Js("seo/anchors.js"),
             Js("seo/copywriter-pick.js"),
+            # Блок Collaborator в панели, «Обновить из Collaborator» (E11-01).
+            Js("seo/collaborator.js"),
         )
         css: ClassVar[dict[str, tuple[Css, ...]]] = {
             # offers.css — «прочие данные из файла» в том же виде, что в карточке площадки.
@@ -647,6 +676,7 @@ class PlacementAdmin(RecordAdmin):
                 Css("seo/anchors.css"),
                 Css("seo/placement-tabs.css"),
                 Css("seo/inline-remove.css"),
+                Css("seo/collaborator.css"),
             )
         }
 
@@ -664,6 +694,13 @@ class PlacementAdmin(RecordAdmin):
             initial.setdefault("placement_type", site.price.placement_type)
             if str(initial.get("seller")) == str(site.price.seller_id):
                 initial.setdefault("link_type", site.price.link_type)
+        # «Завести размещение» из сверки с Collaborator (E11-01): поля — из сделки.
+        deal_id = _int(request.GET.get("collaborator_deal"))
+        product = Product.objects.filter(pk=_int(initial.get("product")) or 0).first()
+        stored = CollaboratorDeal.objects.filter(deal_id=deal_id).first() if deal_id else None
+        if site is not None and product is not None and stored is not None:
+            deal = parse_deal(stored.data)
+            initial.update(collaborator_views.deal_initial(product, site.pk, deal))
         return initial
 
     def formfield_for_foreignkey(
@@ -986,6 +1023,10 @@ class PlacementAdmin(RecordAdmin):
                 )
                 for name, options in fieldsets
             ]
+        if obj is not None and self._collaborator(request, obj) is not None:
+            # Сделка Collaborator этого размещения (E11-01) — сразу под статусом.
+            at = next((i + 1 for i, (_, o) in enumerate(fieldsets) if "status" in o["fields"]), 1)
+            fieldsets.insert(at, (COLLABORATOR, {"fields": ("collaborator_block",)}))
         if obj is not None and obj.extra:
             # Прочие данные из файла размещений — перед «Служебным», только если есть.
             fieldsets.insert(len(fieldsets) - 1, (FROM_FILE, {"fields": ("extra_data",)}))
@@ -1116,6 +1157,25 @@ class PlacementAdmin(RecordAdmin):
                 found = repeat.offer_switch(obj)
             obj.seo_offer_switch = found  # type: ignore[attr-defined]
         return found
+
+    def _collaborator(self, request: HttpRequest, obj: Placement) -> Any:
+        """Сделка размещения в снимке — один раз на запрос, вместе с правом заполнять."""
+        if not hasattr(obj, "seo_collaborator"):
+            found = None
+            if CollaboratorDeal.objects.exists():
+                row, report = collaborator_service.row_for(obj)
+                if row is not None:
+                    found = (row, report, self.has_change_permission(request, obj))
+            obj.seo_collaborator = found  # type: ignore[attr-defined]
+        return obj.seo_collaborator  # type: ignore[attr-defined]
+
+    @admin.display(description="сделка")
+    def collaborator_block(self, obj: Placement) -> SafeString | str:
+        found = getattr(obj, "seo_collaborator", None)
+        if found is None:
+            return "—"
+        row, report, can_fill = found
+        return collaborator_views.panel_block(row, report, can_fill=can_fill)
 
     def panel_add_title(self, request: HttpRequest) -> str:
         site_id = _int(request.GET.get("site"))

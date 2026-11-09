@@ -48,7 +48,14 @@ def test_admin_site_is_ours() -> None:
 def test_groups_follow_the_work(admin_client: Client) -> None:
     menu = _menu(admin_client)
     assert [group["name"] for group in menu] == ["Работа", "Справочники", "Настройки", "Служебное"]
-    assert _names(menu[0]) == ["Площадки", "Загрузки", "Размещения", "Счета", "Экономика"]
+    assert _names(menu[0]) == [
+        "Площадки",
+        "Загрузки",
+        "Размещения",
+        "Сверка с Collaborator",
+        "Счета",
+        "Экономика",
+    ]
     # Анкоры продукта — справочник (E3-05, ADR-059); форма ключа — в «Служебном».
     assert _names(menu[1]) == [
         "Каталог площадок",
@@ -77,7 +84,7 @@ def test_service_tables_only_in_service_group(admin_client: Client) -> None:
 
 
 def test_every_registered_model_once(admin_client: Client) -> None:
-    # «Экономика» — свой экран, а не таблица: модели у пункта нет.
+    # «Экономика» и «Сверка с Collaborator» — свои экраны, а не таблицы: модели у пункта нет.
     in_menu = [
         (model["model"]._meta.app_label, model["model"]._meta.model_name)
         for group in _menu(admin_client)
@@ -109,6 +116,7 @@ def test_home_starts_with_work(admin_client: Client) -> None:
         "Площадки",
         "Загрузки",
         "Размещения",
+        "Сверка с Collaborator",
         "Счета",
         "Экономика",
     ]
@@ -128,6 +136,7 @@ def test_home_without_products(admin_client: Client) -> None:
         ("", ""),
         ("0", "предложений ждут разбора"),
         ("", ""),
+        ("", "сделок ещё нет — «Обновить из Collaborator»"),
         ("0", "к оплате"),
         ("", ""),
     ]
