@@ -1,0 +1,24 @@
+{% extends "admin/otp/base.html" %}
+
+{% block otp_body %}
+<p>Откройте Google Authenticator на телефоне и введите шесть цифр у
+«SEO-система».</p>
+<form method="post" id="login-form" novalidate>{% csrf_token %}
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="form-row">
+    {{ form.code.errors }}
+    <label for="{{ form.code.id_for_label }}">Код из приложения</label> {{ form.code }}
+  </div>
+  <div class="submit-row">
+    <input type="submit" value="Войти">
+  </div>
+</form>
+<details class="seo-otp-help">
+  <summary>Нет телефона под рукой</summary>
+  <p>Введите в то же поле один из запасных кодов, которые вы сохранили при
+  привязке телефона. Каждый код действует один раз{% if backup_left %}; у вас
+  осталось {{ backup_left }}{% else %}; у вас их не осталось{% endif %}.</p>
+  <p>Потеряли телефон — попросите администратора сбросить Authenticator в
+  вашей карточке: при следующем входе вы привяжете новый телефон.</p>
+</details>
+{% endblock %}

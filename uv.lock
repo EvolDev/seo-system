@@ -345,6 +345,18 @@ wheels = [
 ]
 
 [[package]]
+name = "django-otp"
+version = "1.7.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d0/e9/db4349d7a866e6d5153b31fa740b17f5893723715edf7d1673615d9f462c/django_otp-1.7.5.tar.gz", hash = "sha256:7f554d21dcd035550c3b8e3f154b1f422fee71fdc75c8a3bf96e42a2ea6dafcc", size = 79637, upload-time = "2026-10-16T14:48:48.98Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/bc/bda771669006e7e112bed31a330636ff0b3c3407b053c10c492368c35f6f/django_otp-1.7.5-py3-none-any.whl", hash = "sha256:475d4111e07d61616996f098d08d29884da6397273a11f53c1b8e8c75d27e1dc", size = 73805, upload-time = "2026-10-16T14:48:47.793Z" },
+]
+
+[[package]]
 name = "django-stubs"
 version = "6.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1022,6 +1034,18 @@ wheels = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "8.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/b2/7fc2931bfae0af02d5f53b174e9cf701adbb35f39d69c2af63d4a39f81a9/qrcode-8.2.tar.gz", hash = "sha256:35c3f2a4172b33136ab9f6b3ef1c00260dd2f66f858f24d88418a015f446506c", size = 43317, upload-time = "2025-05-01T15:44:24.726Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/b8/d2d6d731733f51684bbf76bf34dab3b70a9148e8f2cef2bb544fccec681a/qrcode-8.2-py3-none-any.whl", hash = "sha256:16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f", size = 45986, upload-time = "2025-05-01T15:44:22.781Z" },
+]
+
+[[package]]
 name = "redis"
 version = "6.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1098,11 +1122,13 @@ dependencies = [
     { name = "django-admin-interface" },
     { name = "django-admin-rangefilter" },
     { name = "django-countries" },
+    { name = "django-otp" },
     { name = "gunicorn" },
     { name = "httpx" },
     { name = "openpyxl" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-json-logger" },
+    { name = "qrcode" },
     { name = "sentry-sdk", extra = ["django"] },
     { name = "whitenoise" },
 ]
@@ -1136,11 +1162,13 @@ requires-dist = [
     { name = "django-admin-interface", specifier = ">=0.32.0" },
     { name = "django-admin-rangefilter", specifier = ">=0.15.0" },
     { name = "django-countries", specifier = ">=9.1.0" },
+    { name = "django-otp", specifier = ">=1.6" },
     { name = "gunicorn", specifier = ">=26.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "python-json-logger", specifier = ">=4.2.0" },
+    { name = "qrcode", specifier = ">=8.0" },
     { name = "sentry-sdk", extras = ["django"], specifier = ">=2.70.0" },
     { name = "whitenoise", specifier = ">=6.12.0" },
 ]

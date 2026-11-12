@@ -1,0 +1,27 @@
+{% extends "admin/otp/base.html" %}
+
+{% block otp_body %}
+<p>Теперь вход — пароль и код из телефона. Привяжите телефон один раз:</p>
+<ol class="seo-otp-steps">
+  <li>Установите <b>Google Authenticator</b> из App Store или Google Play.</li>
+  <li>В приложении нажмите <b>+</b> → <b>Сканировать QR-код</b> и наведите камеру:
+    <div class="seo-otp-qr"><img src="{{ qr }}" alt="QR-код для Google Authenticator" width="200" height="200"></div>
+    <details class="seo-otp-help">
+      <summary>Не сканируется</summary>
+      <p><b>+</b> → <b>Ввести ключ настройки</b>: название — «SEO-система»,
+      ключ — <code class="seo-otp-secret">{{ secret }}</code>, тип — по времени.</p>
+    </details>
+  </li>
+  <li>Введите шесть цифр, которые покажет приложение у «SEO-система ({{ account }})».</li>
+</ol>
+<form method="post" id="login-form" novalidate>{% csrf_token %}
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="form-row">
+    {{ form.code.errors }}
+    <label for="{{ form.code.id_for_label }}">Код из приложения</label> {{ form.code }}
+  </div>
+  <div class="submit-row">
+    <input type="submit" value="Привязать">
+  </div>
+</form>
+{% endblock %}

@@ -4,7 +4,7 @@
 запрос gunicorn, статику отдаёт само приложение (WhiteNoise) из образа.
 """
 
-from config.env import env_int
+from config.env import env_bool, env_int
 from config.settings.base import *  # noqa: F403
 from config.settings.base import ALLOWED_HOSTS, DATABASES, MIDDLEWARE
 
@@ -29,6 +29,10 @@ BEHIND_PROXY = True
 # проверен: запомненное не отменить, а на тестовой копии в локальной версии
 # (localhost) оно сломало бы локальную версию в этом браузере.
 SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", default=0)
+
+# Вход — пароль и код из Google Authenticator у всех (ADR-081). Выключить можно
+# только явно — например, если сломался вход у всех администраторов сразу.
+LOGIN_OTP_REQUIRED = env_bool("LOGIN_OTP_REQUIRED", default=True)
 
 # Проверка контейнера ходит в приложение напрямую, по 127.0.0.1. Снаружи
 # такой адрес не придёт: Caddy пропускает только запросы к домену системы.

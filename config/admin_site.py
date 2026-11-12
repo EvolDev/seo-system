@@ -12,6 +12,7 @@ django.contrib.admin, и `admin.site` во всём проекте — `SeoAdmin
 
 from typing import Any
 
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.apps import AdminConfig
 from django.contrib.auth.signals import user_logged_in
@@ -98,6 +99,15 @@ class SeoAdminSite(admin.AdminSite):
 
         self.login_form = LimitedLoginForm
 
+    def has_permission(self, request: HttpRequest) -> bool:
+        # Вход с кодом (ADR-081): без кода админки нет, даже если адрес забыли в
+        # RequireOTPMiddleware. Импорт здесь — по той же причине, что выше.
+        from config.otp import is_verified
+
+        if not super().has_permission(request):
+            return False
+        return not settings.LOGIN_OTP_REQUIRED or is_verified(request.user)
+
     def get_app_list(
         self, request: HttpRequest, app_label: str | None = None
     ) -> list[dict[str, Any]]:
@@ -151,8 +161,14 @@ class SeoAdminSite(admin.AdminSite):
         from apps.placements import economics_view
         from apps.placements.collaborator import views as collaborator
         from apps.workspace import views
+        from config import otp
 
         own = [
+            # Вход с кодом (ADR-081): после пароля, поэтому без admin_view — он
+            # пустил бы только того, кто код уже ввёл.
+            path("otp/", otp.verify_view, name="otp_verify"),
+            path("otp/setup/", otp.setup_view, name="otp_setup"),
+            path("otp/logout/", otp.logout_view, name="otp_logout"),
             # Экономика: бюджет, траты, план и ссылки по месяцам (Работа → Экономика).
             path("economics/", self.admin_view(economics_view.view), name="economics"),
             # Сверка с Collaborator (E11-01): экран, «Обновить из Collaborator», действия.
@@ -347,3 +363,11 @@ class SeoAdminConfig(AdminConfig):
     def ready(self) -> None:
         super().ready()
         user_logged_in.connect(mark_login, dispatch_uid="seo-session-refresh")
+        # Телефоны и запасные коды (ADR-081) — не экран: в админке их видно было
+        # бы с секретом и кодами. Сброс — в карточке пользователя.
+        from django_otp.plugins.otp_static.models import StaticDevice
+        from django_otp.plugins.otp_totp.models import TOTPDevice
+
+        for model in (TOTPDevice, StaticDevice):
+            if admin.site.is_registered(model):
+                admin.site.unregister(model)

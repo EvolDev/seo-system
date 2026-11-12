@@ -9,11 +9,13 @@ dependencies = [
     "django-admin-interface>=0.32.0",
     "django-admin-rangefilter>=0.15.0",
     "django-countries>=9.1.0",
+    "django-otp>=1.6",
     "gunicorn>=26.2.0",
     "httpx>=0.28.1",
     "openpyxl>=3.1.5",
     "psycopg[binary]>=3.2",
     "python-json-logger>=4.2.0",
+    "qrcode>=8.0",
     "sentry-sdk[django]>=2.70.0",
     "whitenoise>=6.12.0",
 ]
@@ -71,7 +73,7 @@ exclude = ["^source/", "^site/", "^\\.venv/"]
 # классы не наследует: модели темы разбирает плагин django-stubs (они в
 # INSTALLED_APPS), класс фильтра только передаётся в list_filter.
 [[tool.mypy.overrides]]
-module = ["admin_interface.*", "colorfield.*", "rangefilter.*"]
+module = ["admin_interface.*", "colorfield.*", "rangefilter.*", "django_otp.*", "qrcode.*"]
 ignore_missing_imports = true
 
 [tool.django-stubs]

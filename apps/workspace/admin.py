@@ -4,7 +4,8 @@
 entry»), два списка со стрелками, пароль — отдельной страницей. Здесь:
 - **Человек** — имя (его видно в окошке блокировки, в «Сотруднике», в заметках),
   фамилия, логин, почта;
-- **Вход в систему** — «Может входить» и новый пароль дважды прямо в форме;
+- **Вход в систему** — «Может входить» и новый пароль дважды прямо в форме,
+  «Сбросить Authenticator» — потерял телефон для входа с кодом (`config/otp.py`);
 - **Роль** — «Администратор» (полный доступ), «Линкбилдер», «Только просмотр»,
   «Без роли» (`apps/workspace/roles.py`);
 - **Особые права** — исключения к роли: таблица по разделам меню, права роли в ней
@@ -18,11 +19,12 @@ import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import admin as auth_admin
 from django.contrib.auth import password_validation
 from django.contrib.auth.models import Group, Permission, User
-from django.db.models import Count, Q, QuerySet
+from django.db.models import Count, Exists, OuterRef, Q, QuerySet
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -31,12 +33,15 @@ from django.utils.html import format_html_join
 from django.utils.safestring import SafeString, mark_safe
 from django.utils.text import capfirst
 from django.views.decorators.debug import sensitive_post_parameters
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.workspace import roles
 from config.admin import ModelAdmin
 from config.admin_site import HIDDEN, MENU
 from config.assets import Css, Js
 from config.forms import ChoiceButtons
+from config.otp import backup_left, phone
+from config.otp import reset as otp_reset
 
 # Заглушки типов параметризуют админку моделью, сам Django — нет (как в config/admin.py).
 if TYPE_CHECKING:
@@ -48,6 +53,12 @@ ACTIONS = (("view", "Смотреть"), ("add", "Добавлять"), ("change
 # Данные под экранами — таблицы линкбилдинга, которых нет в меню: ссылки, заметки,
 # цены, история статусов. Остальное — «Система»: журнал, сессии, права, темы.
 _DOMAIN_APPS = ("sites", "placements", "keywords", "content", "observability", "workspace")
+# У таблиц библиотек без русского перевода — свои названия.
+_LABELS = {
+    ("otp_totp", "totpdevice"): "Телефоны для входа с кодом",
+    ("otp_static", "staticdevice"): "Наборы запасных кодов",
+    ("otp_static", "statictoken"): "Запасные коды",
+}
 
 
 def _sections(chosen: set[str]) -> list[dict[str, Any]]:
@@ -61,7 +72,7 @@ def _sections(chosen: set[str]) -> list[dict[str, Any]]:
         if key not in labels:
             model = content_type.model_class()
             name = model._meta.verbose_name_plural if model is not None else content_type.model
-            labels[key] = capfirst(str(name))
+            labels[key] = _LABELS.get(key) or capfirst(str(name))
 
     def row(key: tuple[str, str]) -> dict[str, Any]:
         found = by_model[key]
@@ -166,6 +177,7 @@ class UserForm(forms.ModelForm):  # type: ignore[type-arg]
         strip=False,
         widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
     )
+    otp_reset = forms.BooleanField(label="Сбросить Authenticator", required=False)
     role = forms.ChoiceField(
         label="Роль", choices=roles.CHOICES, required=False, widget=ChoiceButtons
     )
@@ -206,6 +218,31 @@ class UserForm(forms.ModelForm):  # type: ignore[type-arg]
         else:
             self.fields["password1"].help_text = "Пароля нет — войти нельзя, пока не зададите."
         self.fields["user_permissions"].required = False
+        if not new:
+            self._otp_status(user)
+
+    def _otp_status(self, user: User) -> None:
+        """Под «Сбросить Authenticator» — привязан ли телефон и сколько запасных кодов."""
+        field = self.fields["otp_reset"]
+        device = phone(user)
+        if device is not None:
+            since = device.created_at
+            when = f" {timezone.localtime(since):%d.%m.%Y}" if since else ""
+            text = (
+                f"Телефон привязан{when}, запасных кодов осталось: {backup_left(user)}."
+                " Потерял телефон — отметьте и сохраните: при следующем заходе"
+                " человек привяжет новый."
+            )
+            if user.pk == self.editor_id:
+                text += " Свой сброс — система сразу попросит привязать телефон заново."
+        else:
+            field.disabled = True
+            text = (
+                "Телефон ещё не привязан — человек привяжет его при первом входе."
+                if settings.LOGIN_OTP_REQUIRED
+                else "Вход с кодом в этой версии выключен."
+            )
+        field.help_text = text
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
@@ -295,7 +332,14 @@ class UserAdmin(ModelAdmin, _UserAdmin):
     form = add_form = UserForm
     add_form_template = None
     filter_horizontal = ()
-    list_display = ("name_cell", "login_name", "login_cell", "role_cell", "last_login_cell")
+    list_display = (
+        "name_cell",
+        "login_name",
+        "login_cell",
+        "phone_cell",
+        "role_cell",
+        "last_login_cell",
+    )
     list_display_links = ("name_cell", "login_name")
     list_filter = (LoginFilter, RoleFilter)
     search_fields = ("username", "first_name", "last_name", "email")
@@ -303,7 +347,7 @@ class UserAdmin(ModelAdmin, _UserAdmin):
     readonly_fields = ("last_login_text", "joined_text")
     fieldsets = (
         ("Человек", {"fields": ("first_name", "last_name", "username", "email")}),
-        ("Вход в систему", {"fields": ("can_login", "password1", "password2")}),
+        ("Вход в систему", {"fields": ("can_login", "password1", "password2", "otp_reset")}),
         ("Роль", {"fields": ("role",)}),
         (
             "Особые права",
@@ -315,14 +359,22 @@ class UserAdmin(ModelAdmin, _UserAdmin):
         ),
         ("Служебное", {"fields": ("last_login_text", "joined_text")}),
     )
-    add_fieldsets = fieldsets[:4]
+    # Новому человеку сбрасывать нечего: телефон он привяжет при первом входе.
+    add_fieldsets = (
+        fieldsets[0],
+        ("Вход в систему", {"fields": ("can_login", "password1", "password2")}),
+        *fieldsets[2:4],
+    )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[User]:
         queryset: QuerySet[User] = (
             super()
             .get_queryset(request)
             .prefetch_related("groups")
-            .annotate(own_perms=Count("user_permissions", distinct=True))
+            .annotate(
+                own_perms=Count("user_permissions", distinct=True),
+                has_phone=Exists(TOTPDevice.objects.filter(user=OuterRef("pk"), confirmed=True)),
+            )
         )
         return queryset
 
@@ -362,6 +414,8 @@ class UserAdmin(ModelAdmin, _UserAdmin):
     def save_related(self, request: HttpRequest, form: Any, formsets: Any, change: bool) -> None:
         super().save_related(request, form, formsets, change)
         roles.set_role(form.instance, form.cleaned_data.get("role") or roles.NONE)
+        if form.cleaned_data.get("otp_reset"):
+            otp_reset(form.instance)
 
     def panel_title(self, obj: Any) -> str:
         name: str = obj.get_full_name() or obj.get_username()
@@ -381,6 +435,10 @@ class UserAdmin(ModelAdmin, _UserAdmin):
     @admin.display(description="может входить", boolean=True)
     def login_cell(self, obj: User) -> bool:
         return obj.is_staff and obj.is_active
+
+    @admin.display(description="телефон для кода", boolean=True)
+    def phone_cell(self, obj: User) -> bool:
+        return bool(getattr(obj, "has_phone", False))
 
     @admin.display(description="роль")
     def role_cell(self, obj: User) -> str:

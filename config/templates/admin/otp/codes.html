@@ -1,0 +1,37 @@
+{% extends "admin/otp/base.html" %}
+
+{# Телефон уже привязан и вход подтверждён — выходить отсюда незачем. #}
+{% block otp_logout %}{% endblock %}
+
+{% block otp_body %}
+<p class="seo-otp-ok">Телефон привязан.</p>
+<p>Сохраните запасные коды — они понадобятся, если телефона не будет под
+рукой. Каждый код действует один раз. <b>Больше эти коды не покажутся.</b></p>
+<ul class="seo-otp-codes" id="seo-otp-codes">{% for code in codes %}<li>{{ code }}</li>{% endfor %}</ul>
+<p class="seo-otp-actions">
+  <button type="button" class="seo-btn" id="seo-otp-copy">Скопировать</button>
+  <a class="seo-btn" download="seo-zapasnye-kody.txt"
+     href="data:text/plain;charset=utf-8,{% filter urlencode:'' %}Запасные коды SEO-системы ({{ request.user.get_username }}). Каждый действует один раз.
+{% for code in codes %}{{ code }}
+{% endfor %}{% endfilter %}">Скачать файлом</a>
+</p>
+<p class="seo-otp-hint">Лучше всего — в менеджер паролей. Не храните коды рядом с телефоном.</p>
+<div class="submit-row">
+  <a class="seo-btn seo-btn-primary seo-otp-continue" href="{{ next }}">Коды сохранены — продолжить</a>
+</div>
+<script>
+  (() => {
+    const button = document.getElementById("seo-otp-copy");
+    const codes = [...document.querySelectorAll("#seo-otp-codes li")].map((item) => item.textContent);
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(codes.join("\n"));
+        button.textContent = "Скопировано ✓";
+      } catch (error) {
+        // Буфер обмена недоступен (не HTTPS) — коды на экране, их можно выделить.
+        button.textContent = "Не вышло — выделите коды вручную";
+      }
+    });
+  })();
+</script>
+{% endblock %}

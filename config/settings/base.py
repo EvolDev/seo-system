@@ -51,6 +51,11 @@ INSTALLED_APPS = [
     "apps.integrations",
     # Личное у каждого пользователя — не домен линкбилдинга (ADR-050).
     "apps.workspace",
+    # Вход с кодом из Google Authenticator (ADR-081, config/otp.py): телефон
+    # человека (TOTP) и запасные коды.
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
 ]
 
 MIDDLEWARE = [
@@ -59,6 +64,10 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Вход с кодом (ADR-081): чем подтверждён вход в этой сессии, и без кода —
+    # только страницы кода и выход (config/otp.py).
+    "django_otp.middleware.OTPMiddleware",
+    "config.otp.RequireOTPMiddleware",
     # Сессия — 14 дней от последнего захода, а не от входа (ADR-081).
     "config.session_refresh.SessionRefreshMiddleware",
     # Кто и откуда меняет статусы — для истории статусов (ADR-049). После
@@ -154,6 +163,13 @@ SESSION_COOKIE_AGE = env_int("SESSION_DAYS", default=14) * 24 * 60 * 60
 # столько минут после последней неудачи (config/login_limit.py).
 LOGIN_FAIL_LIMIT = env_int("LOGIN_FAIL_LIMIT", default=10)
 LOGIN_FAIL_MINUTES = env_int("LOGIN_FAIL_MINUTES", default=15)
+# После пароля — код из Google Authenticator или запасной код (config/otp.py).
+# В локальной версии выключено, в проде включено (config/settings/prod.py).
+LOGIN_OTP_REQUIRED = env_bool("LOGIN_OTP_REQUIRED", default=False)
+# Запасных кодов при привязке телефона; каждый действует один раз.
+LOGIN_OTP_BACKUP_CODES = 10
+# Так система подписана в приложении на телефоне.
+OTP_TOTP_ISSUER = "SEO-система"
 # Перед приложением — прокси, который ставит X-Forwarded-For (Caddy в проде).
 # Локально прокси нет, и заголовку из запроса верить нельзя.
 BEHIND_PROXY = False

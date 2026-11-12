@@ -1,0 +1,23 @@
+{% extends "admin/login.html" %}
+{% comment %}
+Страницы входа с кодом (config/otp.py, ADR-081) — в виде страницы входа: та же
+рамка посередине, без меню. Человек уже ввёл пароль, но рабочего продукта и
+меню ему ещё не показываем.
+{% endcomment %}
+{% load seo_assets %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% asset 'seo/otp.css' %}">{% endblock %}
+
+{% block branding %}<h1 id="site-name"><span>SEO-система</span></h1>{% endblock %}
+
+{% block content %}
+<div id="content-main" class="seo-otp">
+  <h2>{{ title }}</h2>
+  {% block otp_body %}{% endblock %}
+  {% block otp_logout %}
+  <form action="{% url 'admin:otp_logout' %}" method="post" class="seo-otp-logout">{% csrf_token %}
+    <button type="submit" class="seo-otp-link">Выйти и войти под другим логином</button>
+  </form>
+  {% endblock %}
+</div>
+{% endblock %}

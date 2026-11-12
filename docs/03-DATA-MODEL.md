@@ -436,7 +436,10 @@ Ahrefs Batch Analysis под страну, позже — Ahrefs API (E2-07); US
 | created_at | timestamptz | |
 
 Индекс: `(site_id, created_at desc)`. `auth_user` — таблица Django, в
-`schema.sql` — заглушка (ADR-029, уточнение 01.10.2026).
+`schema.sql` — заглушка (ADR-029, уточнение 01.10.2026). Вход с кодом (ADR-081):
+телефон пользователя и запасные коды — таблицы библиотеки django-otp
+(`otp_totp_totpdevice`, `otp_static_staticdevice`, `otp_static_statictoken`),
+как и таблицы Django, в `schema.sql` их нет; удаление пользователя уносит их.
 
 Площадка в базе одна: в новый список она попадает со всей историей —
 статусом по продуктам, аудитами, размещениями. Список общий для всех
