@@ -1,8 +1,10 @@
 # Пульт: состояние системы — службы, версия, сайт, бэкапы, диск, память.
 
-# Последние бэкапы — по строке на «что и куда».
+# Последние бэкапы — по строке на «что и куда»; строки R2 — когда он включён.
 backups_summary_sql() {
-    cat <<'SQL'
+    local r2=false
+    r2_on && r2=true
+    cat <<SQL
 SELECT k.label,
        coalesce(to_char(r.started_at, 'DD.MM HH24:MI'), 'не было'),
        CASE r.status WHEN 'ok' THEN '✓' WHEN 'failed' THEN '✗ ОШИБКА' ELSE '' END
@@ -19,6 +21,7 @@ LEFT JOIN LATERAL (
     WHERE b.kind = k.kind AND b.target = k.target AND b.status <> 'running'
     ORDER BY started_at DESC LIMIT 1
 ) r ON true
+WHERE k.target <> 'r2' OR $r2
 ORDER BY k.n;
 SQL
 }

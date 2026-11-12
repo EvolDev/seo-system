@@ -18,6 +18,12 @@ pytestmark = pytest.mark.django_db
 NOW = datetime(2026, 11, 10, 9, 0, tzinfo=UTC)
 
 
+@pytest.fixture(autouse=True)
+def _r2_enabled(settings: Any) -> None:
+    """По умолчанию — оба хранилища; без R2 — `TestWithoutR2`."""
+    settings.BACKUP_R2_ENABLED = True
+
+
 def _run(kind: str, target: str, hours_ago: float, status: str = BackupStatus.OK) -> BackupRun:
     run = BackupRun.objects.create(kind=kind, target=target, status=status, message="сообщение")
     started = NOW - timedelta(hours=hours_ago)
@@ -27,7 +33,7 @@ def _run(kind: str, target: str, hours_ago: float, status: str = BackupStatus.OK
 
 
 def _all_fresh() -> None:
-    for kind, target in health.EXPECTED:
+    for kind, target in health.expected():
         _run(kind, target, hours_ago=5)
 
 
@@ -68,7 +74,7 @@ class TestBackups:
 
     def test_nothing_yet_names_every_backup(self) -> None:
         keys = _keys(health.backup_problems(NOW))
-        assert keys == {f"backup-stale-{kind}-{target}" for kind, target in health.EXPECTED}
+        assert keys == {f"backup-stale-{kind}-{target}" for kind, target in health.expected()}
 
     def test_dump_older_than_a_day(self, settings: Any) -> None:
         settings.BACKUP_MAX_AGE_HOURS = 26
@@ -98,6 +104,45 @@ class TestBackups:
         _all_fresh()
         _run(BackupKind.BASE, BackupTarget.B2, hours_ago=0.1, status=BackupStatus.RUNNING)
         assert health.backup_problems(NOW) == []
+
+
+class TestWithoutR2:
+    """Второе хранилище выключено: копия и проверка только в B2, R2 не ждём."""
+
+    @pytest.fixture(autouse=True)
+    def _r2_off(self, settings: Any) -> None:
+        settings.BACKUP_R2_ENABLED = False
+
+    def test_r2_not_expected(self) -> None:
+        assert {target for _, target in health.expected()} == {BackupTarget.B2}
+        assert len(health.expected()) == 4
+
+    def test_b2_fresh_is_enough(self) -> None:
+        _all_fresh()
+        assert not BackupRun.objects.filter(target=BackupTarget.R2).exists()
+        assert health.backup_problems(NOW) == []
+
+    def test_b2_still_watched(self, settings: Any) -> None:
+        settings.BACKUP_MAX_AGE_HOURS = 26
+        _run(BackupKind.BASE, BackupTarget.B2, hours_ago=5)
+        _run(BackupKind.DUMP, BackupTarget.B2, hours_ago=30)
+        _run(BackupKind.UPLOADS, BackupTarget.B2, hours_ago=5)
+        _run(BackupKind.RESTORE_TEST, BackupTarget.B2, hours_ago=5)
+        assert _keys(health.backup_problems(NOW)) == {"backup-stale-dump-b2"}
+
+    def test_old_r2_failure_ignored(self) -> None:
+        """R2 выключили после неудачи — старая строка журнала не тревожит."""
+        _all_fresh()
+        _run(BackupKind.DUMP, BackupTarget.R2, hours_ago=1, status=BackupStatus.FAILED)
+        assert health.backup_problems(NOW) == []
+
+    def test_summary_shows_b2_copy(self, admin_client: Client) -> None:
+        _run(BackupKind.DUMP, BackupTarget.B2, hours_ago=1)
+        content = admin_client.get(
+            reverse("admin:observability_backuprun_changelist")
+        ).content.decode()
+        assert "дамп B2:" in content and "файлы B2: не было" in content
+        assert "R2" not in health.summary()
 
 
 class TestDisk:
@@ -131,7 +176,7 @@ class TestTask:
         settings.BACKUP_MONITOR = True
         usage = mock.Mock(total=100, used=10, free=90)
         with mock.patch("apps.observability.health.shutil.disk_usage", return_value=usage):
-            assert system_health.delay().get() == 1 + len(health.EXPECTED)
+            assert system_health.delay().get() == 1 + len(health.expected())
         events = [event for event in sentry_events if event.get("level") == "error"]
         fingerprints = {tuple(event["fingerprint"][:2]) for event in events}
         assert ("system-health", "archive-off") in fingerprints

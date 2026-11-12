@@ -9,11 +9,17 @@ until psql -XAtq -c "SELECT 1 FROM backup_runs LIMIT 1" >/dev/null 2>&1; do
     sleep 30
 done
 has_ok_run base b2 || "$LIB/run-recorded.sh" base b2 "$LIB/step-base.sh" || true
-if ! { has_ok_run dump b2 && has_ok_run dump r2 && has_ok_run uploads b2 \
-    && has_ok_run uploads r2; }; then
+# Хранилище без удачной копии или проверки — сразу: и на новом сервере, и когда
+# второе хранилище только что включили.
+missing_copy="" missing_test=""
+for target in $(copy_targets); do
+    { has_ok_run dump "$target" && has_ok_run uploads "$target"; } || missing_copy=yes
+    has_ok_run restore_test "$target" || missing_test=yes
+done
+if [ -n "$missing_copy" ]; then
     "$LIB/nightly.sh" || true
 fi
-if ! { has_ok_run restore_test b2 && has_ok_run restore_test r2; }; then
+if [ -n "$missing_test" ]; then
     "$LIB/weekly.sh" || true
 fi
 log "бэкапы по расписанию: $LIB/crontab"

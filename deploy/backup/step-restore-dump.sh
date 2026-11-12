@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Проверка копии R2: последний ночной дамп — во временную базу, сверка с числами
-# строк на момент дампа; архив файлов загрузок — целый, файлов столько же.
+# Проверка ночной копии в хранилище: step-restore-dump.sh <b2|r2>.
+# Последний ночной дамп — во временную базу, сверка с числами строк на момент
+# дампа; архив файлов загрузок — целый, файлов столько же. Для R2 — вся его
+# проверка, для B2 — вторая половина после архива на минуту (step-restore-b2.sh).
 source /usr/local/lib/seo-backup/lib.sh
 rclone_env
 
+target=${1:?укажите хранилище: b2 или r2}
+name=${target^^}
 dir="$SCRATCH/dumpcheck"
 data="$dir/data"
 temp_stop "$data"
@@ -12,18 +16,18 @@ mkdir -p "$dir"
 guard_target_dir "$data"
 trap 'temp_stop "$data"; rm -rf "$dir"' EXIT
 
-dump=$(rclone lsf r2:db --files-only | sort | tail -n 1)
-[ -n "$dump" ] || die "в R2 нет ни одного ночного дампа"
-files=$(rclone lsf r2:uploads --files-only | sort | tail -n 1)
-[ -n "$files" ] || die "в R2 нет ни одного архива файлов загрузок"
-log "скачиваю из R2: $dump, $files"
-rclone copyto "r2:db/$dump" "$dir/seo.dump"
-rclone copyto "r2:uploads/$files" "$dir/uploads.tar"
+dump=$(rclone lsf "$target:db" --files-only | sort | tail -n 1)
+[ -n "$dump" ] || die "в $name нет ни одного ночного дампа"
+files=$(rclone lsf "$target:uploads" --files-only | sort | tail -n 1)
+[ -n "$files" ] || die "в $name нет ни одного архива файлов загрузок"
+log "скачиваю из $name: $dump, $files"
+rclone copyto "$target:db/$dump" "$dir/seo.dump"
+rclone copyto "$target:uploads/$files" "$dir/uploads.tar"
 
 # Числа строк на момент дампа — из журнала; нет — с живой базы.
-expected=$(psql -XAtq -v ON_ERROR_STOP=1 -v file="$dump" <<'SQL'
+expected=$(psql -XAtq -v ON_ERROR_STOP=1 -v file="$dump" -v target="$target" <<'SQL'
 SELECT details -> 'counts' FROM backup_runs
-WHERE kind = 'dump' AND target = 'r2' AND status = 'ok' AND details ->> 'file' = :'file'
+WHERE kind = 'dump' AND target = :'target' AND status = 'ok' AND details ->> 'file' = :'file'
 ORDER BY started_at DESC LIMIT 1;
 SQL
 )
@@ -43,9 +47,9 @@ took=$(($(date +%s) - started))
 
 # Файлы загрузок: архив читается целиком, файлов — сколько было при упаковке.
 in_archive=$(tar -tf "$dir/uploads.tar" | grep -vc '/$' || true)
-packed=$(psql -XAtq -v ON_ERROR_STOP=1 -v file="$files" <<'SQL'
+packed=$(psql -XAtq -v ON_ERROR_STOP=1 -v file="$files" -v target="$target" <<'SQL'
 SELECT details ->> 'counts' FROM backup_runs
-WHERE kind = 'uploads' AND target = 'r2' AND status = 'ok' AND details ->> 'file' = :'file'
+WHERE kind = 'uploads' AND target = :'target' AND status = 'ok' AND details ->> 'file' = :'file'
 ORDER BY started_at DESC LIMIT 1;
 SQL
 )
@@ -63,5 +67,5 @@ echo "$size" >"$STEP_OUT/size"
 if [ -n "$packed" ] && [ "$in_archive" != "$packed" ]; then
     die "в архиве $files файлов $in_archive, а упаковано было $packed"
 fi
-echo "дамп $dump из R2 восстановлен за $took с: $tables таблиц сходятся; в архиве файлов\
+echo "дамп $dump из $name восстановлен за $took с: $tables таблиц сходятся; в архиве файлов\
  загрузок $in_archive файлов, все читаются" >"$STEP_OUT/message"

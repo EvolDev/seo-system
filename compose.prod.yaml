@@ -139,8 +139,8 @@ services:
           memory: 3G
 
   # Бэкапы (E10-03, ADR-081; deploy/backup/): полный снимок базы, ночной дамп и
-  # файлы загрузок в B2 и R2, еженедельная проверка восстановления во временные
-  # базы; каждая — строка «Служебное → Бэкапы». Файлы живой базы и загрузок —
+  # файлы загрузок в B2 и, если включено (BACKUP_R2_ENABLED), в R2, еженедельная
+  # проверка восстановления во временные базы; каждая — строка «Служебное → Бэкапы». Файлы живой базы и загрузок —
   # только для чтения. Первый запуск сервера — всё сразу, дальше по расписанию.
   backup:
     image: seo-system-postgres:latest
@@ -160,6 +160,7 @@ services:
       B2_BUCKET: ${B2_BUCKET:-}
       B2_KEY_ID: ${B2_KEY_ID:-}
       B2_APPLICATION_KEY: ${B2_APPLICATION_KEY:-}
+      BACKUP_R2_ENABLED: ${BACKUP_R2_ENABLED:-false}
       R2_ENDPOINT: ${R2_ENDPOINT:-}
       R2_BUCKET: ${R2_BUCKET:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}

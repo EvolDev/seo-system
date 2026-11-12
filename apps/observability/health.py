@@ -8,7 +8,8 @@ E10-03, E10-05, ADR-081. Бэкап, о пропаже которого никт
 - журнал `backup_runs`, который пишет контейнер `backup`: полный снимок базы
   (B2), ночной дамп и файлы загрузок (B2 и R2) — не старше
   `BACKUP_MAX_AGE_HOURS`, проверки восстановления (B2 и R2) — не старше
-  `RESTORE_TEST_MAX_AGE_DAYS`; последняя попытка не упала;
+  `RESTORE_TEST_MAX_AGE_DAYS`; последняя попытка не упала. R2 — только когда
+  второе хранилище включено (`BACKUP_R2_ENABLED`);
 - место на диске сервера — не больше `DISK_ALERT_PERCENT` %.
 
 Что не так — событие в GlitchTip (оттуда письмо), одно в день на каждую беду.
@@ -31,7 +32,7 @@ from apps.observability.models import BackupKind, BackupRun, BackupStatus, Backu
 logger = logging.getLogger(__name__)
 
 # Что и куда должно уходить: полный снимок — только в B2 (к нему архив WAL),
-# дамп и файлы загрузок — в оба хранилища, проверка — каждого хранилища.
+# дамп и файлы загрузок — в каждое хранилище, проверка — каждого хранилища.
 EXPECTED: tuple[tuple[BackupKind, BackupTarget], ...] = (
     (BackupKind.BASE, BackupTarget.B2),
     (BackupKind.DUMP, BackupTarget.B2),
@@ -41,6 +42,13 @@ EXPECTED: tuple[tuple[BackupKind, BackupTarget], ...] = (
     (BackupKind.RESTORE_TEST, BackupTarget.B2),
     (BackupKind.RESTORE_TEST, BackupTarget.R2),
 )
+
+
+def expected() -> tuple[tuple[BackupKind, BackupTarget], ...]:
+    """Что и куда должно уходить сейчас: R2 — только когда он включён."""
+    if settings.BACKUP_R2_ENABLED:
+        return EXPECTED
+    return tuple(pair for pair in EXPECTED if pair[1] != BackupTarget.R2)
 
 
 @dataclass(frozen=True)
@@ -99,7 +107,7 @@ def archive_problems(state: Archiver, now: datetime) -> list[Problem]:
 def latest_runs() -> dict[tuple[str, str], dict[str, BackupRun | None]]:
     """Для каждого «что и куда» — последняя удачная и самая последняя запись."""
     result: dict[tuple[str, str], dict[str, BackupRun | None]] = {}
-    for kind, target in EXPECTED:
+    for kind, target in expected():
         runs = BackupRun.objects.filter(kind=kind, target=target).order_by("-started_at", "-pk")
         result[(kind, target)] = {
             "ok": runs.filter(status=BackupStatus.OK).first(),
@@ -177,9 +185,11 @@ def summary() -> str:
             parts.append("Архив изменений базы: выключен")
         else:
             parts.append(f"Архив изменений базы: {_when(state.last_archived_at)}")
+    # Ночная копия — по хранилищу у другой компании, если оно есть, иначе по B2.
+    copy_target = BackupTarget.R2 if settings.BACKUP_R2_ENABLED else BackupTarget.B2
     for (kind, target), runs in latest_runs().items():
         ok = runs["ok"]
-        if kind in (BackupKind.BASE, BackupKind.RESTORE_TEST) or target == BackupTarget.R2:
+        if kind in (BackupKind.BASE, BackupKind.RESTORE_TEST) or target == copy_target:
             short = {
                 BackupKind.BASE: "полный снимок",
                 BackupKind.DUMP: "дамп",

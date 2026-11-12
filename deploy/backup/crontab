@@ -4,8 +4,8 @@
 # Полный снимок базы → B2: от него архив восстанавливает базу на любую минуту.
 0 3 * * * /usr/local/lib/seo-backup/run-recorded.sh base b2 /usr/local/lib/seo-backup/step-base.sh
 
-# Дамп базы и файлы загрузок → B2 и R2, зашифрованные.
+# Дамп базы и файлы загрузок → B2 и, если включено (BACKUP_R2_ENABLED), R2.
 30 3 * * * /usr/local/lib/seo-backup/nightly.sh
 
-# Проверка восстановления: архив B2 и дамп R2 — во временные базы.
+# Проверка восстановления: архив и дамп B2, дамп R2 (если включено) — во временные базы.
 30 4 * * 0 /usr/local/lib/seo-backup/weekly.sh

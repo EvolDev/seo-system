@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Ночная копия у двух компаний: дамп базы и файлы загрузок — в B2 и в R2,
-# зашифрованные. Каждая отправка — своя строка журнала.
+# Ночная копия: дамп базы и файлы загрузок — в B2 и, если включено второе
+# хранилище, в R2 у другой компании (BACKUP_R2_ENABLED), зашифрованные. Каждая
+# отправка — своя строка журнала.
 source /usr/local/lib/seo-backup/lib.sh
 
 day=$(date +%F-%H%M)
@@ -19,7 +20,7 @@ find /uploads -type f | wc -l >"$dir/uploads.counts"
 tar -C /uploads -cf "$files" . 2>"$dir/uploads.err" || rm -f "$files"
 
 status=0
-for target in b2 r2; do
+for target in $(copy_targets); do
     "$LIB/run-recorded.sh" dump "$target" "$LIB/step-upload.sh" "$target" db "$dump" || status=1
     "$LIB/run-recorded.sh" uploads "$target" "$LIB/step-upload.sh" "$target" uploads "$files" \
         || status=1

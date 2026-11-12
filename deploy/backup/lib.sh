@@ -5,6 +5,8 @@
 #   шифрование libsodium, ключ BACKUP_WALG_KEY); files/ — ночной дамп и файлы
 #   загрузок (rclone crypt, пароль BACKUP_FILES_PASSWORD);
 # - R2 (Cloudflare): files/ — то же, что files/ в B2: копия у другой компании.
+#   Включается BACKUP_R2_ENABLED=true (ADR-081, уточнение 12.11.2026); без него
+#   ночная копия и её проверка — только в B2.
 # Без двух ключей из менеджера паролей копии не прочитать никому, и нам тоже.
 #
 # Скрипты работают в контейнере backup от пользователя postgres: живая база —
@@ -66,28 +68,51 @@ SQL
     [ "$count" -gt 0 ]
 }
 
+# --- Хранилища ночной копии ------------------------------------------------
+
+# Второе хранилище (R2) включено? Значения — как у настроек приложения
+# (config/env.py): true/1/yes/on в любом регистре.
+r2_enabled() {
+    case "${BACKUP_R2_ENABLED:-false}" in
+        [Tt][Rr][Uu][Ee] | 1 | [Yy][Ee][Ss] | [Oo][Nn]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Куда уходит ночная копия: b2 и, если включено, r2.
+copy_targets() {
+    if r2_enabled; then
+        echo "b2 r2"
+    else
+        echo b2
+    fi
+}
+
 # --- rclone: хранилища из переменных окружения, без файла настроек ----------
 
 rclone_env() {
     : "${B2_ENDPOINT:?нет B2_ENDPOINT}" "${B2_BUCKET:?нет B2_BUCKET}"
-    : "${R2_ENDPOINT:?нет R2_ENDPOINT}" "${R2_BUCKET:?нет R2_BUCKET}"
     : "${BACKUP_FILES_PASSWORD:?нет BACKUP_FILES_PASSWORD}"
     export RCLONE_CONFIG_B2RAW_TYPE=s3 RCLONE_CONFIG_B2RAW_PROVIDER=Other
     export RCLONE_CONFIG_B2RAW_ENDPOINT="$B2_ENDPOINT"
     export RCLONE_CONFIG_B2RAW_REGION="${B2_REGION:-}"
     export RCLONE_CONFIG_B2RAW_ACCESS_KEY_ID="${B2_KEY_ID:-}"
     export RCLONE_CONFIG_B2RAW_SECRET_ACCESS_KEY="${B2_APPLICATION_KEY:-}"
-    export RCLONE_CONFIG_R2RAW_TYPE=s3 RCLONE_CONFIG_R2RAW_PROVIDER=Other
-    export RCLONE_CONFIG_R2RAW_ENDPOINT="$R2_ENDPOINT"
-    export RCLONE_CONFIG_R2RAW_REGION=auto
-    export RCLONE_CONFIG_R2RAW_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:-}"
-    export RCLONE_CONFIG_R2RAW_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:-}"
+    if r2_enabled; then
+        : "${R2_ENDPOINT:?нет R2_ENDPOINT}" "${R2_BUCKET:?нет R2_BUCKET}"
+        export RCLONE_CONFIG_R2RAW_TYPE=s3 RCLONE_CONFIG_R2RAW_PROVIDER=Other
+        export RCLONE_CONFIG_R2RAW_ENDPOINT="$R2_ENDPOINT"
+        export RCLONE_CONFIG_R2RAW_REGION=auto
+        export RCLONE_CONFIG_R2RAW_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:-}"
+        export RCLONE_CONFIG_R2RAW_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:-}"
+    fi
     # Ключи сервера могут не уметь перечислять корзины — не проверяем их.
     export RCLONE_S3_NO_CHECK_BUCKET=true
     local password
     password=$(rclone obscure "$BACKUP_FILES_PASSWORD")
     local name raw bucket
-    for name in B2 R2; do
+    for name in $(copy_targets); do
+        name=${name^^}
         raw="${name}RAW"
         bucket="${name}_BUCKET"
         export "RCLONE_CONFIG_${name}_TYPE=crypt"

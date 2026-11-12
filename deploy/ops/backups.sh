@@ -1,22 +1,28 @@
 # Пульт: бэкапы и восстановление (E10-03, ADR-081; docs/17-OPERATIONS.md).
 # Сами копии, проверки и восстановление делают скрипты deploy/backup/ в
-# контейнере backup — пульт их зовёт и показывает итог.
+# контейнере backup — пульт их зовёт и показывает итог. Ошибку каждого шага
+# проверяем явно: внутри run_logged set -e не действует.
 
 backup_now() {
-    say "Ночная копия сейчас: дамп базы и файлы загрузок → B2 и R2"
-    dc exec -T backup "$BACKUP_LIB/nightly.sh"
+    say "Ночная копия сейчас: дамп базы и файлы загрузок → $(copy_targets_text)"
+    dc exec -T backup "$BACKUP_LIB/nightly.sh" \
+        || { fail "копия не удалась — причина выше и в «Служебное → Бэкапы»"; return 1; }
     done_msg "копия сделана — «Служебное → Бэкапы»"
 }
 
 base_now() {
     say "Полный снимок базы → B2"
-    dc exec -T backup "$BACKUP_LIB/run-recorded.sh" base b2 "$BACKUP_LIB/step-base.sh"
+    dc exec -T backup "$BACKUP_LIB/run-recorded.sh" base b2 "$BACKUP_LIB/step-base.sh" \
+        || { fail "снимок не удался — причина выше"; return 1; }
     done_msg "снимок сделан"
 }
 
 restore_test_now() {
-    say "Проверка восстановления: архив B2 и дамп R2 — во временные базы"
-    dc exec -T backup "$BACKUP_LIB/weekly.sh"
+    local what="архив и дамп B2"
+    r2_on && what+=", дамп R2"
+    say "Проверка восстановления: $what — во временные базы"
+    dc exec -T backup "$BACKUP_LIB/weekly.sh" \
+        || { fail "проверка НЕ прошла — причина выше и в «Служебное → Бэкапы»"; return 1; }
     done_msg "проверка прошла"
 }
 
@@ -77,7 +83,8 @@ op_restore_copy() {
 
 restore_copy() {
     say "Копия базы на $1 — рядом с живой, живая не меняется"
-    dc exec -T backup "$BACKUP_LIB/restore-copy.sh" "$1"
+    dc exec -T backup "$BACKUP_LIB/restore-copy.sh" "$1" \
+        || { fail "копия на $1 не поднялась — причина выше"; return 1; }
     done_msg "копия открыта: консоль — этот же пункт; убрать — «Убрать копию базы»"
 }
 
@@ -105,11 +112,13 @@ restore_volumes() {
     # Тома с метками compose: иначе он предупреждал бы о «чужих» томах.
     dc create --no-recreate postgres >/dev/null 2>&1 || true
     dc run --rm --no-deps -T -v "$(volume pgdata):/restore" \
-        --entrypoint "$BACKUP_LIB/restore.sh" backup /restore ${when:+"$when"}
+        --entrypoint "$BACKUP_LIB/restore.sh" backup /restore ${when:+"$when"} \
+        || { fail "база из архива не восстановилась"; return 1; }
     if [ "$files" = yes ]; then
-        say "Файлы загрузок из R2 → том $(volume uploads)"
+        say "Файлы загрузок из ночной копии → том $(volume uploads)"
         dc run --rm --no-deps -T -v "$(volume uploads):/restore" \
-            --entrypoint "$BACKUP_LIB/restore-files.sh" backup /restore
+            --entrypoint "$BACKUP_LIB/restore-files.sh" backup /restore \
+            || { fail "файлы загрузок не восстановились"; return 1; }
     fi
 }
 
@@ -174,7 +183,7 @@ op_restore_full() {
     fi
     local when
     when=$(ui_input "Восстановить до последнего изменения в архиве — оставьте пусто. На минуту в прошлом — ГГГГ-ММ-ДД ЧЧ:ММ:" "")
-    ui_confirm_word "Новый сервер: база из архива B2${when:+ на $when} и файлы загрузок из R2 — в пустые тома, затем запуск.
+    ui_confirm_word "Новый сервер: база из архива B2${when:+ на $when} и файлы загрузок из ночной копии — в пустые тома, затем запуск.
 
 Старый сервер, если оживёт, НЕ включать: оба писали бы в один архив." ВОССТАНОВИТЬ \
         || return 0
@@ -189,9 +198,12 @@ restore_full() {
         dc up -d s3
     fi
     say "Сборка образов версии $version"
-    ver "$version" dc build app postgres
+    ver "$version" dc build app postgres || { fail "образы не собрались — причина выше"; return 1; }
     docker tag "$APP_IMAGE:$version" "$APP_IMAGE:latest"
-    restore_volumes "${1:-}" yes
+    restore_volumes "${1:-}" yes || {
+        fail "восстановление остановлено, система не запускалась — причина выше"
+        return 1
+    }
     say "Запуск: база догоняет архив и открывается"
     ver "$version" dc up -d
     if wait_healthy; then
@@ -205,7 +217,7 @@ op_backups() {
     local choice
     choice=$(ui_menu "Бэкапы" "Ночью копии делаются сами; здесь — сейчас, вручную." \
         list "Последние бэкапы и архив изменений" \
-        now "Сделать копию сейчас (дамп и файлы → B2 и R2)" \
+        now "Сделать копию сейчас (дамп и файлы → $(copy_targets_text))" \
         base "Полный снимок базы сейчас (→ B2)" \
         test "Проверить восстановление сейчас")
     case "$choice" in

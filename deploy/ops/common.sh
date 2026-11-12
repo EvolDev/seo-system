@@ -59,6 +59,21 @@ time_zone() {
     dc exec -T app printenv TIME_ZONE 2>/dev/null || echo Europe/Moscow
 }
 
+# Второе хранилище (R2) включено? Спрашиваем контейнер backup: решает его
+# BACKUP_R2_ENABLED и то же правило, что у скриптов бэкапа.
+r2_on() {
+    dc exec -T backup bash -c "source $BACKUP_LIB/lib.sh && r2_enabled" >/dev/null 2>&1
+}
+
+# Куда уходит ночная копия — для подписей.
+copy_targets_text() {
+    if r2_on; then
+        echo "B2 и R2"
+    else
+        echo "B2"
+    fi
+}
+
 # Адрес сайта для проверки снаружи (через Caddy).
 site_url() {
     if [ "$MODE" = rehearsal ]; then

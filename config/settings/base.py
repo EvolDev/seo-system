@@ -133,6 +133,9 @@ USE_TZ = True
 # Бэкапы делает контейнер backup прода (deploy/backup/), приложение раз в час
 # проверяет, что свежие есть (apps/observability/health.py). Локально их нет.
 BACKUP_MONITOR = env_bool("BACKUP_MONITOR", default=False)
+# Второе хранилище ночной копии — Cloudflare R2 (уточнение ADR-081 от 12.11.2026):
+# выключено — копия и проверка только в B2, бэкапов R2 проверка здоровья не ждёт.
+BACKUP_R2_ENABLED = env_bool("BACKUP_R2_ENABLED", default=False)
 # Полный снимок, ночной дамп и файлы загрузок старше стольких часов — беда.
 BACKUP_MAX_AGE_HOURS = env_int("BACKUP_MAX_AGE_HOURS", default=26)
 # Проверка восстановления старше стольких дней — беда (идёт раз в неделю).
