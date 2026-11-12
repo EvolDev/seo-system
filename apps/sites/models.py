@@ -1236,6 +1236,10 @@ class UploadChange(models.Model):
     row_id = models.BigIntegerField("строка")
     op = models.TextField("действие")  # I — вставка, U — правка, D — удаление
     before = models.JSONField("было", null=True, blank=True)
+    # У правки — что записала загрузка, только изменённые колонки: сравнив с
+    # тем, что в строке сейчас, отмена видит правки после загрузки (ADR-060).
+    # У журналов до 09.11.2026 пусто.
+    after = models.JSONField("записано", null=True, blank=True)
 
     class Meta:
         db_table = "upload_changes"
