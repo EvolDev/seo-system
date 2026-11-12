@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.35 от 09.11.2026 — журнал загрузки помнит записанное: отмена видит правки после загрузки (ADR-060)
 -- Версия 1.34 от 08.11.2026 — сделки Collaborator из API и сверка с размещениями (ADR-079, ADR-080)
 -- Версия 1.33 от 28.10.2026 — блокировка правки площадки и размещений (ADR-077)
 -- Версия 1.32 от 24.10.2026 — списки анкоров по регионам (ADR-075)
@@ -411,6 +412,7 @@ CREATE TABLE upload_changes (
     row_id      bigint NOT NULL,
     op          text NOT NULL,                -- I — вставка, U — правка, D — удаление
     before      jsonb,                        -- строка до изменения; у вставки пусто
+    after       jsonb,                        -- у правки: что записала загрузка, изменённые колонки
     CONSTRAINT upload_changes_op_check CHECK (op IN ('I','U','D'))
 );
 CREATE INDEX idx_upload_changes_upload ON upload_changes(upload_id, table_name, row_id);
@@ -1039,9 +1041,17 @@ BEGIN
     IF TG_OP = 'INSERT' THEN
         INSERT INTO upload_changes (upload_id, table_name, row_id, op)
         VALUES (upload, TG_TABLE_NAME, NEW.id, 'I');
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- Что записала загрузка — только изменённые колонки: по ним отмена узнаёт
+        -- правки, сделанные в строке уже после загрузки.
+        INSERT INTO upload_changes (upload_id, table_name, row_id, op, before, after)
+        SELECT upload, TG_TABLE_NAME, OLD.id, 'U', to_jsonb(OLD),
+               coalesce(jsonb_object_agg(n.key, n.value), '{}'::jsonb)
+        FROM jsonb_each(to_jsonb(NEW)) AS n
+        WHERE to_jsonb(OLD) -> n.key IS DISTINCT FROM n.value;
     ELSE
         INSERT INTO upload_changes (upload_id, table_name, row_id, op, before)
-        VALUES (upload, TG_TABLE_NAME, OLD.id, left(TG_OP, 1), to_jsonb(OLD));
+        VALUES (upload, TG_TABLE_NAME, OLD.id, 'D', to_jsonb(OLD));
     END IF;
     RETURN NULL;
 END

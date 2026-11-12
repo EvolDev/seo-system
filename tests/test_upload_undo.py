@@ -15,7 +15,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.observability.models import Check
-from apps.placements.models import Placement, PlacementLink, PlacementStatus
+from apps.placements.models import (
+    Placement,
+    PlacementLink,
+    PlacementStatus,
+    PlacementStatusChange,
+)
 from apps.sites.models import (
     MetricSource,
     Product,
@@ -365,3 +370,94 @@ class TestAdmin:
         client_admin.post(url, {"post": "yes"})
         assert not Upload.objects.filter(pk=upload.pk).exists()
         assert not Placement.objects.exists()
+
+
+def _aged(upload: Upload) -> Upload:
+    """Загрузка — «час назад», её история статусов — до неё.
+
+    В тесте вся работа идёт в одной транзакции, и `now()` базы у загрузки и у
+    правок после неё одно и то же; в жизни правка человека — позже записи.
+    """
+    hour_ago = timezone.now() - dt.timedelta(hours=1)
+    Upload.objects.filter(pk=upload.pk).update(written_at=hour_ago)
+    earlier = hour_ago - dt.timedelta(minutes=1)
+    SiteStatusChange.objects.update(changed_at=earlier)
+    PlacementStatusChange.objects.update(changed_at=earlier)
+    upload.refresh_from_db()
+    return upload
+
+
+class TestEditsAfterUpload:
+    """Правки людей после загрузки, которые отмена откатит или удалит (09.11.2026).
+
+    Пользователь: отмена возвращает изменённые загрузкой строки целиком — правка,
+    сделанная в них потом, пропадала молча; подтверждение должно о ней сказать.
+    """
+
+    @pytest.fixture
+    def existing(self, clideo: Product) -> Placement:
+        # Площадка и заявка уже были: загрузка дополнит заявку и продвинет статус.
+        site = Site.objects.create(domain="tomsguide.com")
+        ProductSite.objects.filter(site=site, product=clideo).update(status=SiteStatus.ORDERED)
+        return Placement.objects.create(site=site, product=clideo, status=PlacementStatus.ORDERED)
+
+    def test_journal_remembers_what_upload_wrote(
+        self, clideo: Product, existing: Placement
+    ) -> None:
+        upload = _written(clideo, [TOMSGUIDE])
+        change = UploadChange.objects.get(
+            upload=upload, table_name="placements", row_id=existing.pk, op="U"
+        )
+        assert change.after is not None
+        assert change.after["status"] == PlacementStatus.PLACED
+        assert change.after["article_url"] == TOMSGUIDE["URL статьи"]
+        # Только изменённые колонки: площадка у заявки та же.
+        assert "site_id" not in change.after
+
+    def test_no_edits_no_warning(self, clideo: Product, existing: Placement) -> None:
+        upload = _written(clideo, [TOMSGUIDE])
+        lines = undo.preview(upload).lines()
+        assert not any("после загрузки" in line for line in lines), "\n".join(lines)
+
+    def test_edit_after_upload_is_announced_first(
+        self, clideo: Product, existing: Placement
+    ) -> None:
+        upload = _written(clideo, [TOMSGUIDE])
+        existing.refresh_from_db()
+        existing.comment = "договорились о скидке"
+        existing.save()
+        lines = undo.preview(upload).lines()
+        assert lines[0] == "Откатятся правки, сделанные после загрузки, — размещения: 1", lines
+        # Решение по площадке после загрузки не трогали — его в предупреждении нет.
+        assert len([line for line in lines if "после загрузки" in line]) == 1
+        undo.undo(upload)
+        existing.refresh_from_db()
+        assert existing.comment is None
+
+    def test_edit_of_column_upload_did_not_touch_counts_too(
+        self, clideo: Product, existing: Placement
+    ) -> None:
+        """Отмена возвращает строку целиком: откатится и колонка, которую загрузка не меняла."""
+        upload = _written(clideo, [TOMSGUIDE])
+        site = ProductSite.objects.get(site=existing.site, product=clideo)
+        ProductSite.objects.filter(pk=site.pk).update(comment="позвонить в понедельник")
+        lines = undo.preview(upload).lines()
+        assert any(line.startswith("Откатятся правки") and ": 1" in line for line in lines), lines
+
+    def test_status_change_on_new_placement(self, clideo: Product) -> None:
+        upload = _aged(_written(clideo, [TOMSGUIDE]))
+        placement = Placement.objects.get()
+        placement.status = PlacementStatus.ORDERED
+        placement.save()
+        lines = undo.preview(upload).lines()
+        assert "Удалится и работа после загрузки — размещения со сменой статуса: 1" in lines
+
+    def test_old_journal_says_it_does_not_know(self, clideo: Product, existing: Placement) -> None:
+        upload = _aged(_written(clideo, [TOMSGUIDE]))
+        UploadChange.objects.filter(upload=upload).update(after=None)
+        existing.refresh_from_db()
+        existing.status = PlacementStatus.ORDERED
+        existing.save()
+        lines = undo.preview(upload).lines()
+        assert "Откатятся смены статуса после загрузки — размещения: 1" in lines, lines
+        assert any("система не знает" in line for line in lines)

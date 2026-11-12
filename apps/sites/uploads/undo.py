@@ -17,6 +17,11 @@
    удаляются: отмена — «как будто загрузки не было»;
 5. удаляется сама загрузка, её строки разбора и журнал, после фиксации — файл.
 
+Подтверждение заранее говорит, что ещё уйдёт вместе с загрузкой: правки,
+сделанные после неё в изменённых ею строках (журнал помнит, что она записала, —
+отличается от того, что в строке сейчас), и смены статуса у созданных ею
+площадок и размещений (по истории статусов).
+
 Если строки этой загрузки потом трогала более поздняя загрузка, отмена
 запрещена: сначала отменяют ту — иначе её изменения пропали бы молча.
 
@@ -39,11 +44,16 @@ from django.contrib.auth.models import User
 from django.db import connection, models, transaction
 
 from apps.sites import latest
-from apps.sites.models import SitePrice, Upload, UploadStatus
+from apps.sites.models import SitePrice, Upload, UploadChange, UploadStatus
 from config import db, deletion
 
 # Отмена по журналу пишет историю статусов от своего run_id — потом её стирает.
 _HISTORY_TABLES = ("site_status_changes", "placement_status_changes")
+# Таблица со статусом → её история и колонка ссылки на строку (ADR-049).
+_STATUS_HISTORY = {
+    "product_sites": ("site_status_changes", "product_site_id"),
+    "placements": ("placement_status_changes", "placement_id"),
+}
 
 
 class Blocked(Exception):
@@ -66,6 +76,14 @@ class Report:
     kept_users: int = 0
     later: list[Upload] = field(default_factory=list)
     working_prices: int = 0  # площадкам вернулась рабочая цена, выбранная до разбора
+    # Откатятся правки после загрузки в строках, которые она поменяла.
+    edited: dict[str, int] = field(default_factory=dict)
+    # Журнал до 09.11.2026 не помнит записанного: о правках — только по статусам.
+    edits_unknown: bool = False
+    # Смены статуса после загрузки: у поменянных ею строк (старый журнал) и у
+    # созданных ею — эти удалятся вместе с работой над ними.
+    status_edited: dict[str, int] = field(default_factory=dict)
+    status_edited_new: dict[str, int] = field(default_factory=dict)
 
     def lines(self) -> list[str]:
         if not self.journaled:
@@ -73,10 +91,31 @@ class Report:
                 "Загрузка записана до журнала изменений: удалится только она сама и файл, "
                 "записанное ею в базе останется."
             ]
+        # Работа людей после загрузки — первой: её легко потерять, не заметив.
         result = [
+            f"Откатятся правки, сделанные после загрузки, — {name.lower()}: {count}"
+            for name, count in self.edited.items()
+        ]
+        result += [
+            f"Откатятся смены статуса после загрузки — {name.lower()}: {count}"
+            for name, count in self.status_edited.items()
+        ]
+        if self.edits_unknown:
+            result.append(
+                "Правки, сделанные после загрузки в изменённых ею строках, тоже откатятся —"
+                " сколько их, система не знает: загрузка записана раньше, чем журнал стал"
+                " это запоминать"
+            )
+        result += [
+            f"Удалится и работа после загрузки — {name.lower()} со сменой статуса: {count}"
+            for name, count in self.status_edited_new.items()
+        ]
+        # Сама загрузка и её журнал уходят по определению — это не работа людей.
+        own = {_plural(Upload), _plural(UploadChange)}
+        result += [
             f"Удалится — {line.text.lower()}: {line.count}"
             for line in self.plan.lines()
-            if not line.cleared and line.text != _plural(Upload)
+            if not line.cleared and line.text not in own
         ]
         result += [
             f"Вернётся как было — {name.lower()}: {count}" for name, count in self.restored.items()
@@ -182,6 +221,8 @@ def _run(upload: Upload) -> Report:
             " set_config('seo.change_run_id', %s, true)",
             [run_id],
         )
+        # Правки после загрузки — до того, как отмена перепишет строки.
+        _edits_after(cursor, upload, report)
         inserted, before = _journal(cursor, upload.pk)
         for table, rows in before.items():
             _restore(cursor, table, rows)
@@ -193,6 +234,10 @@ def _run(upload: Upload) -> Report:
     users = inserted.pop(User._meta.db_table, [])
     roots: dict[deletion.Model, list[int]] = {_model(t): ids for t, ids in inserted.items()}
     roots[Upload] = [upload.pk]
+    # Журнал загрузки уходит вместе с ней — не «созданное после загрузки».
+    roots[UploadChange] = list(
+        UploadChange.objects.filter(upload=upload).values_list("pk", flat=True)
+    )
     plan = deletion.collect(roots)
     for model, ids in plan.deleted.items():
         extra = len(ids - set(roots.get(model, ())))
@@ -256,6 +301,75 @@ def _working_prices_back(cursor: Any, upload_id: int, prices: list[int]) -> int:
         [upload_id, prices],
     )
     return int(cursor.rowcount)
+
+
+def _edits_after(cursor: Any, upload: Upload, report: Report) -> None:
+    """Что люди успели сделать после загрузки и что отмена откатит или удалит.
+
+    Строки, которые загрузка поменяла: журнал помнит, какой строка была до неё
+    (`before`) и что она записала (`after`, только изменённые колонки); их
+    сумма — строка сразу после загрузки. Отличается от строки сейчас хоть одной
+    колонкой — строку правили после загрузки. Колонки, которых тогда не было, не
+    сравниваются. В журналах до 09.11.2026 `after` нет — тогда известны только
+    смены статуса, по истории статусов (ADR-049).
+    """
+    quote = connection.ops.quote_name
+    cursor.execute(
+        "SELECT table_name, bool_or(after IS NULL) FROM upload_changes"
+        " WHERE upload_id = %s AND op = 'U' GROUP BY table_name ORDER BY table_name",
+        [upload.pk],
+    )
+    for table, old_journal in cursor.fetchall():
+        if old_journal:
+            report.edits_unknown = True
+            continue
+        cursor.execute(
+            f"""
+            WITH first AS (
+                SELECT DISTINCT ON (row_id) row_id, before
+                FROM upload_changes
+                WHERE upload_id = %(upload)s AND table_name = %(table)s AND op = 'U'
+                ORDER BY row_id, id
+            ), written AS (
+                SELECT c.row_id, jsonb_object_agg(e.key, e.value ORDER BY c.id) AS after
+                FROM upload_changes c CROSS JOIN LATERAL jsonb_each(c.after) AS e
+                WHERE c.upload_id = %(upload)s AND c.table_name = %(table)s AND c.op = 'U'
+                GROUP BY c.row_id
+            )
+            SELECT count(*)
+            FROM first f
+            JOIN {quote(table)} AS t ON t.id = f.row_id
+            LEFT JOIN written w ON w.row_id = f.row_id
+            WHERE EXISTS (
+                SELECT 1 FROM jsonb_each(f.before || coalesce(w.after, '{{}}'::jsonb)) AS s
+                WHERE to_jsonb(t) ? s.key AND to_jsonb(t) -> s.key IS DISTINCT FROM s.value
+            )
+            """,
+            {"upload": upload.pk, "table": table},
+        )
+        (count,) = cursor.fetchone()
+        if count:
+            report.edited[_plural(_model(table))] = count
+
+    since = upload.written_at or upload.created_at
+    for table, (history, column) in _STATUS_HISTORY.items():
+        for op, target in (("U", report.status_edited), ("I", report.status_edited_new)):
+            if op == "U" and not report.edits_unknown:
+                continue  # правки поменянных строк уже посчитаны по журналу
+            cursor.execute(
+                f"""
+                SELECT count(DISTINCT h.{quote(column)})
+                FROM {quote(history)} h
+                JOIN upload_changes c
+                  ON c.upload_id = %s AND c.table_name = %s AND c.op = %s
+                 AND c.row_id = h.{quote(column)}
+                WHERE h.changed_at > %s
+                """,
+                [upload.pk, table, op, since],
+            )
+            (count,) = cursor.fetchone()
+            if count:
+                target[_plural(_model(table))] = count
 
 
 def _restore(cursor: Any, table: str, rows: list[Any]) -> None:
