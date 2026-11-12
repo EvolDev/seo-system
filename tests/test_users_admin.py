@@ -59,10 +59,14 @@ class TestRoles:
         } <= linkbuilder
         assert "content.change_domainsetting" not in linkbuilder
         assert "observability.change_taskrun" not in linkbuilder
+        # Бэкапы — только администратору.
+        assert "observability.view_backuprun" not in linkbuilder
         system = ("auth.", "admin.", "sessions.")
         assert not {code for code in linkbuilder if code.startswith(system)}
         viewer = _codes(roles.VIEWER)
         assert "placements.view_placement" in viewer and "workspace.change_usersettings" in viewer
+        assert "observability.view_taskrun" in viewer
+        assert "observability.view_backuprun" not in viewer
         assert not {
             code for code in viewer if not code.startswith("workspace.") and ".view_" not in code
         }

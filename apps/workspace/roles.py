@@ -42,7 +42,7 @@ HINTS = {
         "Работа, справочники и данные под ними — смотреть, заводить, менять, удалять. Общие"
         " настройки, запуски задач и расход API — только смотреть. Пользователей не видит."
     ),
-    VIEWER: "Смотреть работу, справочники и служебное, ничего не менять.",
+    VIEWER: "Смотреть работу, справочники и служебное (кроме бэкапов), ничего не менять.",
     NONE: "Только особые права ниже. Без них после входа экраны пусты.",
 }
 
@@ -51,7 +51,10 @@ _WORK_APPS = ("sites", "placements", "keywords")
 # Своё рабочее место — у каждого, кто входит.
 _OWN_APPS = ("workspace",)
 # Только смотреть линкбилдеру: общие настройки, промпты, журналы и расход API.
-_READ_ONLY = Q(content_type__app_label="observability") | Q(
+# Журнал бэкапов — дело администратора (пользователь, 12.11.2026: «других не
+# должны такие вещи волновать или попадаться на глаза»).
+_ADMIN_ONLY = Q(content_type__app_label="observability", content_type__model="backuprun")
+_READ_ONLY = (Q(content_type__app_label="observability") & ~_ADMIN_ONLY) | Q(
     content_type__app_label="content",
     content_type__model__in=("domainsetting", "prompttemplate", "promptvariant"),
 )
