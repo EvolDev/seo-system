@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034  # INTERACTIVE, YES читают части пульта
+# Пульт SEO-системы: меню в терминале (E10-02, ADR-081; docs/17-OPERATIONS.md).
+#
+#   deploy/seo                 — на сервере (есть метка .seo-server) или локально
+#   deploy/seo server          — сервер: обновить, откатить, службы, бэкапы…
+#   deploy/seo rehearsal       — то же на тестовой копии прода (8003)
+#   deploy/seo local           — локальная версия: копия базы, вход на сервер
+#   deploy/seo <режим> --run <действие> [--yes]   — без меню
+#
+# Действия без меню: status, update, rollback, history, start, stop,
+# restart-app, restart-queue, restart-all, errors, backup-now, base-now,
+# restore-test, backup-list, restore-copy, restore-copy-stop, restore-rollback,
+# restore-full, disk, prune, local-backup, local-list. Время для restore-* —
+# переменная SEO_WHEN («2026-11-20 14:05»).
+#
+# Весь пульт — функции, работа начинается последней строкой: оболочка читает
+# файл целиком заранее, и обновление, которое меняет сам пульт, не подсунет
+# ей середину нового файла.
+set -euo pipefail
+
+DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# shellcheck source=deploy/ops/common.sh
+source "$DIR/ops/common.sh"
+for part in status release services backups manual local; do
+    # shellcheck source=/dev/null
+    source "$DIR/ops/$part.sh"
+done
+
+header() {
+    local image archive
+    image=$(running_image)
+    if site_ok; then
+        printf 'Сайт открывается · версия %s' "${image##*:}"
+    else
+        printf 'САЙТ НЕ ОТВЕЧАЕТ · версия %s' "${image##*:}"
+    fi
+    archive=$(archive_sql | db_sql 2>/dev/null || true)
+    printf '\n%s' "${archive:-База недоступна}"
+}
+
+server_menu() {
+    local choice title
+    title="SEO-система · $([ "$MODE" = rehearsal ] && echo "тестовая копия прода" || echo сервер)"
+    while true; do
+        choice=$(ui_menu "$title" "$(header)" \
+            status "Состояние системы" \
+            update "Обновить до новой версии" \
+            rollback "Откатить на прошлую версию" \
+            services "Запустить / остановить / перезапустить" \
+            logs "Журналы служб" \
+            backups "Бэкапы: сделать сейчас, проверить, список" \
+            restore "Восстановление" \
+            manual "Ручные команды" \
+            maintenance "Обслуживание: диск, старые образы, история" \
+            quit "Выход")
+        case "$choice" in
+            status) op_status ;;
+            update) op_update || true ;;
+            rollback) op_rollback || true ;;
+            services) op_services || true ;;
+            logs) op_logs || true ;;
+            backups) op_backups || true ;;
+            restore) op_restore || true ;;
+            manual) op_manual || true ;;
+            maintenance) op_maintenance || true ;;
+            quit | "") return 0 ;;
+        esac
+    done
+}
+
+# Действие без меню: --run <действие>.
+run_action() {
+    case "$1" in
+        status) op_status ;;
+        update) op_update ;;
+        rollback) op_rollback ;;
+        history) op_history ;;
+        start) op_start ;;
+        stop) op_stop ;;
+        restart-app) op_restart_app ;;
+        restart-queue) op_restart_queue ;;
+        restart-all) op_restart_all ;;
+        errors) op_errors ;;
+        backup-now) op_backup_now ;;
+        base-now) op_base_now ;;
+        restore-test) op_restore_test ;;
+        backup-list) op_backup_list ;;
+        restore-copy) restore_copy "${SEO_WHEN:?задайте SEO_WHEN}" ;;
+        restore-copy-stop) op_restore_copy_stop ;;
+        restore-rollback)
+            ui_confirm_word "откат базы" ОТКАТИТЬ
+            run_logged restore-rollback restore_rollback "${SEO_WHEN:?задайте SEO_WHEN}"
+            ;;
+        restore-full)
+            if ! volume_empty "$(volume pgdata)"; then
+                fail "том $(volume pgdata) не пустой — это не новый сервер"
+                return 1
+            fi
+            ui_confirm_word "восстановление" ВОССТАНОВИТЬ
+            run_logged restore-full restore_full "${SEO_WHEN:-}"
+            ;;
+        disk) op_disk ;;
+        prune) op_prune ;;
+        local-backup) op_local_backup ;;
+        local-list) op_local_list ;;
+        *)
+            echo "Нет действия «$1»." >&2
+            return 2
+            ;;
+    esac
+}
+
+main() {
+    MODE=${1:-}
+    if [ -z "$MODE" ]; then
+        if [ -f "$ROOT/.seo-server" ]; then MODE=server; else MODE=local; fi
+    fi
+    case "$MODE" in
+        server | rehearsal | local) ;;
+        *)
+            echo "Режим — server, rehearsal или local (описание — в начале deploy/seo)." >&2
+            return 2
+            ;;
+    esac
+    shift || true
+    use_system_time_zone
+
+    local action=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --run)
+                action=${2:?после --run — действие}
+                INTERACTIVE=0
+                shift 2
+                ;;
+            --yes)
+                YES=1
+                shift
+                ;;
+            *)
+                echo "Не понимаю «$1»." >&2
+                return 2
+                ;;
+        esac
+    done
+
+    if [ -n "$action" ]; then
+        run_action "$action"
+        return
+    fi
+    if [ "$MODE" = local ]; then
+        local_menu
+    else
+        server_menu
+    fi
+    clear
+}
+
+main "$@"
+exit $?

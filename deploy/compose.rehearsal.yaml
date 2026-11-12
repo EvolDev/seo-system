@@ -1,0 +1,22 @@
+# Тестовая копия прода в локальной версии (E10-03, ADR-081): хранилища B2 и R2
+# подменяет эмулятор S3 — rclone из образа базы раздаёт папку как хранилище.
+# Ключи настоящих хранилищ не нужны; корзины b2-test и r2-test — две папки.
+#   docker compose -p seo-rehearsal -f compose.prod.yaml -f deploy/compose.rehearsal.yaml \
+#       --env-file <путь>/rehearsal.env up -d --no-build
+services:
+  s3:
+    image: seo-system-postgres:latest
+    user: postgres
+    entrypoint: ["sh", "-c"]
+    command:
+      - mkdir -p /s3data/b2-test /s3data/r2-test
+        && exec rclone serve s3 --addr :9000 --auth-key "test-key,test-secret" /s3data
+    volumes:
+      - s3data:/s3data
+
+  postgres:
+    depends_on:
+      - s3
+
+volumes:
+  s3data:

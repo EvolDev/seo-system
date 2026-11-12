@@ -18,7 +18,8 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
 from apps.integrations.serp import spent_today
-from apps.observability.models import ApiUsage, TaskRun, TaskStatus
+from apps.observability import health
+from apps.observability.models import ApiUsage, BackupRun, BackupStatus, TaskRun, TaskStatus
 from config.admin import RecordAdmin
 
 # Названия задач по-русски. Задачи нет в списке — показывается её имя.
@@ -26,6 +27,7 @@ TASK_LABELS = {
     "heartbeat": "Пульс очереди",
     "queue_probe": "Проверка очереди",
     "import_workbook": "Загрузка таблицы",
+    "system_health": "Здоровье прода",
 }
 # Сколько символов ошибки видно в списке; целиком — на странице запуска.
 ERROR_PREVIEW = 120
@@ -194,3 +196,68 @@ class ApiUsageAdmin(RecordAdmin):
     @admin.display(description="run_id", ordering="run_id")
     def run(self, obj: ApiUsage) -> str | None:
         return str(obj.run_id)[:8] if obj.run_id else None
+
+
+def size_text(size: int | None) -> str | None:
+    """Байты → «37,2 МБ», «1,4 ГБ»."""
+    if size is None:
+        return None
+    for unit, power in (("ГБ", 3), ("МБ", 2), ("КБ", 1)):
+        if size >= 1024**power:
+            return f"{size / 1024**power:.1f} {unit}".replace(".", ",")
+    return f"{size} Б"
+
+
+@admin.register(BackupRun)
+class BackupRunAdmin(RecordAdmin):
+    """Бэкапы и проверки восстановления (ADR-081): пишет контейнер backup прода."""
+
+    list_display = ("started_at", "kind", "target", "result", "size", "duration", "message")
+    list_filter = ("kind", "target", "status", "started_at")
+    ordering = ("-started_at", "-pk")
+    list_per_page = 100
+    fields = (
+        "kind",
+        "target",
+        "status",
+        "started_at",
+        "finished_at",
+        "size",
+        "message",
+        "details_view",
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def changelist_view(
+        self, request: HttpRequest, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        # Над списком — главное: когда что последний раз удалось.
+        subtitle = health.summary()
+        return super().changelist_view(request, {**(extra_context or {}), "subtitle": subtitle})
+
+    @admin.display(description="итог", ordering="status")
+    def result(self, obj: BackupRun) -> str:
+        marks = {BackupStatus.OK: "✓ ", BackupStatus.FAILED: "✗ "}
+        return marks.get(BackupStatus(obj.status), "… ") + obj.get_status_display()
+
+    @admin.display(description="размер", ordering="size_bytes")
+    def size(self, obj: BackupRun) -> str | None:
+        return size_text(obj.size_bytes)
+
+    @admin.display(description="длительность")
+    def duration(self, obj: BackupRun) -> str | None:
+        if obj.finished_at is None:
+            return None
+        return duration_text(int((obj.finished_at - obj.started_at).total_seconds() * 1000))
+
+    @admin.display(description="подробности")
+    def details_view(self, obj: BackupRun) -> SafeString | None:
+        if obj.details is None:
+            return None
+        text = json.dumps(obj.details, ensure_ascii=False, indent=2)
+        return format_html("<pre>{}</pre>", text)

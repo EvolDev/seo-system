@@ -71,6 +71,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             ("keywords", "anchorlist"),
             ("keywords", "keywordposition"),
             ("observability", "taskrun"),
+            ("observability", "backuprun"),
             ("observability", "apiusage"),
         ],
     ),

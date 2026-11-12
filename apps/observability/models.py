@@ -151,6 +151,73 @@ class TaskRun(models.Model):
         return f"{self.task_name} · {self.status}"
 
 
+class BackupKind(models.TextChoices):
+    BASE = "base", "Полный снимок базы"
+    DUMP = "dump", "Ночной дамп базы"
+    UPLOADS = "uploads", "Файлы загрузок"
+    RESTORE_TEST = "restore_test", "Проверка восстановления"
+
+
+class BackupTarget(models.TextChoices):
+    B2 = "b2", "Backblaze B2"
+    R2 = "r2", "Cloudflare R2"
+
+
+class BackupStatus(models.TextChoices):
+    RUNNING = "running", "Идёт"
+    OK = "ok", "Готово"
+    FAILED = "failed", "Ошибка"
+
+
+class BackupRun(models.Model):
+    """Бэкап или проверка восстановления: что, куда, чем кончилось (E10-03, ADR-081).
+
+    Строки пишет контейнер `backup` прода (`deploy/backup/`), а не приложение:
+    снимок базы делается рядом с её файлами. Приложение их показывает
+    («Служебное → Бэкапы») и раз в час проверяет, что свежие есть
+    (`apps/observability/health.py`).
+    """
+
+    kind = models.TextField("что", choices=BackupKind.choices)
+    target = models.TextField("куда", choices=BackupTarget.choices)
+    status = models.TextField(
+        "итог",
+        choices=BackupStatus.choices,
+        default=BackupStatus.RUNNING,
+        db_default=BackupStatus.RUNNING,
+    )
+    started_at = models.DateTimeField("начало", db_default=PgNow())
+    finished_at = models.DateTimeField("конец", null=True, blank=True)
+    size_bytes = models.BigIntegerField("размер, байт", null=True, blank=True)
+    message = models.TextField("сообщение", null=True, blank=True)
+    details = models.JSONField("подробности", null=True, blank=True)
+
+    class Meta:
+        db_table = "backup_runs"
+        verbose_name = "бэкап"
+        verbose_name_plural = "бэкапы"
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["kind", "target", "-started_at"], name="idx_backup_runs_kind"),
+        ]
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(kind__in=BackupKind.values),
+                name="backup_runs_kind_check",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(target__in=BackupTarget.values),
+                name="backup_runs_target_check",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=BackupStatus.values),
+                name="backup_runs_status_check",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} · {self.get_target_display()} · {self.status}"
+
+
 class ApiUsage(models.Model):
     """Расход платного API, кроме LLM: Serper, Ahrefs, Voyage.
 

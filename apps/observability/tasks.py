@@ -4,6 +4,9 @@
 (`CELERY_BEAT_SCHEDULE`). Строка в «Запусках задач» показывает, что beat
 и воркер живы, даже когда других задач нет.
 
+`system_health` — здоровье прода раз в час: архив базы, свежие бэкапы, проверки
+восстановления, диск (`apps/observability/health.py`, ADR-081).
+
 `queue_probe` — проба для `manage.py queue_check`: удачная, падающая на
 каждой попытке, долгая, с общим ключом ограничения скорости или на паузе
 до заданного времени (E2-02).
@@ -16,6 +19,7 @@ from datetime import datetime
 from celery import shared_task
 from django.utils import timezone
 
+from apps.observability import health
 from config.queue import Postpone, QueueTask
 from config.throttle import Throttle
 
@@ -36,6 +40,16 @@ class ProbeError(RuntimeError):
 @shared_task(base=QueueTask, name="heartbeat")
 def heartbeat() -> None:
     logger.info("пульс очереди")
+
+
+@shared_task(base=QueueTask, name="system_health")
+def system_health() -> int:
+    """Беды прода — событиями в GlitchTip; итог — число бед в «Запусках задач»."""
+    problems = health.check()
+    health.report(problems)
+    if not problems:
+        logger.info("прод здоров: архив, бэкапы, проверки восстановления, диск")
+    return len(problems)
 
 
 @shared_task(

@@ -95,6 +95,7 @@ nav:
       - reference/glossary.md
       - reference/background-tasks.md
       - reference/api-spend.md
+      - reference/backups.md
       - reference/sellers-prices-notes.md
       - reference/anchors.md
   - Как это устроено:

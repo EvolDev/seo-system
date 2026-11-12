@@ -6,6 +6,27 @@
 # контейнеров не растут без конца. Тестовая копия в локальной версии — тот же
 # файл со своим именем проекта и файлом окружения (README, «Прод»).
 
+# Имя проекта — тома называются seo_pgdata, seo_uploads…: на них ссылаются пульт
+# (deploy/seo) и инструкция восстановления. Тестовая копия задаёт своё (-p).
+name: seo
+
+# Архив базы в B2 (WAL-G, ADR-081): им пишет сама база (archive_command) и
+# пользуется контейнер backup. Ключи — из .env сервера.
+x-walg-env: &walg-env
+  WALG_S3_PREFIX: s3://${B2_BUCKET:-}/wal-g
+  AWS_ENDPOINT: ${B2_ENDPOINT:-}
+  AWS_REGION: ${B2_REGION:-}
+  AWS_ACCESS_KEY_ID: ${B2_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${B2_APPLICATION_KEY:-}
+  AWS_S3_FORCE_PATH_STYLE: "true"
+  WALG_LIBSODIUM_KEY: ${BACKUP_WALG_KEY:-}
+  WALG_LIBSODIUM_KEY_TRANSFORM: hex
+  WALG_COMPRESSION_METHOD: zstd
+  # Хранилище недоступно — WAL-G сдаётся после трёх попыток, и неудача видна в
+  # pg_stat_archiver за минуты (проверка здоровья пишет в GlitchTip). Отправку
+  # повторяет сама база раз в минуту: файл ждёт на диске, ничего не теряется.
+  WALG_S3_MAX_RETRIES: "3"
+
 # Общее у приложения, воркера и beat: один образ, те же переменные.
 x-app: &app
   build:
@@ -68,15 +89,25 @@ services:
         limits:
           memory: 256M
 
+  # Postgres 16 с WAL-G и инструментами бэкапа (deploy/postgres/Dockerfile).
   postgres:
-    image: postgres:16
+    build:
+      context: ./deploy
+      dockerfile: postgres/Dockerfile
+    # Имя образа — постоянное: выкладка новой версии приложения базу не
+    # перезапускает; образ меняется только вместе с deploy/postgres.
+    image: seo-system-postgres:latest
     restart: unless-stopped
     logging: *logging
     environment:
+      <<: *walg-env
       POSTGRES_DB: ${POSTGRES_DB:?задайте POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?задайте POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}
     # Память под сервер с 8 ГБ: кеш базы — 1 ГБ, остальное читает с диска ОС.
+    # Архив (PG_ARCHIVE_MODE=on): каждое изменение базы не позже чем через
+    # минуту уходит в B2. Не ушло — файл журнала ждёт на диске, ничего не теряется,
+    # а проверка здоровья пишет в GlitchTip.
     command:
       - postgres
       - -c
@@ -87,6 +118,12 @@ services:
       - work_mem=16MB
       - -c
       - maintenance_work_mem=256MB
+      - -c
+      - archive_mode=${PG_ARCHIVE_MODE:-off}
+      - -c
+      - archive_command=/usr/local/bin/wal-g wal-push %p
+      - -c
+      - archive_timeout=60
     # Параллельные запросы держат данные в /dev/shm; штатных 64 МБ Docker мало.
     shm_size: 1g
     volumes:
@@ -100,6 +137,45 @@ services:
       resources:
         limits:
           memory: 3G
+
+  # Бэкапы (E10-03, ADR-081; deploy/backup/): полный снимок базы, ночной дамп и
+  # файлы загрузок в B2 и R2, еженедельная проверка восстановления во временные
+  # базы; каждая — строка «Служебное → Бэкапы». Файлы живой базы и загрузок —
+  # только для чтения. Первый запуск сервера — всё сразу, дальше по расписанию.
+  backup:
+    image: seo-system-postgres:latest
+    restart: unless-stopped
+    logging: *logging
+    user: postgres
+    entrypoint: ["/usr/local/lib/seo-backup/entrypoint.sh"]
+    environment:
+      <<: *walg-env
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:?задайте POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER:?задайте POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}
+      TZ: ${TIME_ZONE:-Europe/Moscow}
+      B2_ENDPOINT: ${B2_ENDPOINT:-}
+      B2_REGION: ${B2_REGION:-}
+      B2_BUCKET: ${B2_BUCKET:-}
+      B2_KEY_ID: ${B2_KEY_ID:-}
+      B2_APPLICATION_KEY: ${B2_APPLICATION_KEY:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      BACKUP_FILES_PASSWORD: ${BACKUP_FILES_PASSWORD:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data:ro
+      - uploads:/uploads:ro
+      - backup_scratch:/scratch
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   # Очередь и кеш. Журнал AOF на томе: очередь переживает перезапуск.
   redis:
@@ -147,5 +223,6 @@ volumes:
   redisdata:
   uploads:
   beat:
+  backup_scratch:
   caddy_data:
   caddy_config:

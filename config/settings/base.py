@@ -129,6 +129,20 @@ TIME_ZONE = env_str("TIME_ZONE", default="Europe/Moscow")
 USE_I18N = True
 USE_TZ = True
 
+# --- Бэкапы (E10-03, ADR-081) ---
+# Бэкапы делает контейнер backup прода (deploy/backup/), приложение раз в час
+# проверяет, что свежие есть (apps/observability/health.py). Локально их нет.
+BACKUP_MONITOR = env_bool("BACKUP_MONITOR", default=False)
+# Полный снимок, ночной дамп и файлы загрузок старше стольких часов — беда.
+BACKUP_MAX_AGE_HOURS = env_int("BACKUP_MAX_AGE_HOURS", default=26)
+# Проверка восстановления старше стольких дней — беда (идёт раз в неделю).
+RESTORE_TEST_MAX_AGE_DAYS = env_int("RESTORE_TEST_MAX_AGE_DAYS", default=8)
+# Изменения базы не уходили в архив дольше — беда: пульс очереди пишет в базу
+# раз в час, и файл архива уходит не реже.
+WAL_ARCHIVE_MAX_AGE_MINUTES = env_int("WAL_ARCHIVE_MAX_AGE_MINUTES", default=120)
+# Диск сервера занят больше стольких процентов — беда.
+DISK_ALERT_PERCENT = env_int("DISK_ALERT_PERCENT", default=80)
+
 # --- Вход и сессия (ADR-081) ---
 # Не заходил столько дней — входит заново; заходит регулярно — не выкидывает
 # (config/session_refresh.py).
@@ -223,6 +237,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "indexation_alerts",
         "schedule": crontab(hour=6, minute=30),
         "options": {"expires": 12 * 60 * 60},
+    },
+    # Здоровье прода (ADR-081): архив базы, бэкапы, проверки восстановления,
+    # диск. В локальной версии проверять нечего — BACKUP_MONITOR выключен.
+    "system_health": {
+        "task": "system_health",
+        "schedule": crontab(minute=15),
+        "options": {"expires": 50 * 60},
     },
     # Курсы ЕЦБ (E1-07, ADR-043): ЕЦБ публикует их в рабочие дни около 16:00 по
     # CET, в 18:00 по Москве они уже есть. Пропущенный день догоняет следующий запуск.

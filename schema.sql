@@ -1,5 +1,6 @@
 -- ============================================================
 -- Система автоматизации линкбилдинга — схема PostgreSQL 16
+-- Версия 1.35 от 09.11.2026 — журнал бэкапов и проверок восстановления (ADR-081)
 -- Версия 1.34 от 08.11.2026 — сделки Collaborator из API и сверка с размещениями (ADR-079, ADR-080)
 -- Версия 1.33 от 28.10.2026 — блокировка правки площадки и размещений (ADR-077)
 -- Версия 1.32 от 24.10.2026 — списки анкоров по регионам (ADR-075)
@@ -907,6 +908,26 @@ CREATE TABLE task_runs (
     run_id       uuid
 );
 CREATE INDEX idx_taskruns_name ON task_runs(task_name, started_at DESC);
+
+-- Бэкапы и проверки восстановления (ADR-081): строки пишет контейнер backup
+-- прода — снимок базы делается рядом с её файлами; приложение показывает их и
+-- раз в час проверяет, что свежие есть.
+CREATE TABLE backup_runs (
+    id           bigserial PRIMARY KEY,
+    kind         text NOT NULL,
+    target       text NOT NULL,
+    status       text NOT NULL DEFAULT 'running',
+    started_at   timestamptz NOT NULL DEFAULT now(),
+    finished_at  timestamptz,
+    size_bytes   bigint,
+    message      text,
+    details      jsonb,
+    CONSTRAINT backup_runs_kind_check
+        CHECK (kind IN ('base','dump','uploads','restore_test')),
+    CONSTRAINT backup_runs_target_check CHECK (target IN ('b2','r2')),
+    CONSTRAINT backup_runs_status_check CHECK (status IN ('running','ok','failed'))
+);
+CREATE INDEX idx_backup_runs_kind ON backup_runs(kind, target, started_at DESC);
 
 -- Стоимость — центы с долями: запрос к выдаче стоит десятую долю цента,
 -- в целых центах он был бы нулём (ADR-040). numeric точен, это не float.

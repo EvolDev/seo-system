@@ -6,7 +6,7 @@ export APP_GID := $(shell id -g)
 COMPOSE := docker compose
 RUN := $(COMPOSE) run --rm app
 
-.PHONY: up down logs restart-queue migrate superuser test e2e check fmt shell docs-check docs-serve
+.PHONY: up down logs restart-queue migrate superuser test e2e check fmt shell docs-check docs-serve ops
 
 up:  ## Поднять окружение (с пересборкой образа, если менялись зависимости)
 	$(COMPOSE) up -d --build
@@ -54,3 +54,8 @@ docs-check:  ## Проверка пользовательской докумен
 
 docs-serve:  ## Просмотр документации: http://127.0.0.1:8001 (8000 занят приложением)
 	$(COMPOSE) run --rm --no-deps -p 127.0.0.1:8001:8001 app mkdocs serve -a 0.0.0.0:8001
+
+# Пульт: меню в терминале — копия локальной базы, меню сервера по SSH, тестовая
+# копия прода (deploy/seo, docs/17-OPERATIONS.md). На сервере — команда seo.
+ops:  ## Пульт: копия локальной базы, меню сервера, тестовая копия прода
+	deploy/seo local
