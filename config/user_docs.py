@@ -36,6 +36,7 @@ from django.http.response import HttpResponseBase
 from django.urls import reverse
 from django.utils._os import safe_join
 from django.utils.cache import patch_cache_control
+from django.utils.http import http_date
 from django.utils.safestring import mark_safe
 from django.views.static import serve
 
@@ -114,20 +115,28 @@ def page(request: HttpRequest, path: str = "") -> HttpResponseBase:
         if folder.is_dir():
             query = request.META.get("QUERY_STRING", "")
             return HttpResponseRedirect(request.path + "/" + (f"?{query}" if query else ""))
-    response = serve(request, path, document_root=str(root))
     home = f'href="{reverse("admin:index")}"'
-    if path.endswith(".html") and response.status_code == 200 and home != BUILT_HOME:
-        # Под секретным путём системы (ADR-081) «в систему» ведёт в его корень.
-        response.close()
-        html = Path(safe_join(root, path)).read_text(encoding="utf-8")
-        rewritten = HttpResponse(
-            html.replace(BUILT_HOME, home), content_type=response["Content-Type"]
-        )
-        rewritten["Last-Modified"] = response["Last-Modified"]
-        response = rewritten
+    if path.endswith(".html") and home != BUILT_HOME:
+        response: HttpResponseBase = _page_with_home(root, path, home)
+    else:
+        response = serve(request, path, document_root=str(root))
     # Каждый раз сверяться с сервером (ответ «не изменилось» — пустой): после
     # выкатки браузер иначе мог бы ещё день показывать прежнюю страницу.
     patch_cache_control(response, private=True, no_cache=True)
+    return response
+
+
+def _page_with_home(root: Path, path: str, home: str) -> HttpResponse:
+    """Страница справки, где «в систему» ведёт в корень секретного пути (ADR-081)."""
+    try:
+        file = Path(safe_join(root, path))
+    except SuspiciousFileOperation as error:
+        raise Http404("Нет такой страницы") from error
+    if not file.is_file():
+        raise Http404("Нет такой страницы")
+    html = file.read_text(encoding="utf-8").replace(BUILT_HOME, home)
+    response = HttpResponse(html, content_type="text/html; charset=utf-8")
+    response["Last-Modified"] = http_date(file.stat().st_mtime)
     return response
 
 

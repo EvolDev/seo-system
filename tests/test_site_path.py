@@ -139,3 +139,12 @@ def test_docs_home_link_follows_path(
     assert 'href="how-to/"' in html
     assert response["Content-Type"].startswith("text/html")
     assert "no-cache" in response["Cache-Control"]
+
+
+@pytest.mark.usefixtures("on_server")
+def test_docs_missing_page_under_path(
+    admin_client: Client, tmp_path: Path, settings: Settings
+) -> None:
+    settings.USER_DOCS_ROOT = tmp_path
+    assert admin_client.get("/tihaya-gavan/docs/nothing/index.html").status_code == 404
+    assert admin_client.get("/tihaya-gavan/docs/../secret.html").status_code == 404
