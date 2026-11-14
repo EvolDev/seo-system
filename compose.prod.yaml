@@ -166,6 +166,9 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
       BACKUP_FILES_PASSWORD: ${BACKUP_FILES_PASSWORD:-}
+      # Чистить копии старше стольких дней — только для хранилища на самом
+      # сервере (storage ниже); у Backblaze это делает правило корзины.
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-}
     volumes:
       - pgdata:/var/lib/postgresql/data:ro
       - uploads:/uploads:ro
@@ -177,6 +180,32 @@ services:
       resources:
         limits:
           memory: 1G
+
+  # Хранилище копий на самом сервере — пока нет Backblaze B2 (ADR-081, уточнение
+  # 14.11.2026): то же «S3», что на тестовой копии, — rclone раздаёт папку тома.
+  # Включается профилем: COMPOSE_PROFILES=local-backup и B2_ENDPOINT=http://storage:9000
+  # в .env (docs/18-SERVER-SETUP.md §11). Наружу не смотрит. От потери самого
+  # сервера не спасает — копию забирать к себе.
+  storage:
+    image: seo-system-postgres:latest
+    profiles: ["local-backup"]
+    restart: unless-stopped
+    logging: *logging
+    user: postgres
+    entrypoint: ["sh", "-c"]
+    command:
+      - mkdir -p "/s3data/$$B2_BUCKET"
+        && exec rclone serve s3 --addr :9000 --auth-key "$$B2_KEY_ID,$$B2_APPLICATION_KEY" /s3data
+    environment:
+      B2_BUCKET: ${B2_BUCKET:-}
+      B2_KEY_ID: ${B2_KEY_ID:-}
+      B2_APPLICATION_KEY: ${B2_APPLICATION_KEY:-}
+    volumes:
+      - backup_storage:/s3data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # Очередь и кеш. Журнал AOF на томе: очередь переживает перезапуск.
   redis:
@@ -230,5 +259,6 @@ volumes:
   uploads:
   beat:
   backup_scratch:
+  backup_storage:
   caddy_data:
   caddy_config:

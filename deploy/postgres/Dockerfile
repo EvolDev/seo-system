@@ -41,4 +41,7 @@ RUN apt-get update \
 RUN mkdir -p /scratch /s3data /restore \
     && chown postgres:postgres /scratch /s3data /restore
 
+# Право на запуск — здесь, а не из папки: в git скрипты могли записаться без него
+# (папка проекта на диске Windows), и на сервере контейнер бэкапов не стартовал бы.
 COPY backup/ /usr/local/lib/seo-backup/
+RUN chmod 755 /usr/local/lib/seo-backup/*.sh

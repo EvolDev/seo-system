@@ -26,4 +26,8 @@ for target in $(copy_targets); do
         || status=1
 done
 rm -rf "$dir"
+# Хранилище на самом сервере — старое удаляем сами (у Backblaze — правило корзины).
+if [ -n "${BACKUP_KEEP_DAYS:-}" ]; then
+    "$LIB/prune.sh" || status=1
+fi
 exit "$status"

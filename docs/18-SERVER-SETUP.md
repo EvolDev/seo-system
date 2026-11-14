@@ -289,7 +289,7 @@ docker compose exec -T postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" -d "$POST
 tar -czf backups/uploads.tgz -C uploads .                     # файлы загрузок (прайсы, каталоги)
 docker compose exec -T postgres sh -c 'psql -XAtq -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
     < deploy/ops/table-counts.sql > backups/counts-local.txt  # сколько строк в каждой таблице
-ls -lh backups/transfer.dump backups/uploads.tgz              # ~37 МБ и ~60 МБ
+ls -lh backups/transfer.dump backups/uploads.tgz              # ~37 МБ и ~15 МБ
 ```
 
 `pg_dump -Fc` — снимок базы в сжатом формате Postgres; локальная база при этом
@@ -514,21 +514,90 @@ docker image prune -f                   # удалить образы, кото�
 
 ---
 
-## 11. Бэкапы — когда будет Backblaze B2
+## 11. Бэкапы
 
-1. Корзина в B2 — `docs/17-OPERATIONS.md` §3 «Хранилища — один раз».
-2. В `.env`: `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`,
-   `BACKUP_WALG_KEY` (`openssl rand -hex 32`), `BACKUP_FILES_PASSWORD`
-   (`openssl rand -base64 32`), `PG_ARCHIVE_MODE=on`, `BACKUP_MONITOR=true`.
-   **Оба ключа шифрования — сразу в менеджер паролей**: без них копии не прочитать.
+Включать после переноса базы (§5). Пока Backblaze B2 нет — копии на самом
+сервере; когда появится — переезд несколькими строками `.env`.
+
+### 11.1. Сейчас: копии на самом сервере
+
+Работает всё то же, что с Backblaze: поминутный архив изменений базы (вернуть
+базу на любую минуту), каждую ночь полный снимок, дамп и файлы загрузок, раз в
+неделю — проверка, что из копий всё восстанавливается, оповещения, «копия базы
+на минуту» в пульте. Лежат копии в отдельном томе Docker (`seo_backup_storage`),
+его раздаёт служба `storage` — то же «хранилище», что на тестовой копии прода.
+Копии старше 14 дней удаляются каждую ночь (`BACKUP_KEEP_DAYS`): несколько
+гигабайт из ваших 140.
+
+**От чего не спасает:** диск сервера умер, сервер взломали или удалили — копии
+пропадут вместе с ним. Поэтому раз в неделю забирайте копию к себе (§11.2), а
+лучше — и снимки сервера у Hetzner (спросить у админа).
+
+1. Ключи — сгенерировать и **сразу в менеджер паролей** (без них копии не прочитать):
+
+```bash
+openssl rand -hex 32         # → BACKUP_WALG_KEY: шифрует архив изменений и снимки
+openssl rand -base64 32      # → BACKUP_FILES_PASSWORD: шифрует дампы и файлы
+openssl rand -hex 16         # → B2_APPLICATION_KEY: пароль к хранилищу на сервере
+```
+
+2. В `.env` — заменить строки бэкапов на эти:
+
+```bash
+COMPOSE_PROFILES=local-backup          # включить службу storage — хранилище на сервере
+B2_ENDPOINT=http://storage:9000        # адрес хранилища внутри сервера
+B2_REGION=us-east-1                    # для хранилища на сервере — любое такое значение
+B2_BUCKET=copies
+B2_KEY_ID=seo
+B2_APPLICATION_KEY=<сгенерированный>
+BACKUP_WALG_KEY=<сгенерированный>
+BACKUP_FILES_PASSWORD=<сгенерированный>
+BACKUP_KEEP_DAYS=14                    # чистить копии старше 14 дней
+PG_ARCHIVE_MODE=on                     # база отправляет каждое изменение в архив
+BACKUP_MONITOR=true                    # раз в час проверять, что копии свежие
+```
+
+На экране **Служебное → Бэкапы** и в пульте хранилище по-прежнему называется
+«B2» — это его роль, основное хранилище; сейчас оно на самом сервере.
+
 3. Применить:
 
 ```bash
-dcp up -d postgres backup      # база перезапустится с архивом изменений, бэкапы проснутся
-dcp logs -f backup             # первый снимок, ночная копия и проверка — сразу
+dcp up -d                      # запустит storage, перезапустит базу с архивом (~10 с) и бэкапы
+dcp logs -f backup             # за минуту: полный снимок, ночная копия, проверка восстановления
 ```
 
-Через несколько минут в **Служебное → Бэкапы** — всё «✓ Готово».
+Ждём «бэкапы по расписанию» в конце; выход — Ctrl+C. В **Служебное → Бэкапы** —
+три строки «✓ Готово».
+
+### 11.2. Раз в неделю — копию к себе на компьютер
+
+Локально, в папке проекта — две команды. Они попросят сервер сделать свежий
+дамп и упаковать файлы загрузок и сразу скачают их к вам, на сервере ничего не
+остаётся:
+
+```bash
+ssh <логин>@<IP> 'cd /opt/seo-system && docker compose -p seo -f compose.prod.yaml exec -T postgres sh -c "pg_dump -Fc -U \$POSTGRES_USER -d \$POSTGRES_DB"' \
+    > backups/server-$(date +%F).dump
+ssh <логин>@<IP> 'cd /opt/seo-system && docker compose -p seo -f compose.prod.yaml run --rm --no-deps -T app tar -cz -C /app/uploads .' \
+    > backups/server-uploads-$(date +%F).tgz
+ls -lh backups/server-*                 # дамп ~40 МБ, файлы ~15 МБ — если 0 байт, что-то не так
+```
+
+`ssh … '<команда>' > файл` — выполнить команду на сервере, а её вывод записать в
+файл у себя. Копии в `backups/` в git не попадают. Старые удаляйте сами, хватит
+последних четырёх. Развернуть такую копию на новом сервере — как в §5.
+
+### 11.3. Потом: переезд в Backblaze B2
+
+1. Корзина в B2 — `docs/17-OPERATIONS.md` §3 «Хранилища — один раз».
+2. В `.env`: `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY` —
+   от Backblaze; строки `COMPOSE_PROFILES` и `BACKUP_KEEP_DAYS` — удалить (в B2
+   старое удаляет правило корзины, а ключам сервера удалять нельзя). Ключи
+   шифрования — те же.
+3. `dcp up -d` — бэкапы увидят, что в новом хранилище пусто, и сразу сделают
+   снимок, копию и проверку. Хранилище на сервере остановится; его том
+   `seo_backup_storage` можно удалить через месяц: `docker volume rm seo_backup_storage`.
 
 ---
 
