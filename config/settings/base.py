@@ -156,6 +156,8 @@ WAL_ARCHIVE_MAX_AGE_MINUTES = env_int("WAL_ARCHIVE_MAX_AGE_MINUTES", default=120
 DISK_ALERT_PERCENT = env_int("DISK_ALERT_PERCENT", default=80)
 
 # --- Вход и сессия (ADR-081) ---
+# Вход по логину или по почте (config/auth.py).
+AUTHENTICATION_BACKENDS = ["config.auth.LoginOrEmailBackend"]
 # Не заходил столько дней — входит заново; заходит регулярно — не выкидывает
 # (config/session_refresh.py).
 SESSION_COOKIE_AGE = env_int("SESSION_DAYS", default=14) * 24 * 60 * 60

@@ -21,6 +21,8 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 
+from config.auth import user_by_login
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,8 +42,11 @@ def client_ip(request: HttpRequest) -> str:
 
 
 def _key(request: HttpRequest, username: str) -> str:
-    # Логин — что угодно из формы: в ключ идёт его отпечаток, а не он сам.
-    login = hashlib.sha256(username.strip().lower().encode()).hexdigest()[:32]
+    # Логин — что угодно из формы: в ключ идёт его отпечаток, а не он сам. Почта
+    # сводится к логину её владельца: попытки по логину и по почте — один счёт.
+    user = user_by_login(username)
+    name = user.get_username() if user is not None else username
+    login = hashlib.sha256(name.strip().lower().encode()).hexdigest()[:32]
     return f"login-fail:{client_ip(request)}:{login}"
 
 
@@ -50,6 +55,10 @@ TOO_MANY = "Слишком много неверных попыток входа
 
 class LimitedLoginForm(AdminAuthenticationForm):
     """Форма входа админки со счётчиком неверных паролей."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["username"].label = "Логин или почта"
 
     def clean(self) -> dict[str, Any]:
         username = str(self.cleaned_data.get("username") or "")

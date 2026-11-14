@@ -195,6 +195,7 @@ class UserForm(forms.ModelForm):  # type: ignore[type-arg]
         help_texts: ClassVar[dict[str, str]] = {
             "first_name": "Так человека видно в окошке блокировки, в «Сотруднике» и в заметках.",
             "username": "Для входа: буквы, цифры и @ . + - _.",
+            "email": "Входить можно и по ней вместо логина.",
             "user_permissions": "",
         }
         widgets: ClassVar[dict[str, Any]] = {"user_permissions": PermissionTable}
@@ -243,6 +244,15 @@ class UserForm(forms.ModelForm):  # type: ignore[type-arg]
                 else "Вход с кодом в этой версии выключен."
             )
         field.help_text = text
+
+    def clean_email(self) -> str:
+        email = str(self.cleaned_data.get("email") or "").strip()
+        # По почте входят (config/auth.py) — у двух людей одной быть не может.
+        if email and (
+            User.objects.filter(email__iexact=email).exclude(pk=self.instance.pk).exists()
+        ):
+            raise forms.ValidationError("Эта почта уже у другого пользователя — по ней входят.")
+        return email
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
