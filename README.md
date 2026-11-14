@@ -61,7 +61,8 @@ Python, Django и остальные пакеты ставить на хост �
    make superuser
    ```
 
-6. Открыть http://localhost:8000/admin/ и войти.
+6. Открыть http://localhost:8000/admin/ и войти. Если в `.env` задан секретный
+   путь `SITE_PATH` — http://localhost:8000/<путь>/ (ADR-081).
 
 7. Поставить хуки git — они не пропустят коммит с битой пользовательской
    документацией (ADR-028). Нужен [uv](https://docs.astral.sh/uv/) на
