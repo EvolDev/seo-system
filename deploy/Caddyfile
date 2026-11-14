@@ -13,6 +13,9 @@
 	servers {
 		protocols h1 h2
 	}
+	# Браузер по IP-адресу не называет сайт (SNI) — без этого Caddy не знает,
+	# какой сертификат показать, и рвёт рукопожатие (internal error).
+	default_sni {$SITE_ADDRESS}
 }
 
 # Сертификат — TLS_MODE (docs/18-SERVER-SETUP.md):
@@ -28,6 +31,7 @@
 	tls {
 		issuer acme {
 			profile shortlived
+			disable_tlsalpn_challenge
 		}
 	}
 }
@@ -37,11 +41,15 @@
 		issuer acme {
 			dir https://acme-staging-v02.api.letsencrypt.org/directory
 			profile shortlived
+			disable_tlsalpn_challenge
 		}
 	}
 }
 
-{$SITE_ADDRESS} {
+# https:// — тот же сайт для соединений без имени (браузер по IP-адресу имени не
+# шлёт): без такого блока Caddy не находит правила соединения и рвёт рукопожатие;
+# сертификат для них — адреса системы (default_sni выше).
+{$SITE_ADDRESS}, https:// {
 	import tls-{$TLS_MODE:auto}
 
 	encode zstd gzip
