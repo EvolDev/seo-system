@@ -209,8 +209,11 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS:?задайте SITE_ADDRESS — домен системы}
       # Секретный путь системы (ADR-081); без него приложение не стартует само.
       SITE_PATH: ${SITE_PATH:-}
+      # Сертификат: auto — домен, ip — Let's Encrypt на IP (deploy/Caddyfile).
+      TLS_MODE: ${TLS_MODE:-auto}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # z — метка SELinux (AlmaLinux): иначе Caddy не прочитает файл с диска.
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro,z
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

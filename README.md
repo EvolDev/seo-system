@@ -128,6 +128,8 @@ Analysis и Referring domains) и файлы размещений загружа
 адрес), `SITE_PATH` — секретный путь: вся система — `https://<адрес>/<путь>/`,
 любой другой адрес Caddy обрывает без ответа (ADR-081).
 
+Новый сервер с нуля, перенос базы и выкладка руками — `docs/18-SERVER-SETUP.md`.
+
 ```bash
 docker compose -f compose.prod.yaml up -d --build    # поднять всё
 docker compose -f compose.prod.yaml run --rm app python manage.py migrate

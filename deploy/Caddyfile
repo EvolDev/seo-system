@@ -15,7 +15,35 @@
 	}
 }
 
+# Сертификат — TLS_MODE (docs/18-SERVER-SETUP.md):
+# - auto — домен: Let's Encrypt; localhost тестовой копии: свой центр Caddy;
+# - ip — Let's Encrypt на IP-адрес, без домена: только короткие сертификаты
+#   (профиль shortlived, 160 часов), Caddy продлевает их сам раз в пару дней;
+# - ip-staging — то же из тестового центра Let's Encrypt: проверить, что выдача
+#   на IP проходит, не тратя лимиты. Браузер такому сертификату не доверяет.
+(tls-auto) {
+}
+
+(tls-ip) {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+}
+
+(tls-ip-staging) {
+	tls {
+		issuer acme {
+			dir https://acme-staging-v02.api.letsencrypt.org/directory
+			profile shortlived
+		}
+	}
+}
+
 {$SITE_ADDRESS} {
+	import tls-{$TLS_MODE:auto}
+
 	encode zstd gzip
 
 	# Файлы каталога Collaborator и прайсов — до 100 МБ.
