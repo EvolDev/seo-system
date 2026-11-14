@@ -52,9 +52,9 @@ status_text() {
         | column -t -s $'\t' || echo "  не запущены"
     echo
     if site_ok; then
-        echo "Сайт: открывается ($(site_url))"
+        echo "Сайт: открывается ($(site_home))"
     else
-        echo "Сайт: НЕ ОТВЕЧАЕТ ($(site_url)/healthz)"
+        echo "Сайт: НЕ ОТВЕЧАЕТ ($(site_home)healthz)"
     fi
     echo
     archive_sql | db_sql 2>/dev/null || echo "База недоступна"

@@ -16,6 +16,10 @@ docs). Рядом проверщик tools/check_user_docs.py кладёт дв�
 
 Какой экран открыт, узнаём по имени адреса админки (`SCREENS`); идентификаторы
 экранов — docs/15-USER-DOCS.md §3.4, там же их ищет проверщик.
+
+Адреса страниц в картах проверщик пишет от корня (`/docs/…`), а на сервере
+справка живёт под секретным путём системы (SITE_PATH, ADR-081): при выдаче
+`/docs/` заменяется на настоящий адрес раздела.
 """
 
 import functools
@@ -29,12 +33,16 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import SuspiciousFileOperation
 from django.http import Http404, HttpRequest, HttpResponseRedirect
 from django.http.response import HttpResponseBase
+from django.urls import reverse
 from django.utils._os import safe_join
 from django.utils.cache import patch_cache_control
 from django.utils.safestring import mark_safe
 from django.views.static import serve
 
 register = template.Library()
+
+# Корень справки в картах screens.json и whatsnew.json (tools/check_user_docs.py).
+BUILT_ROOT = "/docs/"
 
 # Имя адреса админки → экран из 15-USER-DOCS.md §3.4. Панель записи — тот же
 # адрес, что и полная страница, поэтому «?» в панели находит тот же экран.
@@ -125,7 +133,7 @@ def screen_pages(screen: str) -> list[dict[str, str]]:
     if not isinstance(screens, dict):
         return []
     return [
-        {"url": str(found["url"]), "title": str(found["title"])}
+        {"url": _docs_url(str(found["url"])), "title": str(found["title"])}
         for found in screens.get(screen) or []
         if isinstance(found, dict) and "url" in found and "title" in found
     ]
@@ -144,8 +152,17 @@ def whats_new() -> dict[str, Any] | None:
         "version": str(news.get("version") or ""),
         "released": bool(news.get("released")),
         # HTML собран из нашего же журнала при сборке образа — доверяем, как шаблону.
-        "html": mark_safe(str(news["html"])),
+        "html": mark_safe(
+            str(news["html"]).replace(f'href="{BUILT_ROOT}', f'href="{reverse("user_docs")}')
+        ),
     }
+
+
+def _docs_url(url: str) -> str:
+    """Адрес страницы справки из карты — под настоящим адресом раздела."""
+    if url.startswith(BUILT_ROOT):
+        return reverse("user_docs") + url[len(BUILT_ROOT) :]
+    return url
 
 
 def _load(name: str) -> Any:

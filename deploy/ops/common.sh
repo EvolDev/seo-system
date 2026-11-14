@@ -84,10 +84,18 @@ site_url() {
 }
 
 # Сайт отвечает «ok» через Caddy — так же, как людям.
+# Секретный путь системы (ADR-081): снаружи открыт только он.
+site_path() {
+    dc exec -T app printenv SITE_PATH 2>/dev/null || true
+}
+
+# Адрес входа в систему — с секретным путём.
+site_home() {
+    echo "$(site_url)/$(site_path)/"
+}
+
 site_ok() {
-    local url
-    url=$(site_url)
-    [ "$(curl -ks --max-time 10 "$url/healthz" 2>/dev/null)" = ok ]
+    [ "$(curl -ks --max-time 10 "$(site_home)healthz" 2>/dev/null)" = ok ]
 }
 
 # Ждать, пока приложение здорово и сайт отвечает: до 3 минут.

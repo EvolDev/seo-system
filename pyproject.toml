@@ -80,7 +80,8 @@ ignore_missing_imports = true
 django_settings_module = "config.settings.local"
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings.local"
+# Тесты — без секретного пути из .env (config/settings/test.py, ADR-081).
+DJANGO_SETTINGS_MODULE = "config.settings.test"
 # Браузерные проверки (tests/e2e) идут только в make e2e: нужен образ с Chromium.
 addopts = "--strict-markers -m 'not e2e'"
 markers = ["e2e: браузерная проверка экрана, запускается make e2e (ADR-046)"]

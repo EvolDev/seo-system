@@ -43,6 +43,7 @@ LOGIN_OTP_REQUIRED=false         # true — после пароля код из 
 
 # --- Прод: адрес и веб-сервер --- compose.prod.yaml, ADR-081; локально не нужны
 SITE_ADDRESS=                    # домен системы для Caddy: seo.example.com
+SITE_PATH=                       # секретный путь: система — <адрес>/<путь>/, на сервере обязателен; пусто — /admin/
 SECURE_HSTS_SECONDS=0            # «только HTTPS» в браузере; после проверки HTTPS — 31536000
 WEB_WORKERS=3                    # процессов gunicorn
 
@@ -119,7 +120,7 @@ PRIMARY_PRODUCT_DOMAIN=convertio.co
   сессия кончается через столько дней без захода; столько неверных паролей
   подряд — вход для логина с этого адреса закрыт на столько минут после
   последней неудачи;
-- `SITE_ADDRESS`, `SECURE_HSTS_SECONDS`, `WEB_WORKERS` — только прод
+- `SITE_ADDRESS`, `SITE_PATH`, `SECURE_HSTS_SECONDS`, `WEB_WORKERS` — только прод
   (`compose.prod.yaml`): домен для Caddy, срок «только HTTPS» в браузере
   (0, пока HTTPS на сервере не проверен; запомненное браузером не отменить),
   число процессов gunicorn. На тестовой копии прода ещё `ENV_FILE`,

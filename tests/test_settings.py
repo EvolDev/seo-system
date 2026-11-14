@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from types import ModuleType
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from config.logs import ConsoleFormatter, RunIdFilter, SecretsFilter
 from config.settings import base
@@ -27,6 +28,29 @@ def _load_prod() -> ModuleType:
 
 @pytest.mark.usefixtures("reload_base")
 class TestProd:
+    @pytest.fixture(autouse=True)
+    def _site_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # На сервере секретный путь обязателен (ADR-081).
+        monkeypatch.setenv("SITE_PATH", "tihaya-gavan")
+
+    def test_site_path_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("SITE_PATH")
+        with pytest.raises(ImproperlyConfigured, match="SITE_PATH"):
+            _load_prod()
+
+    @pytest.mark.parametrize("value", ["/", "admin x", "Maneki", "ab", "../etc"])
+    def test_site_path_only_simple_words(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+        monkeypatch.setenv("SITE_PATH", value)
+        with pytest.raises(ImproperlyConfigured, match="SITE_PATH"):
+            _load_prod()
+
+    def test_everything_under_site_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SITE_PATH", "/tihaya-gavan/")
+        prod = _load_prod()
+        assert prod.SITE_PATH == "tihaya-gavan"
+        assert prod.URL_ROOT == "tihaya-gavan/"
+        assert prod.STATIC_URL == "tihaya-gavan/static/"
+
     def test_debug_off_even_if_env_says_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DJANGO_DEBUG", "true")
         assert _load_prod().DEBUG is False

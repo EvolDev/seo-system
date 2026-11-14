@@ -174,7 +174,14 @@ OTP_TOTP_ISSUER = "SEO-система"
 # Локально прокси нет, и заголовку из запроса верить нельзя.
 BEHIND_PROXY = False
 
-STATIC_URL = "static/"
+# --- Адрес системы (ADR-081) ---
+# Секретный путь на сервере: вся система — под /<путь>/ (админка — в его корне,
+# справка — /<путь>/docs/, статика — /<путь>/static/), любой другой адрес Caddy
+# обрывает без ответа (deploy/Caddyfile). Локально пусто: /admin/, /docs/, /static/.
+SITE_PATH = env_str("SITE_PATH", default="").strip("/")
+URL_ROOT = f"{SITE_PATH}/" if SITE_PATH else ""
+
+STATIC_URL = f"{URL_ROOT}static/"
 # Статика уровня проекта: расцветки админки (ADR-038).
 STATICFILES_DIRS = [BASE_DIR / "config" / "static"]
 

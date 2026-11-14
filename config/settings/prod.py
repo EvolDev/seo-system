@@ -4,7 +4,11 @@
 запрос gunicorn, статику отдаёт само приложение (WhiteNoise) из образа.
 """
 
-from config.env import env_bool, env_int
+import re
+
+from django.core.exceptions import ImproperlyConfigured
+
+from config.env import env_bool, env_int, env_str
 from config.settings.base import *  # noqa: F403
 from config.settings.base import ALLOWED_HOSTS, DATABASES, MIDDLEWARE
 
@@ -29,6 +33,18 @@ BEHIND_PROXY = True
 # проверен: запомненное не отменить, а на тестовой копии в локальной версии
 # (localhost) оно сломало бы локальную версию в этом браузере.
 SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", default=0)
+
+# Секретный путь системы обязателен: Caddy пропускает только его, остальное
+# обрывает (deploy/Caddyfile, ADR-081). Буквы, цифры и дефис — чтобы адрес
+# одинаково понимали браузер, Caddy и Django.
+SITE_PATH = env_str("SITE_PATH").strip("/")
+if not re.fullmatch(r"[a-z0-9][a-z0-9-]{3,62}", SITE_PATH):
+    raise ImproperlyConfigured(
+        "SITE_PATH — секретный путь системы: строчные латинские буквы, цифры и дефис,"
+        " от 4 знаков, например tihaya-gavan"
+    )
+URL_ROOT = f"{SITE_PATH}/"
+STATIC_URL = f"{URL_ROOT}static/"
 
 # Вход — пароль и код из Google Authenticator у всех (ADR-081). Выключить можно
 # только явно — например, если сломался вход у всех администраторов сразу.

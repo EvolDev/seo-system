@@ -207,6 +207,8 @@ services:
       - "${HTTPS_BIND:-443}:443"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?задайте SITE_ADDRESS — домен системы}
+      # Секретный путь системы (ADR-081); без него приложение не стартует само.
+      SITE_PATH: ${SITE_PATH:-}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

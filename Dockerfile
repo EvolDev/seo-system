@@ -70,9 +70,11 @@ RUN uv sync --frozen --no-install-project --no-default-groups
 COPY --from=docs /opt/user-docs /opt/user-docs
 COPY . .
 # Настройкам при импорте нужны переменные окружения — для сборки статики
-# хватает заглушек: к базе collectstatic не обращается.
+# хватает заглушек: к базе collectstatic не обращается, а файлы в образе лежат
+# одинаково при любом секретном пути (SITE_PATH меняет только адрес раздачи).
 RUN DJANGO_ENV=prod DJANGO_SECRET_KEY=build ALLOWED_HOSTS=build REDIS_URL=redis://build \
         POSTGRES_HOST=build POSTGRES_DB=build POSTGRES_USER=build POSTGRES_PASSWORD=build \
+        SITE_PATH=build \
         python manage.py collectstatic --noinput \
     && mkdir -p /app/uploads /var/lib/celery \
     && chown "$APP_UID:$APP_GID" /app/uploads /var/lib/celery

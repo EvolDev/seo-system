@@ -123,17 +123,20 @@ Analysis и Referring domains) и файлы размещений загружа
 статика внутри, без dev-зависимостей), gunicorn за Caddy с HTTPS, данные —
 в именованных томах, `restart: unless-stopped`, лимиты памяти, журналы
 контейнеров по 5 × 20 МБ. Переменные — `.env` сервера; кроме общих нужны
-`DJANGO_ENV=prod`, `SITE_ADDRESS` (домен), `ALLOWED_HOSTS` (тот же домен).
+`DJANGO_ENV=prod`, `SITE_ADDRESS` (домен или IP), `ALLOWED_HOSTS` (тот же
+адрес), `SITE_PATH` — секретный путь: вся система — `https://<адрес>/<путь>/`,
+любой другой адрес Caddy обрывает без ответа (ADR-081).
 
 ```bash
 docker compose -f compose.prod.yaml up -d --build    # поднять всё
 docker compose -f compose.prod.yaml run --rm app python manage.py migrate
-curl https://<домен>/healthz                         # «ok» — сайт и база живы
+curl https://<адрес>/<путь>/healthz                 # «ok» — сайт и база живы
 ```
 
 **Тестовая копия прода в локальной версии** — тот же файл со своим именем
 проекта и своим файлом окружения (`ENV_FILE`, `SITE_ADDRESS=localhost`,
-`HTTPS_BIND=127.0.0.1:8003`): `https://localhost:8003`, сертификат от
+`HTTPS_BIND=127.0.0.1:8003`): `https://localhost:8003/repetitsiya/` (путь —
+`deploy/compose.rehearsal.yaml`), сертификат от
 внутреннего центра Caddy — браузер предупредит, что не доверяет ему. Рабочую
 базу локальной версии копия только читает (`pg_dump` → `pg_restore` в свою
 базу). Куки сессии у прода — `seo_session`, поэтому вход на 8003 не выкидывает

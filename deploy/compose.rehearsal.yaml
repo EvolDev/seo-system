@@ -1,6 +1,8 @@
 # Тестовая копия прода в локальной версии (E10-03, ADR-081): хранилища B2 и R2
 # подменяет эмулятор S3 — rclone из образа базы раздаёт папку как хранилище.
 # Ключи настоящих хранилищ не нужны; корзины b2-test и r2-test — две папки.
+# Секретный путь — как на сервере (ADR-081): по умолчанию
+# https://localhost:8003/repetitsiya/, свой — переменной SITE_PATH при запуске.
 #   docker compose -p seo-rehearsal -f compose.prod.yaml -f deploy/compose.rehearsal.yaml \
 #       --env-file <путь>/rehearsal.env up -d --no-build
 services:
@@ -17,6 +19,22 @@ services:
   postgres:
     depends_on:
       - s3
+
+  app:
+    environment:
+      SITE_PATH: ${SITE_PATH:-repetitsiya}
+
+  worker:
+    environment:
+      SITE_PATH: ${SITE_PATH:-repetitsiya}
+
+  beat:
+    environment:
+      SITE_PATH: ${SITE_PATH:-repetitsiya}
+
+  caddy:
+    environment:
+      SITE_PATH: ${SITE_PATH:-repetitsiya}
 
 volumes:
   s3data:
