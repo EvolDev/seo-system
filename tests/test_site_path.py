@@ -121,3 +121,21 @@ class TestOnServer:
         news = whats_new()
         assert news is not None
         assert str(news["html"]) == '<a href="/tihaya-gavan/docs/how-to/x/">x</a>'
+
+
+@pytest.mark.usefixtures("on_server")
+def test_docs_home_link_follows_path(
+    admin_client: Client, tmp_path: Path, settings: Settings
+) -> None:
+    """«В систему» в шапке справки собран как /admin/ — выдаётся корнем пути."""
+    (tmp_path / "index.html").write_text(
+        '<a href="/admin/" title="SEO-система">x</a><a href="how-to/">y</a>', encoding="utf-8"
+    )
+    settings.USER_DOCS_ROOT = tmp_path
+    response = admin_client.get("/tihaya-gavan/docs/")
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert 'href="/tihaya-gavan/"' in html and 'href="/admin/"' not in html
+    assert 'href="how-to/"' in html
+    assert response["Content-Type"].startswith("text/html")
+    assert "no-cache" in response["Cache-Control"]

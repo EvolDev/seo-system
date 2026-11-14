@@ -31,7 +31,7 @@ from django import template
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import SuspiciousFileOperation
-from django.http import Http404, HttpRequest, HttpResponseRedirect
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.http.response import HttpResponseBase
 from django.urls import reverse
 from django.utils._os import safe_join
@@ -43,6 +43,9 @@ register = template.Library()
 
 # Корень справки в картах screens.json и whatsnew.json (tools/check_user_docs.py).
 BUILT_ROOT = "/docs/"
+# Ссылка «в систему» в шапке каждой страницы справки (mkdocs.yml, extra.homepage):
+# сайт собирается один на любой путь системы, настоящий адрес — при выдаче.
+BUILT_HOME = 'href="/admin/"'
 
 # Имя адреса админки → экран из 15-USER-DOCS.md §3.4. Панель записи — тот же
 # адрес, что и полная страница, поэтому «?» в панели находит тот же экран.
@@ -112,6 +115,16 @@ def page(request: HttpRequest, path: str = "") -> HttpResponseBase:
             query = request.META.get("QUERY_STRING", "")
             return HttpResponseRedirect(request.path + "/" + (f"?{query}" if query else ""))
     response = serve(request, path, document_root=str(root))
+    home = f'href="{reverse("admin:index")}"'
+    if path.endswith(".html") and response.status_code == 200 and home != BUILT_HOME:
+        # Под секретным путём системы (ADR-081) «в систему» ведёт в его корень.
+        response.close()
+        html = Path(safe_join(root, path)).read_text(encoding="utf-8")
+        rewritten = HttpResponse(
+            html.replace(BUILT_HOME, home), content_type=response["Content-Type"]
+        )
+        rewritten["Last-Modified"] = response["Last-Modified"]
+        response = rewritten
     # Каждый раз сверяться с сервером (ответ «не изменилось» — пустой): после
     # выкатки браузер иначе мог бы ещё день показывать прежнюю страницу.
     patch_cache_control(response, private=True, no_cache=True)
