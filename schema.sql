@@ -225,6 +225,9 @@ CREATE INDEX idx_prices_pending ON site_prices(site_id) WHERE reviewed_at IS NUL
 CREATE INDEX idx_prices_withdrawn ON site_prices(site_id, seller_id, placement_type, checked_at)
     WHERE withdrawn;
 ALTER TABLE sites ADD FOREIGN KEY (price_id) REFERENCES site_prices(id);
+-- Удаление цены проверяет, не рабочая ли она у площадки: без индекса — полный
+-- проход по sites на каждую цену (отмена загрузки, 16.11.2026).
+CREATE INDEX idx_sites_price ON sites(price_id);
 
 CREATE TABLE gray_scans (
     id             bigserial PRIMARY KEY,
@@ -400,6 +403,11 @@ CREATE TABLE upload_items (
     source_value    text                             -- адрес из файла, если там не домен
 );
 CREATE INDEX idx_upload_items_upload ON upload_items(upload_id, review_group);
+-- Удаление площадки или цены проверяет, не ссылается ли на неё строка разбора:
+-- без индексов — полный проход по upload_items на каждую (отмена загрузки, 16.11.2026).
+CREATE INDEX idx_upload_items_site ON upload_items(site_id);
+CREATE INDEX idx_upload_items_price ON upload_items(price_id);
+CREATE INDEX idx_upload_items_ref_price ON upload_items(ref_price_id);
 
 -- Журнал загрузки (ADR-060): строка, которую запись загрузки вставила, поменяла
 -- или удалила. Пишет триггер log_upload_change, пока в транзакции стоит номер

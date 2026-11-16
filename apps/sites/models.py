@@ -356,6 +356,11 @@ class Site(models.Model):
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=["domain"], name="sites_domain_key"),
         ]
+        # Удаление цены проверяет, не рабочая ли она у площадки: без индекса —
+        # полный проход по sites на каждую цену (отмена загрузки, 0033).
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["price"], name="idx_sites_price"),
+        ]
 
     def __str__(self) -> str:
         return self.domain
@@ -1213,6 +1218,11 @@ class UploadItem(models.Model):
         verbose_name_plural = "строки разбора"
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=["upload", "review_group"], name="idx_upload_items_upload"),
+            # Удаление площадки или цены проверяет, не ссылается ли на неё строка
+            # разбора: без индексов — полный проход по upload_items на каждую (0033).
+            models.Index(fields=["site"], name="idx_upload_items_site"),
+            models.Index(fields=["price"], name="idx_upload_items_price"),
+            models.Index(fields=["ref_price"], name="idx_upload_items_ref_price"),
         ]
 
     def __str__(self) -> str:
