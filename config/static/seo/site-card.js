@@ -116,6 +116,33 @@
     });
   }
 
+  // Страна площадки (ADR-082): выбор из 249 стран подгружается по ✎, а не с
+  // каждой карточкой — с ним карточка весила вдвое больше. Не загрузился —
+  // «Факты о площадке», там та же страна выпадающим списком (адрес ссылки).
+  function editCountry(button) {
+    var tile = button.closest(".seo-card-country");
+    var place = tile && tile.querySelector("dd");
+    if (!place) return;
+    fetch(button.getAttribute("data-country-edit"), { credentials: "same-origin" })
+      .then(function (response) {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.text();
+      })
+      .then(function (html) {
+        if (!place.isConnected) return;
+        place.innerHTML = html;
+        tile.classList.add("is-editing");
+        var picker = place.querySelector("[data-country-picker]");
+        if (!picker || !window.seoCountryPicker) return;
+        window.seoCountryPicker(picker);
+        var input = picker.querySelector(".seo-country-input");
+        if (input) input.focus();
+      })
+      .catch(function () {
+        window.location.href = button.href;
+      });
+  }
+
   // ---------- Обработчики на document — один раз ----------
 
   if (!window.seoSiteCard) {
@@ -162,6 +189,12 @@
           setOpen(section, true);
           syncAll(cardOf(section));
         }
+        return;
+      }
+      var country = target.closest("[data-country-edit]");
+      if (country) {
+        event.preventDefault();
+        editCountry(country);
       }
     });
 

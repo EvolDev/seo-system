@@ -413,7 +413,9 @@ class SiteAdmin(RecordAdmin):
             ),
             path(
                 "<int:object_id>/card/country/",
-                self.admin_site.admin_view(require_POST(self.card_country_view)),
+                self.admin_site.admin_view(
+                    require_http_methods(["GET", "POST"])(self.card_country_view)
+                ),
                 name="sites_site_card_country",
             ),
             path(
@@ -647,10 +649,21 @@ class SiteAdmin(RecordAdmin):
         return self._back_to_card(request, object_id)
 
     def card_country_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
-        """Страна площадки выбором в карточке (ADR-082); пусто — «не указана»."""
+        """Страна площадки выбором в карточке (ADR-082); пусто — «не указана».
+
+        GET — сам выбор: плитка «Страна» подгружает его по ✎, а не с каждой
+        карточкой (249 стран удваивали её вес). POST — сохранить.
+        """
         site = get_object_or_404(Site.all_objects, pk=object_id)
         if not self._may_change(request, site):
             return HttpResponse(status=403)
+        if request.method == "GET":
+            context = {
+                "site": site,
+                "country_url": reverse("admin:sites_site_card_country", args=[site.pk]),
+                "all_countries": countries.all_countries(),
+            }
+            return TemplateResponse(request, "admin/sites/site/card_country.html", context)
         refusal = self._claim(request, site)
         if refusal is not None:
             return refusal
@@ -936,11 +949,10 @@ def _card_context(
         "note_url": reverse("admin:sites_site_card_note", args=[site.pk]),
         "add_offer_url": reverse("admin:sites_siteprice_add") + f"?site={site.pk}",
         "change_url": reverse("admin:sites_site_change", args=[site.pk]),
-        # Страна площадки (ADR-082) — выбором с флагами в плитке «Страна».
+        # Страна площадки (ADR-082): плитка «Страна», выбор — по ✎ (card_country_view).
         "country_url": reverse("admin:sites_site_card_country", args=[site.pk]),
         "country_flag": countries.flag_html(site.country),
         "country_name": countries.name(site.country) if site.country else "",
-        "all_countries": countries.all_countries(),
     }
 
 

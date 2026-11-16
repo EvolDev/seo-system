@@ -39,16 +39,8 @@ docs/prototypes/site-card.html). Одна и та же разметка — в �
     <div class="seo-card-fact"><dt>Трафик</dt><dd>{{ traffic_text }}{% if latest.metrics_at %}<small>замер {{ latest.metrics_at|date:"d.m.Y" }}</small>{% endif %}</dd></div>
     <div class="seo-card-fact"><dt>Топ-регион</dt><dd>{% if latest.top_geo %}{{ geo_flag }}{{ latest.top_geo|upper }}{% if geo_traffic_text %} {{ geo_traffic_text }}{% endif %}{% else %}—{% endif %}</dd></div>
     <div class="seo-card-fact"><dt>Язык</dt><dd>{{ latest.language|default:site.language|default:"—" }}</dd></div>
-    {# Страна площадки (ADR-082): из каталога продавца или выбором здесь; выбор с флагами — seo/country-picker.js, отправка — seo/site-card.js. #}
-    <div class="seo-card-fact seo-card-country"><dt>Страна</dt><dd>{% if can_change %}<form method="post" action="{{ country_url }}" data-card-form class="seo-inline-form">{% csrf_token %}
-      <div class="seo-country" data-country-picker data-auto data-label="Страна площадки" data-placeholder="Бразилия, br…">
-        <select name="country" data-site-country aria-label="Страна площадки">
-          <option value=""{% if not site.country %} selected{% endif %}>не указана</option>
-          {% for country in all_countries %}<option value="{{ country.code }}"{% if country.code == site.country %} selected{% endif %} data-search="{{ country.search }}"{% if country.flag %} data-flag="{{ country.flag }}"{% endif %}>{{ country.label }}</option>{% endfor %}
-        </select>
-      </div>
-      <noscript><button type="submit">Сохранить</button></noscript>
-    </form>{% elif site.country %}{{ country_flag }}{{ country_name }}{% else %}—{% endif %}</dd></div>
+    {# Страна площадки (ADR-082): из каталога продавца или выбором по ✎ — список стран подгружает seo/site-card.js (card_country.html), без скрипта ✎ ведёт в «Факты о площадке». #}
+    <div class="seo-card-fact seo-card-country"><dt>Страна</dt><dd><span class="seo-card-country-name"{% if site.country %} title="{{ country_name }}"{% endif %}>{% if site.country %}{{ country_flag }}{{ country_name }}{% else %}—{% endif %}</span>{% if can_change %} <a href="{{ change_url }}" class="seo-card-country-edit" data-country-edit="{{ country_url }}" title="Изменить страну площадки" aria-label="Изменить страну площадки">✎</a>{% endif %}</dd></div>
     <div class="seo-card-fact"><dt>Серость</dt><dd>{% if gray.latest %}<span class="seo-card-zone seo-gray-{{ gray.latest.zone|default:'none' }}"{% if gray.latest.zone %} title="{{ gray.latest.zone_title }}"{% endif %}>{{ gray.latest.percent }}</span><small>{{ gray.latest.day }}</small>{% else %}—<small>замеров нет</small>{% endif %}</dd></div>
     <div class="seo-card-fact"><dt>Рабочая цена</dt><dd>{% if working %}{{ working_eur }}<small>{% if working_original %}{{ working_original }} · {% endif %}{{ working.get_placement_type_display }}</small>{% elif withdrawn_at %}—<small>не продаётся с {{ withdrawn_at|date:"d.m.Y" }}</small>{% else %}—<small>не выбрана</small>{% endif %}</dd></div>
   </dl>

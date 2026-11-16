@@ -60,10 +60,15 @@ body.admin-interface .seo-card-title { margin: 0; font-size: 1.25rem; }
   white-space: normal;
 }
 .seo-card-fact .seo-flag { margin-right: 4px; }
-/* Страна площадки (ADR-082) — выбор с флагами прямо в плитке: плитка шире,
-   выпадающий список не обрезается её краем. */
-.seo-card-country { grid-column: span 2; }
-.seo-card-country dd { overflow: visible; font-weight: 400; white-space: normal; }
+/* Страна площадки (ADR-082): ✎ рядом с названием; по нему в плитке — выбор с
+   флагами, плитка шире, выпадающий список не обрезается её краем. */
+.seo-card-country:not(.is-editing) dd { display: flex; align-items: baseline; }
+/* Обрезается название, а не ✎: «Доминиканская Республика» в узкой плитке. */
+.seo-card-country-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.seo-card-country-edit { flex: none; margin-left: 4px; font-weight: 400; text-decoration: none; opacity: .7; }
+.seo-card-country-edit:hover, .seo-card-country-edit:focus-visible { opacity: 1; }
+.seo-card-country.is-editing { grid-column: span 2; }
+.seo-card-country.is-editing dd { overflow: visible; font-weight: 400; white-space: normal; }
 .seo-card-country .seo-country { width: 100%; }
 .seo-card-zone { display: inline-block; padding: 0 7px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .seo-card-zone.seo-gray-green { background: var(--seo-down-bg); color: var(--seo-down); }

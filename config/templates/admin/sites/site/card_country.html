@@ -1,0 +1,15 @@
+{% comment %}
+Выбор страны площадки (ADR-082) — плитка «Страна» карточки подгружает его по ✎
+(seo/site-card.js): 249 стран с каждой карточкой удваивали её вес. Выбор с
+флагами и поиском — seo/country-picker.js, сохраняется сразу при выборе
+(data-site-country, data-card-form — панель покажет обновлённую карточку).
+{% endcomment %}
+<form method="post" action="{{ country_url }}" data-card-form class="seo-inline-form">{% csrf_token %}
+  <div class="seo-country" data-country-picker data-label="Страна площадки" data-placeholder="Бразилия, br…">
+    <select name="country" data-site-country aria-label="Страна площадки">
+      <option value=""{% if not site.country %} selected{% endif %}>не указана</option>
+      {% for country in all_countries %}<option value="{{ country.code }}"{% if country.code == site.country %} selected{% endif %} data-search="{{ country.search }}"{% if country.flag %} data-flag="{{ country.flag }}"{% endif %}>{{ country.label }}</option>{% endfor %}
+    </select>
+  </div>
+  <noscript><button type="submit">Сохранить</button></noscript>
+</form>

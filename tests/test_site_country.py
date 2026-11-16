@@ -271,11 +271,25 @@ class TestFilter:
 
 
 class TestCard:
-    def test_card_shows_country_picker(self, admin_client: Client, convertio: Product) -> None:
+    def test_card_shows_country_without_the_list(
+        self, admin_client: Client, convertio: Product
+    ) -> None:
+        # 249 стран в каждой карточке удваивали её вес — выбор подгружается по ✎.
         site = Site.objects.create(domain="publico.pt", country="pt")
         page = admin_client.get(reverse("admin:sites_site_card", args=[site.pk])).content.decode()
+        tile = page[page.index("seo-card-country") : page.index("Серость")]
+        assert "Португалия" in tile
+        assert reverse("admin:sites_site_card_country", args=[site.pk]) in tile
+        assert 'name="country"' not in page
+
+    def test_picker_is_loaded_on_demand(self, admin_client: Client) -> None:
+        site = Site.objects.create(domain="publico.pt", country="pt")
+        response = admin_client.get(reverse("admin:sites_site_card_country", args=[site.pk]))
+        assert response.status_code == 200
+        page = response.content.decode()
         assert 'name="country" data-site-country' in page
         assert '<option value="pt" selected' in page
+        assert page.count("<option") == len(countries.all_countries()) + 1  # и «не указана»
 
     @pytest.mark.parametrize(("posted", "stored"), [("br", "br"), ("PT", "pt"), ("", None)])
     def test_card_sets_country(
@@ -292,13 +306,14 @@ class TestCard:
         site = Site.objects.create(domain="site.com")
         url = reverse("admin:sites_site_card_country", args=[site.pk])
         assert admin_client.post(url, {"country": "zz"}).status_code == 400
-        assert admin_client.get(url).status_code == 405
+        assert admin_client.put(url).status_code == 405
 
     def test_readonly_user_cannot_set(self, client: Client, django_user_model: type[User]) -> None:
         site = Site.objects.create(domain="site.com")
         client.force_login(django_user_model.objects.create_user("viewer", is_staff=True))
         url = reverse("admin:sites_site_card_country", args=[site.pk])
         assert client.post(url, {"country": "br"}).status_code == 403
+        assert client.get(url).status_code == 403
         site.refresh_from_db()
         assert site.country is None
 

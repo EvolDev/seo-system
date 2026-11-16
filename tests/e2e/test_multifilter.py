@@ -9,7 +9,7 @@ import datetime as dt
 
 import pytest
 from django.utils import timezone
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 from pytest_django.live_server_helper import LiveServer
 
 from apps.sites.models import MetricSource, Product, Seller, Site, SitePrice
@@ -42,35 +42,41 @@ def sellers() -> None:
         )
 
 
-def _open_filter(page: Page) -> None:
-    """Меню продавцов свёрнуто: разворачиваем, иначе поле не нажать."""
-    page.locator(".seo-multifilter", has_text="Продавец").locator("summary").click()
-    expect(page.locator(SEARCH)).to_be_visible()
+def _open_filter(page: Page) -> Locator:
+    """Меню продавцов свёрнуто: разворачиваем, иначе поле не нажать.
+
+    Пункты ищем только в нём: на странице есть и другие фильтры с галочками
+    («Страна площадки», ADR-082).
+    """
+    menu = page.locator(".seo-multifilter", has_text="Продавец")
+    menu.locator("summary").click()
+    expect(menu.locator(SEARCH)).to_be_visible()
+    return menu
 
 
 def test_search_narrows_the_list(admin_page: Page, live_server: LiveServer, sellers: None) -> None:
     """Критерий: поле сужает пункты на месте, «Все» остаётся."""
     page = admin_page
     page.goto(f"{live_server.url}{SITES}")
-    _open_filter(page)
+    menu = _open_filter(page)
 
-    before = page.locator(ITEMS).count()
+    before = menu.locator(ITEMS).count()
     assert before > 5, before
 
-    page.locator(SEARCH).fill("chaudhary")
+    menu.locator(SEARCH).fill("chaudhary")
     # Остаются «Все» и Chaudhary Adeel: скрытые действительно скрыты.
-    expect(page.locator(ITEMS)).to_have_count(2)
-    expect(page.locator(ITEMS, has_text="Chaudhary Adeel")).to_have_count(1)
-    expect(page.locator(".seo-multi-item", has_text="Athena Smith")).to_be_hidden()
+    expect(menu.locator(ITEMS)).to_have_count(2)
+    expect(menu.locator(ITEMS, has_text="Chaudhary Adeel")).to_have_count(1)
+    expect(menu.locator(".seo-multi-item", has_text="Athena Smith")).to_be_hidden()
 
-    page.locator(SEARCH).fill("")
-    expect(page.locator(ITEMS)).to_have_count(before)
+    menu.locator(SEARCH).fill("")
+    expect(menu.locator(ITEMS)).to_have_count(before)
 
 
 def test_nothing_found_is_said(admin_page: Page, live_server: LiveServer, sellers: None) -> None:
     page = admin_page
     page.goto(f"{live_server.url}{SITES}")
-    _open_filter(page)
-    page.locator(SEARCH).fill("такого продавца нет")
-    expect(page.locator(".seo-multi-empty")).to_be_visible()
-    expect(page.locator(ITEMS)).to_have_count(1)  # только «Все»
+    menu = _open_filter(page)
+    menu.locator(SEARCH).fill("такого продавца нет")
+    expect(menu.locator(".seo-multi-empty")).to_be_visible()
+    expect(menu.locator(ITEMS)).to_have_count(1)  # только «Все»
