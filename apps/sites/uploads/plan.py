@@ -20,6 +20,7 @@
 """
 
 import datetime as dt
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
@@ -29,6 +30,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.placements.models import Placement, PlacementStatus
+from apps.sites import countries
 from apps.sites.models import (
     PlacementType,
     ProductSite,
@@ -79,6 +81,7 @@ class SiteState:
     # Услуги, которые этот продавец снял с продажи позже даты файла (ADR-068):
     # старый файл площадку обратно в продажу не возвращает.
     withdrawn: set[str] = field(default_factory=set)
+    country: str | None = None  # страна площадки в базе (ADR-082)
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,44 @@ class Plan:
             **_capped("urls", urls),
             **_capped("blocked", [{"domain": domain} for domain in sorted(blocked)]),
             "unknown": list(unknown),
+            **self._countries(planned),
+        }
+
+    def _countries(self, records: Sequence[Record]) -> dict[str, Any]:
+        """Страна площадки из файла (ADR-082): какие страны, что поменяется, что не узнали.
+
+        Страну пишет последняя загрузка: была в базе другая — станет как в файле.
+        Не узнали название — страна не пишется, строка записывается как обычно.
+        """
+        found = Counter(r.country for r in records if r.country)
+        unknown = Counter(r.country_unknown for r in records if r.country_unknown)
+        filled = 0
+        changed: list[dict[str, Any]] = []
+        for record in records:
+            site = self.sites.get(record.domain)
+            if site is None or record.country is None or site.country == record.country:
+                continue
+            if site.country is None:
+                filled += 1
+            else:
+                changed.append(
+                    {
+                        "domain": record.domain,
+                        "old": countries.name(site.country),
+                        "new": countries.name(record.country),
+                    }
+                )
+        return {
+            "countries": [
+                {"code": code, "name": countries.name(code), "count": count}
+                for code, count in found.most_common()
+            ],
+            "country_filled": filled,
+            **_capped("country_changed", sorted(changed, key=lambda row: row["domain"])),
+            **_capped(
+                "country_unknown",
+                [{"value": value, "count": count} for value, count in unknown.most_common()],
+            ),
         }
 
 
@@ -327,13 +368,13 @@ def load_state(
     price_ids: dict[int, int] = {}
     for domain_chunk in _chunks(domains):
         rows = Site.all_objects.filter(domain__in=domain_chunk).values_list(
-            "id", "domain", "is_deleted", "price_id"
+            "id", "domain", "is_deleted", "price_id", "country"
         )
-        for site_id, domain, is_deleted, price_id in rows:
+        for site_id, domain, is_deleted, price_id, country in rows:
             if is_deleted:
                 deleted[domain] = site_id
                 continue
-            sites[domain] = SiteState(site_id, domain)
+            sites[domain] = SiteState(site_id, domain, country=country)
             if price_id is not None:
                 price_ids[site_id] = price_id
     blocked_site_ids = blocked_ids(state.id for state in sites.values())

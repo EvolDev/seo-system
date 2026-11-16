@@ -37,6 +37,29 @@
     {% for row in data.urls %}<li>Строка {{ row.line }}: «{{ row.value }}» → {{ row.domain }}</li>{% empty %}<li class="seo-flat">нет</li>{% endfor %}
   </ul>
 </div>
+{# Страна площадки из колонки «Страна площадки» (ADR-082): пишет последняя загрузка. #}
+{% if data.countries or data.country_unknown_total %}
+  <div class="seo-box">
+    <h3>Страна площадки</h3>
+    <ul>
+      {% for row in data.countries %}<li>{{ row.name }} — {{ row.count }}</li>{% endfor %}
+    </ul>
+    {% if data.country_filled %}<p class="seo-hint">Площадкам базы без страны — страна из файла: {{ data.country_filled }}.</p>{% endif %}
+    {% if data.country_changed_total %}
+      <p class="seo-hint">Была другая страна — по файлу новая: {{ data.country_changed_total }}.</p>
+      <ul>
+        {% for row in data.country_changed %}<li><b>{{ row.domain }}</b>: {{ row.old }} → {{ row.new }}</li>{% endfor %}
+        {% if data.country_changed_total > data.country_changed|length %}<li class="seo-flat">всего {{ data.country_changed_total }}</li>{% endif %}
+      </ul>
+    {% endif %}
+    {% if data.country_unknown_total %}
+      <p class="seo-hint">Не узнали — у этих площадок страна не пишется, остальное записывается:</p>
+      <ul>
+        {% for row in data.country_unknown %}<li>«{{ row.value }}» — {{ row.count }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}
 {% if data.unknown %}
   <div class="seo-box">
     <h3>Незнакомые значения — записаны как есть</h3>

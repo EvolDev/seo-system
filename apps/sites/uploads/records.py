@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
 
+from apps.sites import countries
 from apps.sites.models import PlacementType
 from apps.sites.uploads import values
 from apps.sites.uploads.columns import Field
@@ -37,6 +38,10 @@ class Record:
     link_type: str | None = None
     link_types: dict[PlacementType, str | None] = field(default_factory=dict)
     note: str | None = None
+    # Страна площадки (ADR-082): код по справочнику; не узнали — значение из файла
+    # в `country_unknown`, страну не пишем, строка не ошибка.
+    country: str | None = None
+    country_unknown: str | None = None
     extra: dict[str, str] = field(default_factory=dict)  # заголовок → значение
     card: dict[str, object] | None = None  # факты карточки — только из каталога
 
@@ -171,6 +176,11 @@ def _price_row(row: Row, columns: Mapping[Field, Column], extra: Sequence[Column
         )
     note = cell(Field.NOTE)
     record.note = None if is_blank(note) else show(note)
+    country = cell(Field.COUNTRY)
+    if not is_blank(country):
+        record.country = countries.find(show(country))
+        if record.country is None:
+            record.country_unknown = show(country)
     for column in extra:
         value = row.get(column.index)
         if not is_blank(value):

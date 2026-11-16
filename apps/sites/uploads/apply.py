@@ -156,6 +156,8 @@ class Writer:
                 fields = {k: v for k, v in record.card.items() if k in CARD_FIELDS}
             else:
                 fields = {"source": self.seller.name}
+            if Part.CARD in self.parts and record.country is not None:
+                fields["country"] = record.country
             new.append(Site(domain=record.domain, **fields))
         # Удалённая раньше площадка не создаётся заново (домен уникален и среди
         # удалённых), а возвращается: пометка снимается, описание обновляется.
@@ -168,7 +170,10 @@ class Writer:
             self.site_ids[site.domain] = site.pk
         if restored:
             names = {"is_deleted", "updated_at"} | {
-                name for site in restored for name in CARD_FIELDS if getattr(site, name) is not None
+                name
+                for site in restored
+                for name in (*CARD_FIELDS, "country")
+                if getattr(site, name) is not None
             }
             Site.all_objects.bulk_update(restored, sorted(names), batch_size=BATCH)
         self.counts["sites_restored"] = len(restored)
@@ -182,12 +187,20 @@ class Writer:
         self.counts["sites_created"] = len(created)
 
     def _update_sites(self) -> None:
-        """Факты карточки из каталога; тип ссылки записывается отдельно у предложения."""
+        """Факты карточки из каталога; тип ссылки записывается отдельно у предложения.
+
+        Страну площадки (ADR-082) пишет последняя загрузка, где она есть: была
+        другая — станет как в файле. Что поменяется, сводка показала до записи.
+        """
         records = {
             item.record.domain: item.record
             for item in self.plan.items
             if item.site is not None
-            and (item.record.card is not None or item.record.link_type is not None)
+            and (
+                item.record.card is not None
+                or item.record.link_type is not None
+                or item.record.country is not None
+            )
         }
         if not records:
             return
@@ -213,6 +226,10 @@ class Writer:
                             f"{_show(updates[name])}"
                         )
                     setattr(site, name, updates[name])
+                if record.country is not None and site.country != record.country:
+                    site.country = record.country
+                    diff.append("country")
+                    self.counts["countries_updated"] += 1
                 if diff:
                     site.updated_at = self.now
                     fields.update(diff)

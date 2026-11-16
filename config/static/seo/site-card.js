@@ -165,9 +165,10 @@
       }
     });
 
+    // Тип ссылки и страна площадки (ADR-082) сохраняются сразу при выборе.
     document.addEventListener("change", function (event) {
       var field = event.target;
-      if (!field.matches || !field.matches("[data-link-type]") || !cardOf(field)) return;
+      if (!field.matches || !field.matches("[data-link-type], [data-site-country]") || !cardOf(field)) return;
       var form = field.closest("form");
       if (form.requestSubmit) form.requestSubmit();
       else form.submit();

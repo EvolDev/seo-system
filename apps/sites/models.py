@@ -321,6 +321,10 @@ class Site(models.Model):
     source = models.TextField("источник", null=True, blank=True)
     language = models.TextField("основной язык", null=True, blank=True)
     languages = ArrayField(models.TextField(), verbose_name="языки", null=True, blank=True)
+    # Страна площадки (ADR-082) — что о ней говорит продавец в каталоге или человек
+    # в карточке: код строчными, как у выгрузок Ahrefs (`br`). Не регион Ahrefs —
+    # тот замер трафика по странам (ADR-045). Пусто — не знаем.
+    country = models.CharField("страна площадки", max_length=2, null=True, blank=True)
     topics = ArrayField(models.TextField(), verbose_name="тематики", null=True, blank=True)
     declared_topics = ArrayField(
         models.TextField(), verbose_name="особые тематики", null=True, blank=True

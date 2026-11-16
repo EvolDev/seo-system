@@ -1,4 +1,4 @@
-"""Страны выгрузок Ahrefs и регионов «Площадок» (ADR-045).
+"""Страны выгрузок Ahrefs, регионов «Площадок» (ADR-045) и страна площадки (ADR-082).
 
 Код — две буквы строчными, как его пишет Ahrefs: `us`, `gb`, `in`. Названия
 — из django-countries: по-русски для экрана, по-английски для поиска (в
@@ -44,14 +44,17 @@ SHORT = {
 }
 # Значок «все страны» вместо флага — у «Все страны» и «Все».
 GLOBE = "globe"
-# Как ещё ищут страну: сокращения и названия, которых нет в справочнике.
-ALIASES = {
-    "us": "usa америка соединённые штаты united states",
-    "gb": "uk англия британия great britain",
-    "ae": "uae эмираты",
-    "cz": "czech republic",
-    "kr": "korea корея",
-    "ru": "russian federation",
+# Как ещё называют страну: сокращения и названия, которых нет в справочнике или
+# которые там другие. Каталоги продавцов пишут «United States» и «Turkey», а в
+# справочнике — «United States of America» и «Türkiye» (sites.xlsx, 16.11.2026).
+ALIASES: dict[str, tuple[str, ...]] = {
+    "us": ("usa", "америка", "соединённые штаты", "united states"),
+    "gb": ("uk", "англия", "британия", "great britain"),
+    "ae": ("uae", "эмираты"),
+    "cz": ("czech republic",),
+    "kr": ("korea", "корея"),
+    "ru": ("russian federation",),
+    "tr": ("turkey",),
 }
 
 
@@ -60,6 +63,8 @@ class Country:
     code: str  # us
     name: str  # США — по-русски, для экрана
     search: str  # всё, по чему страну находит поиск, строчными
+    # Названия целиком — код, по-русски, по-английски, синонимы: по ним `find`.
+    names: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -109,9 +114,35 @@ def _all() -> tuple[Country, ...]:
     result = []
     for code, official in russian.items():
         name = SHORT.get(code, official)
-        terms = [code, name, official, english.get(code, ""), ALIASES.get(code, "")]
-        result.append(Country(code, name, " ".join(terms).lower().replace("ё", "е")))
+        terms = [code, name, official, english.get(code, ""), *ALIASES.get(code, ())]
+        names = tuple(dict.fromkeys(_key(term) for term in terms if term))
+        result.append(Country(code, name, " ".join(terms).lower().replace("ё", "е"), names))
     return tuple(sorted(result, key=lambda c: c.name))
+
+
+def _key(text: str) -> str:
+    """Название для сравнения: строчными, «ё» как «е», пробелы — по одному."""
+    return " ".join(text.casefold().replace("ё", "е").split())
+
+
+@cache
+def _by_name() -> dict[str, str]:
+    result: dict[str, str] = {}
+    for country in _all():
+        for name in country.names:
+            result.setdefault(name, country.code)
+    return result
+
+
+def find(text: str | None) -> str | None:
+    """Код страны по названию целиком: «Brazil», «Бразилия», «BR», «USA» → код.
+
+    Не узнали — None. Слова по отдельности не ищем: «United Arab Emirates» — не
+    США, а «Guinea» — не «Equatorial Guinea».
+    """
+    if not text:
+        return None
+    return _by_name().get(_key(text))
 
 
 def all_countries() -> tuple[Country, ...]:

@@ -278,6 +278,21 @@ class SiteAdmin(RecordAdmin):
         """Право менять площадку, без оглядки на блокировку: заметка, звёздочка."""
         return super().has_change_permission(request, site)
 
+    def formfield_for_dbfield(
+        self, db_field: "models.Field[Any, Any]", request: HttpRequest, **kwargs: Any
+    ) -> forms.Field | None:
+        # Страна площадки (ADR-082) — из справочника, а не текстом: код строчными,
+        # как её пишут загрузка и карточка, иначе фильтр «Страна площадки» её не найдёт.
+        if db_field.name == "country":
+            known = [(country.code, country.label) for country in countries.all_countries()]
+            return forms.TypedChoiceField(
+                label=str(db_field.verbose_name).capitalize(),
+                required=False,
+                empty_value=None,
+                choices=[("", "не указана"), *known],
+            )
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
     def _claim(self, request: HttpRequest, site: Site) -> HttpResponse | None:
         """Запись в карточку: блокировка — за этим человеком; держит другой — отказ."""
         key = locks.site_key(site.pk)
@@ -395,6 +410,11 @@ class SiteAdmin(RecordAdmin):
                 "<int:object_id>/card/link-type/",
                 self.admin_site.admin_view(require_POST(self.card_link_type_view)),
                 name="sites_site_card_link_type",
+            ),
+            path(
+                "<int:object_id>/card/country/",
+                self.admin_site.admin_view(require_POST(self.card_country_view)),
+                name="sites_site_card_country",
             ),
             path(
                 "<int:object_id>/card/",
@@ -624,6 +644,21 @@ class SiteAdmin(RecordAdmin):
             return JsonResponse({"error": "Неизвестный тип ссылки."}, status=400)
         offer = get_object_or_404(SitePrice, pk=_posted_id(request, "offer"), site=site)
         offers.set_link_type(offer, value, author=request.user)
+        return self._back_to_card(request, object_id)
+
+    def card_country_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        """Страна площадки выбором в карточке (ADR-082); пусто — «не указана»."""
+        site = get_object_or_404(Site.all_objects, pk=object_id)
+        if not self._may_change(request, site):
+            return HttpResponse(status=403)
+        refusal = self._claim(request, site)
+        if refusal is not None:
+            return refusal
+        value = (request.POST.get("country") or "").strip().lower() or None
+        if value is not None and not countries.is_known(value):
+            return JsonResponse({"error": "Неизвестная страна."}, status=400)
+        if site.country != value:
+            Site.all_objects.filter(pk=site.pk).update(country=value, updated_at=timezone.now())
         return self._back_to_card(request, object_id)
 
     def card_keep_view(self, request: HttpRequest, object_id: int) -> HttpResponse:
@@ -901,6 +936,11 @@ def _card_context(
         "note_url": reverse("admin:sites_site_card_note", args=[site.pk]),
         "add_offer_url": reverse("admin:sites_siteprice_add") + f"?site={site.pk}",
         "change_url": reverse("admin:sites_site_change", args=[site.pk]),
+        # Страна площадки (ADR-082) — выбором с флагами в плитке «Страна».
+        "country_url": reverse("admin:sites_site_card_country", args=[site.pk]),
+        "country_flag": countries.flag_html(site.country),
+        "country_name": countries.name(site.country) if site.country else "",
+        "all_countries": countries.all_countries(),
     }
 
 
@@ -2217,6 +2257,29 @@ class OffersFilter(admin.SimpleListFilter):
         return queryset
 
 
+def _rows_without(
+    own: admin.ListFilter, changelist: Any, request: HttpRequest
+) -> models.QuerySet[Any]:
+    """Строки списка со всеми фильтрами и поиском, кроме `own`, — для чисел у пунктов.
+
+    Штатный способ — `changelist.get_queryset(request, exclude_parameters=...)`,
+    как считает свои фасеты сама админка. Он собирает все фильтры страницы
+    заново, а каждый из них спрашивает базу про свои пункты: это десять лишних
+    запросов на экран. Поэтому берём уже собранные фильтры страницы и применяем
+    их сами, без своего.
+    """
+    rows: models.QuerySet[Any] = changelist.root_queryset
+    for spec in changelist.filter_specs:
+        if spec is own:
+            continue
+        narrowed = spec.queryset(request, rows)
+        if narrowed is not None:
+            rows = narrowed
+    if changelist.query:
+        rows, _ = changelist.model_admin.get_search_results(request, rows, changelist.query)
+    return rows.order_by()
+
+
 class SellerFilter(MultiChoiceFilter):
     """Площадки, которые предлагает продавец: есть его текущее предложение.
 
@@ -2253,26 +2316,8 @@ class SellerFilter(MultiChoiceFilter):
                 yield {**choice, "display": f"{choice['display']} ({count})"}
 
     def _counts(self, changelist: Any) -> dict[int, int]:
-        """Продавец → площадок в списке со всеми фильтрами, кроме этого. Один запрос.
-
-        Штатный способ — `changelist.get_queryset(request,
-        exclude_parameters=...)`, как считает свои фасеты сама админка. Он
-        собирает все фильтры страницы заново, а каждый из них спрашивает базу
-        про свои пункты: это десять лишних запросов на экран. Поэтому берём
-        уже собранные фильтры страницы и применяем их сами, без своего.
-        """
-        rows = changelist.root_queryset
-        for spec in changelist.filter_specs:
-            if spec is self:
-                continue
-            narrowed = spec.queryset(self.request, rows)
-            if narrowed is not None:
-                rows = narrowed
-        if changelist.query:
-            rows, _ = changelist.model_admin.get_search_results(
-                self.request, rows, changelist.query
-            )
-        rows = rows.order_by()
+        """Продавец → площадок в списке со всеми фильтрами, кроме этого. Один запрос."""
+        rows = _rows_without(self, changelist, self.request)
         # Цена продавца считается, если после неё он не снимал площадку с продажи
         # (ADR-068): так в одном запросе по таблице получаются ровно текущие
         # предложения. Подсчёт по представлению текущих предложений стоил втрое
@@ -2416,6 +2461,66 @@ class RegionFilter(admin.SimpleListFilter):
                 "flag": countries.flag_code(lookup),
                 "search": country.search if country else lookup,
             }
+
+
+class SiteCountryFilter(MultiChoiceFilter):
+    """Страна площадки (ADR-082): что о ней говорит продавец или человек в карточке.
+
+    Не «Регион» (ADR-045): тот — трафик по странам из Ahrefs, строки не отбирает.
+    Отметить можно несколько — «Бразилия» и «Португалия». В пунктах — страны,
+    которые есть у площадок базы, с числом площадок в списке, и «Не указана»:
+    иначе, сняв одну страну, человек терял бы и все площадки, страна которых
+    неизвестна.
+    """
+
+    title = "страна площадки"
+    parameter_name = "country"
+    unknown = "none"
+    _counted: dict[str, int] | None = None
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        codes = Site.objects.exclude(country__isnull=True).values_list("country", flat=True)
+        present = {code for code in codes.distinct().order_by() if code}
+        known = [(c.code, c.label) for c in countries.all_countries() if c.code in present]
+        # Код не из справочника — не прячем: так его видно и можно исправить.
+        odd = [(code, code.upper()) for code in sorted(present - {c for c, _ in known})]
+        return [*known, *odd, (self.unknown, "Не указана")]
+
+    @property
+    def show_search(self) -> bool:
+        # Поле поиска — по странам, что есть в списке, а не по всем площадкам базы.
+        return len(self._counted or ()) >= self.search_from
+
+    def choices(self, changelist: Any) -> Iterator[Any]:
+        if self._counted is None:
+            self._counted = self._counts(changelist)
+        counts = self._counted
+        picked = set(self.values())
+        items = super().choices(changelist)
+        yield next(items)  # «Все»
+        for (value, _), choice in zip(self.lookup_choices, items, strict=True):
+            count = counts.get(str(value), 0)
+            if count or str(value) in picked:
+                yield {**choice, "display": f"{choice['display']} ({count})"}
+
+    def _counts(self, changelist: Any) -> dict[str, int]:
+        """Страна → площадок в списке со всеми фильтрами, кроме этого. Один запрос."""
+        rows = _rows_without(self, changelist, self.request)
+        found = (
+            Site.all_objects.filter(pk__in=rows.values("site_id"))
+            .order_by()
+            .values("country")
+            .annotate(sites=Count("pk"))
+            .values_list("country", "sites")
+        )
+        return {code or self.unknown: sites for code, sites in found}
+
+    def narrow(self, queryset: Any, values: list[str]) -> Any:
+        codes = [value for value in values if value != self.unknown]
+        condition = Q(site__country__in=codes)
+        if self.unknown in values:
+            condition |= Q(site__country__isnull=True)
+        return queryset.filter(condition)
 
 
 class EuroPriceRangeFilter(NumericRangeFilter):  # type: ignore[misc]
@@ -2619,6 +2724,7 @@ class ProductSiteLatestAdmin(RecordAdmin):
         OffersFilter,
         SellerFilter,
         WorkingLinkTypeFilter,
+        SiteCountryFilter,
         RegionFilter,
         # Диапазон — поля «С» и «До» (django-admin-rangefilter, ADR-038).
         ("dr", NumericRangeFilter),

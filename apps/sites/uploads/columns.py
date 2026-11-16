@@ -34,6 +34,7 @@ class Field(StrEnum):
     TRAFFIC = "organic_traffic"
     KEYWORDS = "total_keywords"
     LINK_TYPE = "link_type"
+    COUNTRY = "country"
     NOTE = "note"
     EXTRA = "extra"
     SKIP = "skip"
@@ -56,6 +57,7 @@ FIELD_LABELS: dict[Field, str] = {
     Field.TRAFFIC: "Органический трафик",
     Field.KEYWORDS: "Ключей в органике",
     Field.LINK_TYPE: "Тип ссылки (dofollow / nofollow)",
+    Field.COUNTRY: "Страна площадки",
     Field.NOTE: "Наша заметка — в историю заметок",
     Field.EXTRA: "Прочие данные",
     Field.SKIP: "Не загружать",
@@ -187,6 +189,21 @@ _EXACT: dict[str, Field] = {
             "follow",
         ),
         Field.LINK_TYPE,
+    ),
+    # Страна, о которой площадка (ADR-082): sites.xlsx — «country». Трафик по
+    # странам («Top Geo Traffic», «US Traffic») сюда не попадает: в нём «traffic».
+    **dict.fromkeys(
+        (
+            "country",
+            "site country",
+            "region",
+            "geo",
+            "страна",
+            "страна сайта",
+            "регион",
+            "гео",
+        ),
+        Field.COUNTRY,
     ),
 }
 # Цена без указания услуги: публикация, а если в файле есть колонка услуги — её цена.
@@ -345,6 +362,12 @@ def _guess(column: Column, tokens: set[str], *, has_service: bool) -> Guess:
         return Guess(Field.KEYWORDS, Confidence.LIKELY)
     if tokens & {"follow", "dofollow", "nofollow", "rel"}:
         return Guess(Field.LINK_TYPE, Confidence.LIKELY)
+    if tokens & {"country", "страна", "region", "регион", "geo", "гео"}:
+        return Guess(
+            Field.COUNTRY,
+            Confidence.LIKELY,
+            "Страна, о которой площадка. Если это трафик по странам — «Прочие данные».",
+        )
     if tokens & {"comment", "comments", "комментарий", "комментарии", "примечание", "заметка"}:
         return Guess(Field.NOTE, Confidence.LIKELY, "Похоже на наши пометки — пойдут в заметки.")
     # Заголовок ничего не сказал — смотрим на сами значения: «BLOG» со списком
