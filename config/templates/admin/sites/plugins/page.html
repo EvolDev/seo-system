@@ -1,0 +1,64 @@
+{% extends "admin/base_site.html" %}
+{% comment %}
+Экран «Плагины» (Работа → Плагины, ADR-084): расширения браузера с кнопкой
+«Скачать» и инструкцией рядом. Какая версия стоит у человека, пишет seo/plugins.js:
+расширение (relay.js) кладёт свою версию в data-seo-extension у <html>.
+Данные — apps/sites/plugins_view.py, архив — apps/sites/plugins.py.
+{% endcomment %}
+{% load seo_assets %}
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% asset 'seo/plugins.css' %}">
+{% endblock %}
+{% block extrahead %}{{ block.super }}
+<script src="{% asset 'seo/plugins.js' %}" defer></script>
+{% endblock %}
+{% block bodyclass %}{{ block.super }} seo-plugins-page{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Начало</a> › Плагины</div>{% endblock %}
+{% block content %}
+<div class="seo-plugins">
+{% for item in items %}{% with plugin=item.plugin %}
+  <article class="seo-plugin" data-plugin="{{ plugin.code }}" data-version="{{ plugin.version }}" aria-labelledby="plugin-{{ plugin.code }}">
+    <div class="seo-plugin-main">
+      <header class="seo-plugin-head">
+        <h2 id="plugin-{{ plugin.code }}">{{ plugin.name }}</h2>
+        <span class="seo-plugin-version">версия {{ plugin.version }}</span>
+      </header>
+      <p class="seo-plugin-status" data-plugin-status role="status">Проверяю, стоит ли расширение в этом браузере…</p>
+      <p>Подставляет числа «About N results» со страниц Google в карточку площадки, раздел
+        <b>Серость в Google</b>: обе кнопки нажали — замер сохранился сам. Работает в Opera, Edge и Chrome.</p>
+      <ul class="seo-plugin-facts">
+        <li>Читает только те страницы Google, которых ждёт открытая карточка площадки, — ваши обычные поиски не трогает.</li>
+        <li>Если Google спрятал оценку, само нажимает <b>Tools</b>.</li>
+        <li>Замер сохраняет сама система, под вашим входом. Разрешений браузера расширению не нужно.</li>
+      </ul>
+      <a class="seo-btn seo-btn-primary seo-plugin-download" href="{{ item.download_url }}" download="{{ plugin.filename }}">Скачать .zip · {{ plugin.version }}</a>
+      <p class="seo-sub">Архив уже настроен на адрес системы, с которого вы его скачали.</p>
+    </div>
+    <section class="seo-plugin-help" aria-labelledby="plugin-{{ plugin.code }}-install">
+      <h3 id="plugin-{{ plugin.code }}-install">Как поставить</h3>
+      <ol>
+        <li>Скачайте архив и распакуйте его в постоянное место, например в «Документы». Внутри — папка
+          <code>{{ plugin.archive_folder }}</code>. Не удаляйте и не переносите её потом: браузер берёт расширение оттуда.</li>
+        <li>Откройте страницу расширений браузера — адрес вставьте в адресную строку:
+          <table class="seo-plugin-browsers">
+            <tr><th>Opera</th><td><code>opera://extensions</code></td></tr>
+            <tr><th>Edge</th><td><code>edge://extensions</code></td></tr>
+            <tr><th>Chrome</th><td><code>chrome://extensions</code></td></tr>
+          </table>
+        </li>
+        <li>Включите <b>Режим разработчика</b> (в Opera и Chrome — справа вверху, в Edge — слева).</li>
+        <li>Нажмите <b>Загрузить распакованное расширение</b> и выберите папку <code>{{ plugin.archive_folder }}</code>.</li>
+        <li>Перезагрузите вкладки системы (F5) — на уже открытых расширение заработает только после этого. Вверху
+          этой страницы появится «У вас стоит версия …».</li>
+      </ol>
+      <h3>Как обновить</h3>
+      <p>Когда здесь написано «обновите»: скачайте новый архив и распакуйте его поверх той же папки, заменив файлы.
+        На странице расширений нажмите у него <b>Обновить</b> (значок ↻) и перезагрузите вкладки системы.</p>
+      <h3>Если не работает</h3>
+      <p>Проверьте, что расширение включено на странице расширений и вкладка системы перезагружена. Без
+        расширения числа можно вписать в карточку руками — кнопка «?» вверху ведёт к справке.</p>
+    </section>
+  </article>
+{% endwith %}{% endfor %}
+</div>
+{% endblock %}

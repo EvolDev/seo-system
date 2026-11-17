@@ -28,6 +28,8 @@ from config.session_refresh import mark_login
 ECONOMICS = ("placements", "economics")
 # «Сверка с Collaborator» (E11-01) — тоже свой экран.
 COLLABORATOR = ("placements", "collaborator")
+# «Плагины» (ADR-084) — расширение браузера с кнопкой «Скачать», тоже свой экран.
+PLUGINS = ("sites", "plugins")
 
 # Группы меню: (название, код группы, [(приложение, модель)]). Порядок — как в меню.
 MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
@@ -41,6 +43,7 @@ MENU: list[tuple[str, str, list[tuple[str, str]]]] = [
             COLLABORATOR,
             ("placements", "invoice"),
             ECONOMICS,
+            PLUGINS,
         ],
     ),
     (
@@ -133,6 +136,18 @@ class SeoAdminSite(admin.AdminSite):
                     "add_url": None,
                     "perms": {"view": True},
                 }
+        # Импорт здесь: модуль сайта читается вместе с приложением админки, раньше моделей.
+        from apps.sites import plugins_view
+
+        if request.user.has_perm(plugins_view.PERMISSION):
+            models[PLUGINS] = {
+                "name": "Плагины",
+                "object_name": "Plugins",
+                "admin_url": reverse("admin:plugins"),
+                "view_only": True,
+                "add_url": None,
+                "perms": {"view": True},
+            }
         groups: list[dict[str, Any]] = []
         placed = set(HIDDEN)
         for name, code, keys in MENU:
@@ -160,6 +175,7 @@ class SeoAdminSite(admin.AdminSite):
         # загружается вместе с приложением админки, раньше моделей.
         from apps.placements import economics_view
         from apps.placements.collaborator import views as collaborator
+        from apps.sites import plugins_view
         from apps.workspace import views
         from config import otp
 
@@ -173,6 +189,13 @@ class SeoAdminSite(admin.AdminSite):
             path("economics/", self.admin_view(economics_view.view), name="economics"),
             # Сверка с Collaborator (E11-01): экран, «Обновить из Collaborator», действия.
             path("collaborator/", self.admin_view(collaborator.page_view), name="collaborator"),
+            # Плагины (ADR-084): расширение браузера — страница и архив для скачивания.
+            path("plugins/", self.admin_view(plugins_view.page), name="plugins"),
+            path(
+                "plugins/<slug:code>/download/",
+                self.admin_view(plugins_view.download),
+                name="plugin_download",
+            ),
             path(
                 "collaborator/refresh/",
                 self.admin_view(require_POST(collaborator.refresh_view)),
@@ -248,7 +271,10 @@ class SeoAdminSite(admin.AdminSite):
         from config import user_docs
 
         context = {
-            "home_cards": _home_cards(work["models"]) if work else [],
+            # «Плагины» на главную не выходят: расширение ставят один раз (ADR-084).
+            "home_cards": _home_cards([m for m in work["models"] if m["object_name"] != "Plugins"])
+            if work
+            else [],
             "home_app_list": [group for group in groups if group["app_label"] != WORK],
             # «Что нового» — верхний раздел журнала изменений (E9-07).
             "whats_new": user_docs.whats_new(),

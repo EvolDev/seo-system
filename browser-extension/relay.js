@@ -5,9 +5,14 @@
  * Число для такого запроса отдаёт странице сообщением окна
  * `{ type: "seo-gray-reading", … }` — его принимает seo/gray-scan.js.
  * Записывает замер уже сама карточка, под входом человека.
+ * Свою версию кладёт в data-seo-extension у <html> — для страницы «Плагины».
  */
 (function () {
   "use strict";
+
+  // Версию видит страница «Плагины» (ADR-084): актуальная ли, не пора ли обновить.
+  // DOM у страницы и скрипта расширения общий, переменные — нет.
+  document.documentElement.dataset.seoExtension = chrome.runtime.getManifest().version;
 
   function norm(text) {
     return String(text || "").replace(/\s+/g, " ").trim();

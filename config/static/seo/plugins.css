@@ -1,0 +1,54 @@
+/* Экран «Плагины» (ADR-084): карточка расширения — описание и кнопка слева,
+   инструкция справа; на узком экране — одна под другой. Цвета — переменные
+   расцветок (admin-palettes.css). */
+
+.seo-plugins { display: grid; gap: 16px; max-width: 1100px; }
+
+.seo-plugin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--hairline-color, var(--border-color));
+  border-radius: 8px;
+  background: var(--darkened-bg);
+}
+@media (max-width: 860px) {
+  .seo-plugin { grid-template-columns: minmax(0, 1fr); }
+}
+
+.seo-plugin-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.seo-plugin-head h2 { margin: 0; font-size: 1.25rem; }
+.seo-plugin-version {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--selected-bg);
+  color: var(--body-fg);
+  font-size: 0.75rem;
+}
+
+.seo-plugin-status {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline-color, var(--border-color));
+  color: var(--body-quiet-color);
+}
+.seo-plugin.is-current .seo-plugin-status { background: var(--message-success-bg); color: var(--body-fg); }
+.seo-plugin.is-outdated .seo-plugin-status { background: var(--message-warning-bg); color: var(--body-fg); }
+.seo-plugin.is-missing .seo-plugin-status { background: var(--message-warning-bg); color: var(--body-fg); }
+
+.seo-plugin-facts { margin: 8px 0 16px; padding-left: 18px; }
+.seo-plugin-facts li { margin: 4px 0; list-style: disc; }
+.seo-plugin-download { display: inline-block; margin-bottom: 6px; }
+
+.seo-plugin-help h3 { margin: 0 0 8px; font-size: 0.9375rem; }
+.seo-plugin-help h3:not(:first-child) { margin-top: 16px; }
+.seo-plugin-help ol { margin: 0; padding-left: 20px; }
+.seo-plugin-help ol li { margin: 6px 0; list-style: decimal; }
+.seo-plugin-help code { overflow-wrap: anywhere; }
+
+.seo-plugin-browsers { margin: 6px 0 2px; border-collapse: collapse; }
+.seo-plugin-browsers th,
+.seo-plugin-browsers td { padding: 3px 12px 3px 0; border: 0; background: none; text-align: left; }
+.seo-plugin-browsers th { font-weight: 600; color: var(--body-fg); }
