@@ -5,7 +5,12 @@
 # - supercronic — расписание бэкапов в контейнере backup;
 # - jq — разбор ответов WAL-G и сверка таблиц при проверке восстановления.
 # Образ общий у служб postgres и backup: архив пишет сама база, остальное — backup.
-FROM postgres:16
+#
+# Postgres — точной сборкой (16.16), а не меткой «16»: метка на Docker Hub
+# переезжает на новые сборки, и выкладка 17.11.2026 пересобрала образ и
+# перезапустила базу, хотя `deploy/postgres/` не менялся. Обновить Postgres —
+# сменить digest здесь отдельной выкладкой (docs/17-OPERATIONS.md, §2).
+FROM postgres:16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
 
 ARG WALG_VERSION=v3.0.9
 ARG WALG_SHA256=d6795c663894d836ba20840bffe8970aed81bbe25d3151bd4951f6f9c362def9
