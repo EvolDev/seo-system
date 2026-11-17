@@ -292,6 +292,8 @@ def _view(model_admin: ModelAdmin[Placement], request: HttpRequest) -> HttpRespo
                     "issues": plan.issues,
                     "examples": examples,
                     "domain": first["site__domain"] if first else "",
+                    # Размещения без цены их продавца — ячейки цен пустые (ADR-083).
+                    "missing_prices": design.missing_prices(records, config),
                 }
             )
         if action != "open":

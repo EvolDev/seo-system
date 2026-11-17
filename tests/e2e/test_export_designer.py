@@ -13,7 +13,7 @@ from playwright.sync_api import Page, expect
 from pytest_django.live_server_helper import LiveServer
 
 from apps.placements.models import Placement
-from apps.sites.models import ExchangeRate, Product, Site
+from apps.sites.models import ExchangeRate, Product, Seller, Site
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True, serialized_rollback=True)]
 URL = "/admin/placements/placement/export-designer/"
@@ -213,3 +213,38 @@ def test_currency_choice_converts_and_is_remembered(
     page.reload()
     expect(page.locator("#currency-to")).to_have_value("EUR")
     expect(paid.locator(".sample-value")).to_have_text("80.00")
+
+
+def test_price_source_switch(admin_page: Page, live_server: LiveServer, offer: Any) -> None:
+    """Чьи цены (ADR-083): новый шаблон — размещения, переключение — рабочая, запоминается."""
+    site = Site.objects.create(domain="brasil247.com")
+    offer(site, 32000, seller=Seller.objects.create(name="star5media"))
+    morgan = Seller.objects.create(name="Morgan Hugh")
+    Placement.objects.create(
+        site=site,
+        product=Product.objects.create(name="Convertio", domain="convertio.co"),
+        seller=morgan,
+        placement_type="guest_post",
+        price=offer(site, 28000, seller=morgan, working=False),
+    )
+    page = admin_page
+    page.goto(live_server.url + URL)
+    expect(page.locator("#server-status")).to_contain_text("Готово: 1 строк")
+    deal = page.locator('[name="price-source"][value="deal"]')
+    working = page.locator('[name="price-source"][value="working"]')
+    expect(deal).to_be_checked()
+    price = page.locator(
+        "#columns tr",
+        has=page.locator('[data-action="header"][value="Цена размещения статья, EUR"]'),
+    )
+    expect(price.locator(".sample-value")).to_have_text("280.00")
+    expect(price.locator(".field-description")).to_contain_text("через которое его взяли")
+
+    working.check()
+    expect(price.locator(".sample-value")).to_have_text("320.00")
+    expect(page.locator("#pricehelp")).to_contain_text("рабочая цена площадки")
+    expect(price.locator(".field-description")).to_contain_text("другого продавца")
+    page.wait_for_timeout(1000)
+    page.reload()
+    expect(working).to_be_checked()
+    expect(price.locator(".sample-value")).to_have_text("320.00")

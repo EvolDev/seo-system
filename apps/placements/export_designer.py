@@ -6,6 +6,13 @@
 на все строки; «Пересчитать в» — куда перевести «Итог цену» и цены площадки
 (они в евро). Курс — последний ЕЦБ, как в «Экономике» (`latest_rates`).
 
+Цены публикации, анонса и написания — переключатель шаблона (ADR-083):
+«размещения» — предложение, через которое размещение взяли, как в списке
+«Размещений» (`repeat.offer_id`); «рабочая цена площадки» — сегодняшняя рабочая
+цена, она бывает у другого продавца. Шаблон без выбора — рабочая, как было; новый
+шаблон — размещения. Суммы переводятся из валюты предложения сразу в выбранную:
+через евро с округлением посередине 280 USD вернулись бы 279.99.
+
 Регион (ADR-076) — поля «Region» и «Region Traff»: регион каждого размещения
 (страна его списка анкоров) и трафик этой страны. Любой будущий регион ложится в
 те же две колонки; регион не известен — обе пустые. «US Traff» — всегда США.
@@ -19,9 +26,11 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
+from django.db import connection
 from django.db.models import QuerySet
 
 from apps.placements import export as legacy
+from apps.placements import repeat
 from apps.placements.models import Placement, PlacementLink
 from apps.sites.domains import normalize_domain
 from apps.sites.models import Product
@@ -31,8 +40,18 @@ from config import export
 SCREEN = "placements.placement"
 MAX_COLUMNS = 100
 MAX_ROWS = 10000
-# Цены площадки «на сегодня» — в евро; при пересчёте переводятся из евро.
+# Цены публикации, анонса и написания: в файле — в евро или в валюте пересчёта.
 EUR_PRICES = ("placement_price", "announce_price", "writing_price")
+# Чьи это цены (ADR-083): предложение размещения или рабочая цена площадки.
+DEAL = "deal"
+WORKING = "working"
+PRICE_SOURCES = (DEAL, WORKING)
+# Рабочая цена площадки — в исходной валюте, из «площадки на сегодня».
+_WORKING_SQL = """
+SELECT id, price_currency, placement_cents, announce_cents, writing_cents
+FROM v_site_latest
+WHERE id = ANY(%s) AND price_id IS NOT NULL
+"""
 # Первыми в выборе валюты; остальные — с курсом ЕЦБ, по алфавиту.
 MAIN_CURRENCIES = ("EUR", "USD", "GBP")
 
@@ -49,14 +68,18 @@ class Field:
     note: str
     column: export.Column
 
-    def as_json(self) -> dict[str, str]:
-        return {
+    def as_json(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "key": self.key,
             "label": self.label,
             "header": self.header,
             "note": self.note,
             "kind": self.column.kind.value,
         }
+        # У цен подпись зависит от переключателя «чьи цены» (ADR-083).
+        if self.key in PRICE_NOTES:
+            result["notes"] = PRICE_NOTES[self.key]
+        return result
 
 
 # Метаданные ниже описывают существующие значения, не вычисляют их заново.
@@ -144,17 +167,17 @@ LABELS: dict[str, tuple[str, str]] = {
         "Post / Link Insertion, а не dofollow.",
     ),
     "placement_price": (
-        "Текущая рабочая цена публикации, EUR",
-        "Сегодняшняя рабочая цена площадки, пересчитанная в EUR. Может относиться к другому "
-        "продавцу, чем заявка. Не историческая оплаченная сумма.",
+        "Цена публикации, EUR",
+        "Чья цена — выбор «Цены публикации, анонса и написания» в блоке 03. Не "
+        "оплаченная сумма: она — в «Итог цене».",
     ),
     "announce_price": (
-        "Текущая рабочая цена анонса, EUR",
-        "0 — бесплатно; пусто — неизвестно. Не подменять пустое нулём.",
+        "Цена анонса, EUR",
+        "Чья цена — выбор в блоке 03. 0 — бесплатно; пусто — неизвестно.",
     ),
     "writing_price": (
-        "Текущая рабочая цена написания, EUR",
-        "Компонент текущего предложения. Не прибавлять к уже записанному фактическому итогу.",
+        "Цена написания, EUR",
+        "Чья цена — выбор в блоке 03. Не прибавлять к уже записанной «Итог цене».",
     ),
     "paid": (
         "Фактически оплачено — валюта размещения",
@@ -194,6 +217,26 @@ LABELS: dict[str, tuple[str, str]] = {
         "dofollow / nofollow / sponsored / ugc, если значение записано. Не формат "
         "публикации и не условие площадки.",
     ),
+}
+_DEAL_NOTE = (
+    "Цена продавца этого размещения, как в списке «Размещений»: предложение, через которое "
+    "его взяли. У продавца нет цены на эту услугу — пусто, цену другого продавца не "
+    "подставляем."
+)
+_WORKING_NOTE = "Сегодняшняя рабочая цена площадки. Может быть у другого продавца, чем размещение."
+PRICE_NOTES: dict[str, dict[str, str]] = {
+    "placement_price": {
+        DEAL: f"{_DEAL_NOTE} Не оплаченная сумма: она — в «Итог цене».",
+        WORKING: f"{_WORKING_NOTE} Не оплаченная сумма: она — в «Итог цене».",
+    },
+    "announce_price": {
+        DEAL: f"{_DEAL_NOTE} 0 — бесплатно; пусто — неизвестно.",
+        WORKING: f"{_WORKING_NOTE} 0 — бесплатно; пусто — неизвестно.",
+    },
+    "writing_price": {
+        DEAL: f"{_DEAL_NOTE} Не прибавлять к уже записанной «Итог цене».",
+        WORKING: f"{_WORKING_NOTE} Не прибавлять к уже записанной «Итог цене».",
+    },
 }
 TEMPLATE_KEYS: tuple[str, ...] = (
     "target",
@@ -316,6 +359,8 @@ def initial(registry: dict[str, Field]) -> dict[str, Any]:
         # Пусто — «как в размещении» и «не пересчитывать».
         "currency_from": "",
         "currency_to": "",
+        # Новый шаблон — цены размещения, как в списке «Размещений» (ADR-083).
+        "price_source": DEAL,
     }
 
 
@@ -377,6 +422,10 @@ def validate(raw: object, registry: dict[str, Field]) -> dict[str, Any]:
     known = {"", *currencies()}
     if source not in known or target not in known:
         raise DesignError("Выберите валюту из списка.")
+    # Шаблоны до переключателя — рабочая цена площадки, как и выгружали (ADR-083).
+    prices = raw.get("price_source", WORKING)
+    if prices not in PRICE_SOURCES:
+        raise DesignError("Выберите, чьи цены выгружать.")
     return {
         "version": 1,
         "mode": mode,
@@ -386,6 +435,7 @@ def validate(raw: object, registry: dict[str, Field]) -> dict[str, Any]:
         "decimal": decimal,
         "currency_from": source,
         "currency_to": target,
+        "price_source": prices,
     }
 
 
@@ -396,19 +446,36 @@ def currencies() -> list[str]:
     return first + sorted(known - set(first))
 
 
+@dataclass(frozen=True)
+class Offer:
+    """Цены предложения в его валюте: публикация, анонс, написание (центы)."""
+
+    currency: str
+    cents: tuple[int | None, int | None, int | None]
+
+
 def convert(records: list[dict[str, Any]], config: dict[str, Any]) -> None:
     """Суммы строк — в валюте из настроек; курса нет — ячейка пустая.
 
     «Итог цена» — из исходной валюты (своя у каждого размещения, если её не
-    выбрали одну на все), «Итог цена, EUR» — от неё же. Цены площадки — из
-    евро. «Валюта» — во что пересчитали.
+    выбрали одну на все), «Итог цена, EUR» — от неё же. Цены публикации, анонса
+    и написания — из выбранного предложения (`record["offers"]`), из его валюты
+    сразу в евро или в валюту пересчёта. «Валюта» — во что пересчитали.
     """
     source, target = config["currency_from"], config["currency_to"]
-    if not source and not target:
-        return
     rates = latest_rates()
     for record in records:
         values = record["values"]
+        offer: Offer | None = record.get("offers", {}).get(config["price_source"])
+        for key, cents in zip(EUR_PRICES, offer.cents if offer else (None,) * 3, strict=True):
+            if offer is None or cents is None:
+                values[key] = None
+            elif target:
+                values[key] = convert_cents(cents, offer.currency, target, rates)
+            else:
+                values[key] = to_eur_cents(cents, offer.currency, rates)
+        if not source and not target:
+            continue
         paid = values.get("paid")
         if isinstance(paid, int):
             paid_currency = source or str(values.get("currency") or "EUR")
@@ -416,12 +483,35 @@ def convert(records: list[dict[str, Any]], config: dict[str, Any]) -> None:
             values["currency"] = target or paid_currency
             if target:
                 values["paid"] = convert_cents(paid, paid_currency, target, rates)
-        if not target:
-            continue
-        for key in EUR_PRICES:
-            cents = values.get(key)
-            if isinstance(cents, int):
-                values[key] = convert_cents(cents, "EUR", target, rates)
+
+
+def missing_prices(records: list[dict[str, Any]], config: dict[str, Any]) -> int:
+    """Сколько размещений отбора без цены их продавца — для подсказки в предпросмотре.
+
+    Только при «ценах размещения» и включённой колонке цены: у рабочей цены пустые
+    ячейки не новость, а без колонок цен подсказка не о чём.
+    """
+    if config["price_source"] != DEAL or not any(
+        c["source"] in EUR_PRICES and c["enabled"] for c in config["columns"]
+    ):
+        return 0
+    return sum(1 for r in records if r.get("offers", {}).get(DEAL) is None)
+
+
+def _offers(ids: list[int], site_ids: list[int]) -> dict[str, dict[int, Offer]]:
+    """Предложение каждого размещения (ADR-073) и рабочая цена его площадки."""
+    found = repeat.offers_by_ids(ids)
+    deal = {
+        pk: Offer(p.currency, (p.placement_cents, p.announce_cents, p.writing_cents))
+        for pk, p in found.items()
+    }
+    with connection.cursor() as cursor:
+        cursor.execute(_WORKING_SQL, [site_ids])
+        working = {
+            site_id: Offer(currency, (placement, announce, writing))
+            for site_id, currency, placement, announce, writing in cursor.fetchall()
+        }
+    return {DEAL: deal, WORKING: working}
 
 
 def _header(spec: dict[str, Any], config: dict[str, Any], registry: dict[str, Field]) -> str:
@@ -460,6 +550,7 @@ def dataset(queryset: QuerySet[Placement], registry: dict[str, Field]) -> list[d
             links[pk][f"links.{slot}.anchor"] = anchor
             links[pk][f"links.{slot}.url"] = url
     articles = legacy._published_articles(sorted({m["site_id"] for m in metadata}))
+    offers = _offers([m["pk"] for m in metadata], sorted({m["site_id"] for m in metadata}))
     result: list[dict[str, Any]] = []
     for meta, cells in zip(metadata, sheet.rows, strict=True):
         by_title = dict(zip(titles, cells, strict=True))
@@ -478,7 +569,12 @@ def dataset(queryset: QuerySet[Placement], registry: dict[str, Field]) -> list[d
         values["service"] = {"публикация": "Guest Post", "вставка ссылки": "Link Insertion"}.get(
             str(values.get("service")), values.get("service")
         )
-        result.append({**meta, "values": values})
+        # Цены публикации, анонса и написания заполнит `convert` — по выбору шаблона.
+        record_offers = {
+            DEAL: offers[DEAL].get(meta["pk"]),
+            WORKING: offers[WORKING].get(meta["site_id"]),
+        }
+        result.append({**meta, "values": values, "offers": record_offers})
     return result
 
 

@@ -4,6 +4,7 @@ import csv
 import datetime as dt
 import io
 import json
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
@@ -16,11 +17,13 @@ from openpyxl import Workbook, load_workbook
 
 from apps.placements import export_designer as design
 from apps.placements.models import Placement, PlacementLink
-from apps.sites.models import ExchangeRate, Product, Site
+from apps.sites.models import ExchangeRate, Product, Seller, Site, SitePrice
 from apps.sites.rates import convert_cents
 from apps.workspace.models import ExportProfile
 
 pytestmark = pytest.mark.django_db
+
+OfferFactory = Callable[..., SitePrice]
 
 
 @pytest.fixture
@@ -321,9 +324,16 @@ class TestCurrency:
         registry = design.fields()
         value = {**config("placement_price", "announce_price"), "currency_to": "USD"}
         value["columns"][0]["header"] = registry["placement_price"].header
-        records = [{"pk": 1, "values": {"placement_price": 10000, "announce_price": None}}]
+        offer = design.Offer("EUR", (10000, None, None))
+        records: list[dict[str, Any]] = [
+            {"pk": 1, "values": {}, "offers": {design.DEAL: offer, design.WORKING: None}}
+        ]
         design.convert(records, value)
-        assert records[0]["values"] == {"placement_price": 12500, "announce_price": None}
+        assert records[0]["values"] == {
+            "placement_price": 12500,
+            "announce_price": None,
+            "writing_price": None,
+        }
         plan = design.build_plan(records, design.validate(value, registry), registry)
         # Стандартный заголовок — в выбранной валюте, свой — как вписан.
         assert [c.title for c in plan.sheet.columns] == [
@@ -359,3 +369,103 @@ class TestCurrency:
 def test_convert_cents(cents: int, source: str, target: str, expected: int | None) -> None:
     rates = {"EUR": Decimal(1), "USD": Decimal("1.25"), "GBP": Decimal("0.8")}
     assert convert_cents(cents, source, target, rates) == expected
+
+
+class TestPriceSource:
+    """Чьи цены публикации, анонса и написания: размещения или рабочая (ADR-083).
+
+    brasil247.com: размещение взяли у Morgan Hugh за 280 USD с анонсом 50 USD,
+    рабочая цена площадки — star5media, 320 EUR. Раньше в выгрузку шли 320.
+    """
+
+    @pytest.fixture(autouse=True)
+    def rates(self) -> None:
+        ExchangeRate.objects.create(
+            currency="USD", rate_date=dt.date(2026, 10, 16), rate=Decimal("1.25")
+        )
+
+    @pytest.fixture
+    def site(self, offer: OfferFactory) -> Site:
+        site = Site.objects.create(domain="brasil247.com")
+        offer(site, 32000, seller=Seller.objects.create(name="star5media"))
+        return site
+
+    @pytest.fixture
+    def morgan(self) -> Seller:
+        return Seller.objects.create(name="Morgan Hugh")
+
+    @pytest.fixture
+    def deal(self, site: Site, morgan: Seller, offer: OfferFactory) -> Placement:
+        price = offer(
+            site, 28000, seller=morgan, working=False, currency="USD", announce_cents=5000
+        )
+        return Placement.objects.create(
+            site=site,
+            product=Product.objects.create(name="Convertio", domain="convertio.co"),
+            seller=morgan,
+            placement_type="guest_post",
+            price=price,
+        )
+
+    PRICES = ("placement_price", "announce_price", "writing_price")
+
+    def _preview(self, client: Client, value: dict[str, Any]) -> Any:
+        response = post(client, "preview", config=value)
+        assert response.status_code == 200, response.content
+        return response.json()
+
+    def test_new_template_takes_deal_old_keeps_working(self) -> None:
+        registry = design.fields()
+        assert design.initial(registry)["price_source"] == design.DEAL
+        # «Список для барыг» и другие шаблоны до переключателя — как выгружали.
+        old = config("placement_price")
+        del old["price_source"]
+        assert design.validate(old, registry)["price_source"] == design.WORKING
+        with pytest.raises(design.DesignError):
+            design.validate({**old, "price_source": "cheapest"}, registry)
+
+    def test_deal_price_not_working(self, admin_client: Client, deal: Placement) -> None:
+        value = config(*self.PRICES)
+        assert self._preview(admin_client, value)["rows"] == [["224.00", "40.00", ""]]
+        value["price_source"] = design.WORKING
+        assert self._preview(admin_client, value)["rows"] == [["320.00", "", ""]]
+
+    def test_seller_currency_without_round_trip(
+        self, admin_client: Client, deal: Placement
+    ) -> None:
+        # Из долларов сразу в доллары: через евро вышло бы 279.99 у иных курсов.
+        value = {**config(*self.PRICES), "currency_to": "USD"}
+        assert self._preview(admin_client, value)["rows"] == [["280.00", "50.00", ""]]
+        value["price_source"] = design.WORKING
+        assert self._preview(admin_client, value)["rows"] == [["400.00", "", ""]]
+
+    def test_old_placement_seller_offer_of_same_service(
+        self, admin_client: Client, deal: Placement, morgan: Seller, offer: OfferFactory
+    ) -> None:
+        # Размещение до ADR-073: предложения не запомнили — цена его продавца на ту же
+        # услугу. На вставку ссылки цены у продавца нет — пусто, не чужая цена.
+        Placement.objects.filter(pk=deal.pk).update(price=None)
+        preview = self._preview(admin_client, config(*self.PRICES))
+        assert preview["rows"] == [["224.00", "40.00", ""]]
+        assert preview["missing_prices"] == 0
+        Placement.objects.filter(pk=deal.pk).update(placement_type="link_insertion")
+        preview = self._preview(admin_client, config(*self.PRICES))
+        assert preview["rows"] == [["", "", ""]]
+        assert preview["missing_prices"] == 1
+
+    def test_without_seller_working_price(self, admin_client: Client, deal: Placement) -> None:
+        Placement.objects.filter(pk=deal.pk).update(price=None, seller=None)
+        assert self._preview(admin_client, config(*self.PRICES))["rows"] == [["320.00", "", ""]]
+
+    def test_missing_hint_only_for_deal_prices(self, admin_client: Client, deal: Placement) -> None:
+        Placement.objects.filter(pk=deal.pk).update(price=None, placement_type="link_insertion")
+        assert self._preview(admin_client, config(*self.PRICES))["missing_prices"] == 1
+        working = {**config(*self.PRICES), "price_source": design.WORKING}
+        assert self._preview(admin_client, working)["missing_prices"] == 0
+        assert self._preview(admin_client, config("target", "paid"))["missing_prices"] == 0
+
+    def test_price_notes_follow_switch(self) -> None:
+        field = design.fields()["placement_price"].as_json()
+        assert "через которое его взяли" in field["notes"][design.DEAL]
+        assert "другого продавца" in field["notes"][design.WORKING]
+        assert "notes" not in design.fields()["dr"].as_json()

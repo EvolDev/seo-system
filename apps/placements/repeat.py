@@ -170,7 +170,11 @@ def offer_id() -> Coalesce:
 
 def offers_of(placements: Iterable[Placement]) -> dict[int, SitePrice]:
     """Предложения размещений (`offer_id`) с продавцами — двумя запросами."""
-    ids = [item.pk for item in placements]
+    return offers_by_ids([item.pk for item in placements])
+
+
+def offers_by_ids(ids: list[int]) -> dict[int, SitePrice]:
+    """То же по номерам размещений: конструктору выгрузки объекты не нужны (ADR-083)."""
     if not ids:
         return {}
     picked = dict(
