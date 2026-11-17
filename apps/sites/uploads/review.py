@@ -38,7 +38,7 @@ from django.db.models import (
 from django.utils import timezone
 
 from apps.placements.models import Placement
-from apps.sites import offers
+from apps.sites import latest, offers
 from apps.sites.display import Amount, Delta, delta
 from apps.sites.models import (
     ProductSite,
@@ -281,7 +281,7 @@ def decide(
     """
     if action in REMOVE_ACTIONS:
         # Блокировка меняет статусы — в истории это «загрузка» (ADR-049).
-        with bind_change(StatusSource.UPLOAD, _actor_id(author)):
+        with bind_change(StatusSource.UPLOAD, _actor_id(author)), latest.deferred():
             return _remove(upload, item_ids, action, author=author)
     items = list(
         UploadItem.objects.filter(upload=upload, pk__in=list(item_ids), needs_decision=True)
@@ -289,25 +289,28 @@ def decide(
         .order_by("pk")
     )
     undo: list[dict[str, Any]] = []
-    for item in items:
-        with transaction.atomic():
-            site = Site.all_objects.select_for_update().get(pk=item.site_id)
-            before = site.price_id
-            pending = set(_pending_ids(site.pk))
-            if action == "fix":
-                offers.set_working_price(item.price, author=author)
-            else:
-                offers.keep_current([item.price])
-            reviewed = sorted(pending - set(_pending_ids(site.pk)))
-        undo.append(
-            {
-                "type": "price",
-                "site": site.pk,
-                "price": before,
-                "reviewed": reviewed,
-                "item": item.pk,
-            }
-        )
+    # «Площадка на сегодня» — одним пересчётом в конце, а не после каждой строки:
+    # 500 строк по одной — 74 с, браузер не дожидался ответа (17.11.2026).
+    with latest.deferred():
+        for item in items:
+            with transaction.atomic():
+                site = Site.all_objects.select_for_update().get(pk=item.site_id)
+                before = site.price_id
+                pending = set(_pending_ids(site.pk))
+                if action == "fix":
+                    offers.set_working_price(item.price, author=author)
+                else:
+                    offers.keep_current([item.price])
+                reviewed = sorted(pending - set(_pending_ids(site.pk)))
+            undo.append(
+                {
+                    "type": "price",
+                    "site": site.pk,
+                    "price": before,
+                    "reviewed": reviewed,
+                    "item": item.pk,
+                }
+            )
     return undo, []
 
 
@@ -347,6 +350,8 @@ def _remove(
                     continue
             pending = _pending_ids(site_id)
             SitePrice.objects.filter(pk__in=pending).update(reviewed_at=timezone.now())
+            # Пометки «не разобрано» — в копии «площадки на сегодня» (E1-11).
+            latest.refresh([site_id])
             entry: dict[str, Any] = {
                 "type": action, "site": site_id, "reviewed": pending, "item": item_id,
             }  # fmt: skip
@@ -370,7 +375,15 @@ def _remove(
 
 
 def undo(entries: Iterable[dict[str, Any]], *, author: Any) -> int:
-    """Отмена решений: рабочая цена, «не разобрано», пометка «удалена», статусы до блокировки."""
+    """Отмена решений: рабочая цена, «не разобрано», пометка «удалена», статусы до блокировки.
+
+    «Площадка на сегодня» — одним пересчётом в конце, как у решений.
+    """
+    with latest.deferred():
+        return _undo(entries, author=author)
+
+
+def _undo(entries: Iterable[dict[str, Any]], *, author: Any) -> int:
     done = 0
     for entry in entries:
         site_id = int(entry["site"])
@@ -401,6 +414,8 @@ def undo(entries: Iterable[dict[str, Any]], *, author: Any) -> int:
                         offers.set_working_price(previous, author=author)
             # Отменяем после смены цены: смена разбирает предложения этой услуги.
             SitePrice.objects.filter(pk__in=reviewed, site_id=site_id).update(reviewed_at=None)
+            # Пометки «не разобрано» снова есть — они в копии (E1-11).
+            latest.refresh([site_id])
         done += 1
     return done
 

@@ -18,13 +18,19 @@
 
 Пересчёт адресный: правка площадки пересчитывает её одну, загрузка —
 свои площадки пачкой, смена курсов валют — всё (в евро пересчитываются
-пометки «дешевле»).
+пометки «дешевле»). Действие по многим площадкам, которое правит их по
+одной, оборачивается в `deferred()`: пересчёт — один раз в конце.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from typing import Any
 
 from django.db import connection
+
+# Площадки, чей пересчёт отложен до конца `deferred()`; None — не откладываем.
+_waiting: ContextVar[set[int] | None] = ContextVar("latest_waiting", default=None)
 
 #: Колонки копии в порядке подсчёта — один список на вставку и на сверку.
 COLUMNS = (
@@ -111,13 +117,47 @@ def _sql(where: str) -> str:
 
 
 def refresh(site_ids: Iterable[int]) -> int:
-    """Пересчитать названные площадки. Пустой список — ничего не делаем."""
+    """Пересчитать названные площадки. Пустой список — ничего не делаем.
+
+    Внутри `deferred()` только запоминает их — пересчёт будет в конце блока.
+    """
     ids = list(dict.fromkeys(site_ids))
     if not ids:
+        return 0
+    waiting = _waiting.get()
+    if waiting is not None:
+        waiting.update(ids)
         return 0
     with connection.cursor() as cursor:
         cursor.execute(_sql("s.id = ANY(%s)"), [ids])
         return int(cursor.rowcount)
+
+
+@contextmanager
+def deferred() -> Iterator[None]:
+    """Пересчёт — один раз в конце блока, всеми площадками, что просили пересчитать.
+
+    Решение по 500 строкам разбора пересчитывало площадку после каждой: 148 мс
+    на площадку — 74 с, браузер не дожидался ответа; одним пересчётом те же
+    500 площадок — 0,24 с (прод, 17.11.2026). Вложенный блок копит во внешний.
+    Ошибка внутри — пересчитываем записанное до неё (строки разбора — каждая
+    своей транзакцией, они уже в базе) и пропускаем ошибку дальше; не вышло
+    пересчитать (транзакция уже сломана) — главное не заслонять саму ошибку.
+    """
+    if _waiting.get() is not None:
+        yield
+        return
+    waiting: set[int] = set()
+    token = _waiting.set(waiting)
+    try:
+        yield
+    except BaseException:
+        _waiting.reset(token)
+        with suppress(Exception):
+            refresh(waiting)
+        raise
+    _waiting.reset(token)
+    refresh(waiting)
 
 
 def refresh_all() -> int:
